@@ -74,17 +74,17 @@
 - 已暴露 PAT 的撤销等待用户在删除动作前再次确认
 
 ### Phase 9：Phase 2 领域澄清与活文档
-**Status:** in_progress
+**Status:** complete
 - 建立根目录 `CONTEXT.md`
 - 固化任务资产与基础资产保留边界
 - 创建 ADR-006
 - 完成 `PLAN.md` 并锁定 Phase 2 范围、深模块和 Provider 基线
-- 等待确认 `to-spec` 测试接缝
+- 已确认 `to-spec` 测试接缝：HTTP、Durable Worker/Event、真实基础设施检索、MCP、Provider Adapter
 
 ### Phase 10：Phase 2 规格与工单
-**Status:** pending
-- 确认测试接缝
-- 生成 `.scratch/phase-2-assets-retrieval/spec.md`
+**Status:** in_progress
+- 已确认测试接缝
+- 已生成 `.scratch/phase-2-assets-retrieval/spec.md`
 - 将规格拆为 blockers-first 的独立 Ticket
 - 每个 Ticket 写入 `.scratch/phase-2-assets-retrieval/issues/`
 
@@ -177,3 +177,5 @@
 | 2026-07-22 | Git 直连 GitHub 多次 connection reset | 验证本机 v2rayN HTTP 代理后，只在当前仓库配置 `127.0.0.1:10809` |
 | 2026-07-22 | 首次 Git push 等待 Git Credential Manager 超时 | 配置 `gh auth setup-git`，终止本轮残留 Git 进程并使用非交互凭据重试 |
 | 2026-07-22 | classic PAT 首次创建因 Note 重名失败 | 使用唯一 Note 重新创建，未产生额外有效 Token |
+| 2026-07-22 | 恢复 Phase 2 时 `.scratch/phase-2-assets-retrieval` 不存在 | 以已提交的 `PLAN.md`、`CONTEXT.md`、ADR-006 和仓库现状为事实来源重建本地规格目录 |
+| 2026-07-22 | 首次批量写入 Phase 2 spec 时因 `CONTEXT.md` 匹配文本与实际文件差异导致补丁整体拒绝 | 拆分补丁，先独立创建 spec，再按真实上下文更新领域术语和进度 |

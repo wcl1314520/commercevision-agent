@@ -102,3 +102,23 @@
 - `Task Asset` 与 `Foundation Asset` 是 Phase 2 的规范术语，定义见根目录 `CONTEXT.md`。
 - Foundation Asset 的终止条件采用“管理员删除或权利到期，以先发生者为准”，而不是无期限保存。
 - MySQL 权利状态必须先阻断使用，Milvus 和对象存储随后最终一致收敛。
+- Phase 2 的测试边界固定为五类公开接缝：HTTP、Durable Worker/Event、真实 MySQL/MinIO/Milvus 检索、MCP 和 Provider Adapter。
+- `.scratch` 是本地 Issue Tracker 工作区，不是已提交事实来源；丢失时必须从 `PLAN.md`、`CONTEXT.md`、ADR 和当前代码恢复。
+- Phase 1 已提供可扩展的短事务 `UnitOfWork`、Outbox Dispatcher、Inbox Coordinator、Lease/Retry/DLQ 和 Recovery Service；Phase 2 应扩展同一可靠执行模块，不建立第二套任务框架。
+- 当前 `UnitOfWork` 只暴露 Workflow 相关 Repository；Phase 2 需要在同一接口上增加商品、资产、权利、商品简报、品牌档案和索引记录 Repository。
+- Control API 已统一使用 Workspace、Actor 和 Idempotency Header，并有乐观版本检查先例；Phase 2 HTTP 契约应保持相同调用约束。
+- 当前 Worker 仅消费 Workflow 事件且把具体 Graph、Tool 和 Inbox 组合在一个 Runtime 中；Phase 2 应以事件处理器注册表或消息路由模块承载资产事件，避免继续扩大单个条件分支。
+- 当前 Scheduler 同时负责 Outbox 和 Workflow 恢复；Phase 2 的资产到期、索引对账和重建扫描应复用调度循环，但以独立 Scanner 接口和独立运行状态暴露。
+- MySQL 文档中的旧资产逻辑模型把对象位置直接放在 `assets` 上且未建版本表，与锁定计划的 `AssetVersion` 不一致；Phase 2 规格以不可变 AssetVersion 和可变 Asset 聚合为准。
+- MySQL `DATETIME(6)`、应用拒绝 naive datetime 和可变实体乐观版本是已落地的全局 schema contract，所有 Phase 2 时间列与更新路径必须遵守。
+- Upload Session 是独立聚合；上传完成前的状态不属于 Asset。Finalize 必须采用 MySQL Lease 认领、事务外对象校验、凭 Token 事务内落 Asset/Asset Version/Outbox 的三段式。
+- Asset 是可变聚合根，Asset Version、Rights Record、ProductBrief Version 和 Brand Profile Version 均是不可变历史；当前指针由聚合根在乐观锁下原子切换。
+- Phase 2 资产历史必须使用 `RESTRICT`，不能沿用 Workflow 子表的级联删除；MySQL tombstone 先阻断，外部对象和向量随后收敛。
+- 现有 Celery 对异常执行 transport retry，同时业务层拥有 durable retry；Phase 2 必须确立 MySQL Durable Operation 为唯一业务重试权威，避免双重退避与并发认领。
+- 当前 Worker 对未知事件静默标记已处理；Phase 2 handler registry 必须将未知事件分类为永久失败并进入 DLQ。
+- 当前 Provider、Retrieval、Evaluation 包和 MCP 业务工具均为空壳；Compose 也缺少 bucket 初始化、ClamAV 和 Provider 测试 Adapter。
+- Milvus collection 不按 workspace 或品牌拆分；物理 collection 由模型家族、固定 revision、维度、vector kind 和 schema/index spec 组成，MySQL 保存激活指针。
+- 检索顺序固定为 MySQL 权利硬过滤、分路 Dense/FULLTEXT/固定资产召回、RRF、可选 rerank、去重、MySQL 当前权利二次复核、签发临时引用时再次复核。
+- MySQL 中文与混合语言 FULLTEXT 采用并验证 ngram parser；原始 cosine 与 FULLTEXT 分数不直接相加。
+- MCP 是入站 Adapter，调用 Catalog、Product Understanding、Brand Profile 和 Retrieval 应用接口，不直接访问 SQL、MinIO 或 Milvus。
+- 评测除 UnauthorizedRecall@K 外还必须报告 `unauthorized_return_count` 和 `queries_with_unauthorized`，三者都必须为 0。

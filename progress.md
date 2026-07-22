@@ -130,3 +130,18 @@
 - 已同步更新数据架构、ADR 索引、文档索引和研究结论。
 - 已生成并锁定 `PLAN.md`，覆盖资产直传隔离、权利、安全校验、商品理解、Brand Profile、增量 Embedding、混合检索、MCP、删除/重建、观测与评测。
 - 已将 GitHub 远程基线、Phase 2 规格、工单、独立上下文实现和最终验收加入持久执行计划。
+
+### Phase 2 规格恢复
+
+- 用户再次确认任务资产保存 72 小时，基础资产保存至管理员删除或权利到期。
+- 不使用或回显聊天中暴露的 GitHub Token；继续使用 Windows keyring 中现有 `gh` 登录态。
+- 已确认五个测试接缝：HTTP、Durable Worker/Event、真实基础设施检索、MCP、Provider Adapter。
+- 恢复时 `.scratch/phase-2-assets-retrieval` 不存在；将从已提交的锁定计划和领域文档重建。
+- 当前进入 `/to-spec`，随后按 `/to-tickets` 和逐 Ticket 独立上下文 `/implement` 推进。
+- 已读取 `to-spec`、`to-tickets`、`implement`、`tdd`、`codebase-design` 和 `domain-modeling` 技能约束。
+- 已确认现有可靠执行、UoW、HTTP Header、Worker 和 Scheduler 模式可作为 Phase 2 的主要实现接缝。
+- 已启动三个只读独立上下文审计：领域/Schema、API/Worker/Scheduler、MinIO/Milvus/Provider/MCP/评测。
+- 三个只读独立上下文审计已完成，并已吸收其领域、迁移、可靠执行、Milvus、MCP 和评测结论。
+- 已生成 `.scratch/phase-2-assets-retrieval/spec.md`，覆盖 70 条用户故事，以及状态机、Schema、HTTP/Event/MCP/Web/Provider 契约、检索、删除、重建、观测和测试门禁。
+- 已在 `CONTEXT.md` 增加 `Asset Version` 与 `Upload Session` 两个已确定的领域术语。
+- Phase 2 spec 结构校验通过：70 条用户故事、完整标准章节、领域术语检查和 `git diff --check` 均通过。
