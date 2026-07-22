@@ -179,3 +179,4 @@
 | 2026-07-22 | classic PAT 首次创建因 Note 重名失败 | 使用唯一 Note 重新创建，未产生额外有效 Token |
 | 2026-07-22 | 恢复 Phase 2 时 `.scratch/phase-2-assets-retrieval` 不存在 | 以已提交的 `PLAN.md`、`CONTEXT.md`、ADR-006 和仓库现状为事实来源重建本地规格目录 |
 | 2026-07-22 | 首次批量写入 Phase 2 spec 时因 `CONTEXT.md` 匹配文本与实际文件差异导致补丁整体拒绝 | 拆分补丁，先独立创建 spec，再按真实上下文更新领域术语和进度 |
+| 2026-07-22 | Phase 2 spec 推送后首次 `gh run list` 直连 GitHub API 超时 | `gh` 不读取仓库级 Git HTTP 代理；改为仅对查询进程设置已验证的本地 HTTPS 代理 |

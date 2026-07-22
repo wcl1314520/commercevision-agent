@@ -145,3 +145,6 @@
 - 已生成 `.scratch/phase-2-assets-retrieval/spec.md`，覆盖 70 条用户故事，以及状态机、Schema、HTTP/Event/MCP/Web/Provider 契约、检索、删除、重建、观测和测试门禁。
 - 已在 `CONTEXT.md` 增加 `Asset Version` 与 `Upload Session` 两个已确定的领域术语。
 - Phase 2 spec 结构校验通过：70 条用户故事、完整标准章节、领域术语检查和 `git diff --check` 均通过。
+- Phase 2 spec 已提交为 `31a555f` 并推送到 `origin/main`；正在验证对应远程 CI。
+- Phase 2 spec 的 GitHub Actions 运行 `29908574921` 已全部通过。
+- `/to-tickets` 已向用户展示 17 个 blockers-first 纵向 Ticket；按流程等待粒度与依赖关系确认后才发布 Issue 文件。
