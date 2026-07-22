@@ -28,9 +28,9 @@ class CollectingPublisher:
         self.ids: list[str] = []
         self._lock = Lock()
 
-    def publish(self, event_id: str) -> None:
+    def publish_event(self, event: OutboxEvent) -> None:
         with self._lock:
-            self.ids.append(event_id)
+            self.ids.append(event.envelope.event_id)
 
 
 def test_all_runtime_datetime_columns_use_microsecond_precision(integration_database) -> None:

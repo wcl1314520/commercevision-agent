@@ -24,6 +24,7 @@ from .mappers import (
     approval_to_model,
     attempt_from_model,
     attempt_to_model,
+    dead_letter_from_model,
     dead_letter_to_model,
     outbox_from_model,
     outbox_to_model,
@@ -513,6 +514,28 @@ class OutboxRepository:
         if result.rowcount != 1:
             raise LeaseConflictError(f"outbox event {event_id} lease does not match")
 
+    def schedule_retry(
+        self,
+        event_id: str,
+        *,
+        available_at: datetime,
+        error_message: str,
+    ) -> None:
+        result = self.session.execute(
+            update(OutboxEventModel)
+            .where(OutboxEventModel.id == event_id)
+            .values(
+                available_at=available_at,
+                published_at=None,
+                lock_owner=None,
+                lock_token=None,
+                locked_until=None,
+                last_error=error_message[:4000],
+            )
+        )
+        if result.rowcount != 1:
+            raise LeaseConflictError(f"outbox event {event_id} was not available for retry")
+
     def list_for_aggregate(self, aggregate_id: str, *, limit: int = 200) -> list[OutboxEvent]:
         models = self.session.scalars(
             select(OutboxEventModel)
@@ -522,16 +545,21 @@ class OutboxRepository:
         )
         return [outbox_from_model(model) for model in models]
 
-    def has_unpublished(self, *, aggregate_id: str, event_type: str) -> bool:
-        event_id = self.session.scalar(
-            select(OutboxEventModel.id)
-            .where(
-                OutboxEventModel.aggregate_id == aggregate_id,
-                OutboxEventModel.event_type == event_type,
-                OutboxEventModel.published_at.is_(None),
-            )
-            .limit(1)
+    def has_unpublished(
+        self,
+        *,
+        aggregate_id: str,
+        event_type: str,
+        exclude_event_id: str | None = None,
+    ) -> bool:
+        statement = select(OutboxEventModel.id).where(
+            OutboxEventModel.aggregate_id == aggregate_id,
+            OutboxEventModel.event_type == event_type,
+            OutboxEventModel.published_at.is_(None),
         )
+        if exclude_event_id is not None:
+            statement = statement.where(OutboxEventModel.id != exclude_event_id)
+        event_id = self.session.scalar(statement.limit(1))
         return event_id is not None
 
 
@@ -642,6 +670,26 @@ class InboxRepository:
             error_message=error_message,
         )
 
+    def mark_dead(
+        self,
+        *,
+        consumer: str,
+        message_id: str,
+        lease_token: str,
+        now: datetime,
+        error_class: str,
+        error_message: str,
+    ) -> None:
+        self._finish(
+            consumer=consumer,
+            message_id=message_id,
+            lease_token=lease_token,
+            status=InboxStatus.DEAD,
+            now=now,
+            error_class=error_class,
+            error_message=error_message,
+        )
+
     def _finish(
         self,
         *,
@@ -689,6 +737,15 @@ class DeadLetterRepository:
         )
         if existing is None:
             self.session.add(dead_letter_to_model(message))
+
+    def get(self, *, consumer: str, message_id: str) -> DeadLetterMessage | None:
+        model = self.session.scalar(
+            select(DeadLetterMessageModel).where(
+                DeadLetterMessageModel.consumer == consumer,
+                DeadLetterMessageModel.message_id == message_id,
+            )
+        )
+        return dead_letter_from_model(model) if model else None
 
 
 class AuditRepository:

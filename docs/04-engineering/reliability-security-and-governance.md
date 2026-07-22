@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-07-22 |
 | 适用版本 | Engineering v1 |
 
 ## SLO
@@ -59,6 +59,25 @@ Worker 采用：
 - LangGraph Checkpoint。
 - DLQ 和可审计重放。
 - 数据状态不一致检测。
+
+### 消息重试权威
+
+MySQL 是业务消息重试时间和预算的唯一权威：
+
+1. Worker 从 Inbox 认领消息，`delivery_attempts` 是唯一尝试预算。
+2. 普通 Handler 或数据库失败时，同一个短事务将 Inbox 标记为 `FAILED`，并把同一个
+   Outbox Event 重置为未发布，写入按尝试次数计算的未来 `available_at`。
+3. 退避使用可配置的初始值和上限；Scheduler 在精确到微秒的 `available_at` 到达前不会
+   重新发布。
+4. 持久化成功后 Worker 返回 `retry-scheduled`，Celery ACK 当前投递，不创建 countdown、
+   autoretry 或第二套业务重试计划。
+5. 若 Inbox/Outbox 重试事务无法提交，Worker 抛出异常。Celery 使用 late ACK 且
+   `task_acks_on_failure_or_timeout=false`，只在该持久化失败场景执行 Transport Redelivery。
+6. 下一次 MySQL 调度的投递再次增加 Inbox 尝试次数；预算耗尽后 Inbox 进入 `DEAD` 并写入
+   DLQ，不再调用 Handler。
+
+Outbox 重试会清除旧的发布锁。若 Worker 在 Publisher Confirm 写回前已经完成重试调度，
+Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件重新标记为已发布。
 
 ## 身份与权限
 
@@ -156,4 +175,3 @@ Worker 采用：
 - 无权素材进入检索或生成。
 - Checkpoint 使用不安全反序列化。
 - 任务数据不能按策略删除。
-

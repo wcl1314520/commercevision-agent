@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-07-22 |
 | 适用版本 | Deployment v1 |
 
 ## 环境
@@ -141,6 +141,18 @@ Milvus 故障不能影响 MySQL 中的审批、历史和任务查询。
 - Consumer Prefetch。
 - 不使用消息 TTL 替代业务超时。
 - Celery Task 只传 ID 和版本，不传图片或大型 Prompt。
+- 部署四个可配置 Durable Queue：Workflow、Asset、Index 和 Maintenance；四个 Queue Name
+  必须非空且互不相同。
+- `CV_WORKER_CONSUMER_NAME` 标识 Inbox Consumer，必须非空。需要重新处理同一 Event 时不得
+  随意更换该身份。
+- Worker 默认消费四个配置 Queue。独立部署可通过 JSON 数组形式的 `CV_WORKER_QUEUES`
+  选择非空子集，例如 `["commercevision.workflow"]` 或
+  `["commercevision.asset","commercevision.index"]`；重复项、空数组和未配置 Queue 会在
+  启动时失败。
+- Workflow、Asset、Index 和 Maintenance Worker 可以按 Queue Age 独立扩缩容；一个部署
+  可以消费多个 Queue，但不会通过运行时硬编码改变路由。
+- Celery 只负责 Broker Transport Redelivery。业务失败的重试时间、退避和预算持久化在
+  MySQL Inbox/Outbox 中；持久化重试成功后任务 ACK，持久化失败时任务不 ACK。
 
 ## OSS
 

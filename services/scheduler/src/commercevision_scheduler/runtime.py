@@ -8,18 +8,35 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from celery import Celery
-from commercevision_application import OutboxDispatcher, RecoveryService
+from commercevision_application import (
+    EventRoutingError,
+    OutboxDispatcher,
+    RecoveryService,
+    build_event_routing_registry,
+)
 from commercevision_contracts import Settings
+from commercevision_contracts.events import EventQueue
+from commercevision_domain.messaging import OutboxEvent
 from commercevision_persistence import Database, SqlAlchemyUnitOfWork, create_database
 
 
 class CeleryMessagePublisher:
     def __init__(self, settings: Settings) -> None:
         self._client = Celery("commercevision-scheduler", broker=settings.rabbitmq_url)
+        self._routing = build_event_routing_registry(
+            {
+                EventQueue.WORKFLOW: settings.workflow_queue_name,
+                EventQueue.ASSET: settings.asset_queue_name,
+                EventQueue.INDEX: settings.index_queue_name,
+                EventQueue.MAINTENANCE: settings.maintenance_queue_name,
+            }
+        )
+        self._fallback_queue = settings.maintenance_queue_name
         self._client.conf.update(
             broker_connection_retry_on_startup=True,
             broker_transport_options={"confirm_publish": True},
             task_default_delivery_mode="persistent",
+            task_default_queue=settings.workflow_queue_name,
             task_publish_retry=True,
             task_publish_retry_policy={
                 "max_retries": 5,
@@ -29,12 +46,19 @@ class CeleryMessagePublisher:
             },
         )
 
-    def publish(self, event_id: str) -> None:
+    def publish_event(self, event: OutboxEvent) -> None:
+        try:
+            queue = self._routing.queue_for(event.envelope)
+        except EventRoutingError:
+            queue = self._fallback_queue
+        self._send(event.envelope.event_id, queue)
+
+    def _send(self, event_id: str, queue: str) -> None:
         self._client.send_task(
             "commercevision.process_outbox_event",
             args=[event_id],
             task_id=event_id,
-            queue="commercevision.workflow",
+            queue=queue,
         )
 
 

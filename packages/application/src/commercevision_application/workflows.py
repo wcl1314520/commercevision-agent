@@ -8,6 +8,12 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from commercevision_contracts.events import (
+    EventType,
+    WorkflowCancelledPayload,
+    WorkflowResumeRequestedPayload,
+    WorkflowRunRequestedPayload,
+)
 from commercevision_contracts.workflow import (
     ApprovalRequest,
     EventResponse,
@@ -99,9 +105,12 @@ class WorkflowApplicationService:
         )
         event = self._workflow_event(
             workflow=workflow,
-            event_type="workflow.run.requested",
+            event_type=EventType.WORKFLOW_RUN_REQUESTED,
             trace_id=trace_id,
-            payload={"action": "start", "workflow_id": workflow.id},
+            payload=WorkflowRunRequestedPayload(
+                action="start",
+                workflow_id=workflow.id,
+            ).model_dump(mode="json", exclude_none=True),
             now=now,
         )
         try:
@@ -203,9 +212,11 @@ class WorkflowApplicationService:
             uow.outbox.add(
                 self._workflow_event(
                     workflow=workflow,
-                    event_type="workflow.cancelled",
+                    event_type=EventType.WORKFLOW_CANCELLED,
                     trace_id=trace_id,
-                    payload={"workflow_id": workflow.id},
+                    payload=WorkflowCancelledPayload(
+                        workflow_id=workflow.id,
+                    ).model_dump(mode="json"),
                     now=now,
                 )
             )
@@ -279,18 +290,18 @@ class WorkflowApplicationService:
             uow.outbox.add(
                 self._workflow_event(
                     workflow=workflow,
-                    event_type="workflow.resume.requested",
+                    event_type=EventType.WORKFLOW_RESUME_REQUESTED,
                     trace_id=trace_id,
-                    payload={
-                        "workflow_id": workflow.id,
-                        "approval_id": approval.id,
-                        "approval_type": approval_type.value,
-                        "decision": request.decision.value,
-                        "expected_workflow_version": request.expected_workflow_version,
-                        "resulting_workflow_version": workflow.version,
-                        "subject_id": request.subject_id,
-                        "subject_version": request.subject_version,
-                    },
+                    payload=WorkflowResumeRequestedPayload(
+                        workflow_id=workflow.id,
+                        approval_id=approval.id,
+                        approval_type=approval_type,
+                        decision=request.decision,
+                        expected_workflow_version=request.expected_workflow_version,
+                        resulting_workflow_version=workflow.version,
+                        subject_id=request.subject_id,
+                        subject_version=request.subject_version,
+                    ).model_dump(mode="json"),
                     now=now,
                 )
             )
@@ -392,14 +403,14 @@ class WorkflowApplicationService:
     def _workflow_event(
         *,
         workflow: Workflow,
-        event_type: str,
+        event_type: EventType,
         trace_id: str,
         payload: dict[str, Any],
         now: datetime,
     ) -> OutboxEvent:
         return OutboxEvent(
             envelope=EventEnvelope.create(
-                event_type=event_type,
+                event_type=event_type.value,
                 aggregate_type="workflow",
                 aggregate_id=workflow.id,
                 aggregate_version=workflow.version,

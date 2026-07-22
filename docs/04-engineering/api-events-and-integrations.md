@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-07-22 |
 | 适用版本 | API v1 |
 
 ## API 原则
@@ -123,6 +123,32 @@ export.ready
 }
 ```
 
+### Durable Worker 事件
+
+Durable Worker 使用 `packages/contracts` 中的版本化 Pydantic 契约。每个契约同时声明
+`event_type`、`schema_version`、逻辑队列和 Payload Model；Scheduler 和 Worker 都在边界执行
+Payload 校验。兼容性新增字段会被忽略，缺失必填字段或字段类型错误属于永久失败。
+
+四个逻辑队列分别为：
+
+| 逻辑队列 | 默认 Queue | 用途 |
+|---|---|---|
+| workflow | `commercevision.workflow` | Workflow 命令、进度通知和审计事件 |
+| asset | `commercevision.asset` | 资产校验、权利、ProductBrief 和 Brand Profile |
+| index | `commercevision.index` | Embedding、索引删除和 Collection Rebuild |
+| maintenance | `commercevision.maintenance` | 删除、对账，以及无法按契约路由的消息 |
+
+Phase 1 已发布的 v1 契约全部路由至 Workflow Queue：
+
+- `workflow.run.requested`、`workflow.resume.requested` 执行 Graph。
+- `workflow.node.started`、`workflow.node.completed`、
+  `workflow.human_input.required`、`workflow.human_input.received`、
+  `workflow.failed`、`workflow.cancelled` 是显式注册的通知/审计事件。Worker 通过 Inbox
+  记录已观察状态，不重复执行 Graph，也不会将它们误判为未知事件。
+
+未知事件类型、已知事件的不支持版本、未绑定处理器和格式错误的 Payload 都先发布至
+Maintenance Queue，再由 Worker 记录为永久失败并写入 DLQ；不会静默成功。
+
 ## Webhook
 
 - 事件由 Outbox 产生。
@@ -167,4 +193,3 @@ export.ready
 - Event Consumer 忽略未知字段。
 - Event Schema 在 Registry 中版本化。
 - 至少保留一个旧客户端发布周期。
-

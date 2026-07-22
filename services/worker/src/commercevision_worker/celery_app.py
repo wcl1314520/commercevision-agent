@@ -6,6 +6,7 @@ from celery import Celery
 from celery.signals import worker_process_shutdown
 from commercevision_contracts.config import load_settings
 from commercevision_observability import configure_logging
+from kombu import Queue
 
 settings = load_settings("worker")
 configure_logging(settings.log_level)
@@ -17,7 +18,9 @@ celery_app.conf.update(
     enable_utc=True,
     result_backend=None,
     task_acks_late=True,
-    task_default_queue="commercevision.workflow",
+    task_acks_on_failure_or_timeout=False,
+    task_default_queue=settings.workflow_queue_name,
+    task_queues=tuple(Queue(queue_name) for queue_name in settings.configured_worker_queues),
     task_publish_retry=True,
     task_publish_retry_policy={
         "max_retries": 5,
@@ -45,17 +48,9 @@ def _get_runtime():
     return _runtime
 
 
-@celery_app.task(
-    bind=True,
-    name="commercevision.process_outbox_event",
-    max_retries=settings.workflow_message_max_attempts,
-)
-def process_outbox_event(self, event_id: str) -> str:
-    try:
-        return _get_runtime().process_event(event_id)
-    except Exception as exc:
-        countdown = min(60, 2 ** min(self.request.retries, 6))
-        raise self.retry(exc=exc, countdown=countdown) from exc
+@celery_app.task(name="commercevision.process_outbox_event")
+def process_outbox_event(event_id: str) -> str:
+    return _get_runtime().process_event(event_id)
 
 
 @worker_process_shutdown.connect

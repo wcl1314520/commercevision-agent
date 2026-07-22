@@ -260,3 +260,19 @@ def dead_letter_to_model(entity: DeadLetterMessage) -> DeadLetterMessageModel:
         original_created_at=entity.original_created_at,
         created_at=entity.created_at,
     )
+
+
+def dead_letter_from_model(model: DeadLetterMessageModel) -> DeadLetterMessage:
+    return DeadLetterMessage(
+        id=model.id,
+        consumer=model.consumer,
+        message_id=model.message_id,
+        event_type=model.event_type,
+        payload=model.payload_json,
+        reason=model.reason,
+        error_class=model.error_class,
+        error_message=model.error_message,
+        attempt_count=model.attempt_count,
+        original_created_at=model.original_created_at,
+        created_at=model.created_at,
+    )

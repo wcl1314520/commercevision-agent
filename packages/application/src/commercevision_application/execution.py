@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from commercevision_contracts.events import (
+    EventType,
+    WorkflowFailedPayload,
+    WorkflowHumanInputReceivedPayload,
+    WorkflowHumanInputRequiredPayload,
+    WorkflowNodeCompletedPayload,
+    WorkflowNodeStartedPayload,
+    WorkflowRunRequestedPayload,
+)
 from commercevision_domain import (
     AttemptStatus,
     LeaseConflictError,
@@ -139,9 +148,13 @@ class DurableNodeLifecycle:
                 self._event(
                     workflow_id=workflow.id,
                     workflow_version=workflow.version,
-                    event_type="workflow.node.started",
+                    event_type=EventType.WORKFLOW_NODE_STARTED,
                     trace_id=trace_id,
-                    payload={"node": node_name, "step_id": step.id, "step_key": step.step_key},
+                    payload=WorkflowNodeStartedPayload(
+                        node=node_name,
+                        step_id=step.id,
+                        step_key=step.step_key,
+                    ).model_dump(mode="json"),
                     now=now,
                 )
             )
@@ -192,13 +205,13 @@ class DurableNodeLifecycle:
                 self._event(
                     workflow_id=workflow.id,
                     workflow_version=workflow.version,
-                    event_type="workflow.node.completed",
+                    event_type=EventType.WORKFLOW_NODE_COMPLETED,
                     trace_id=trace_id,
-                    payload={
-                        "node": next_node,
-                        "completed_step_id": step.id,
-                        "status": workflow.status.value,
-                    },
+                    payload=WorkflowNodeCompletedPayload(
+                        node=next_node,
+                        completed_step_id=step.id,
+                        status=workflow.status,
+                    ).model_dump(mode="json"),
                     now=now,
                 )
             )
@@ -262,9 +275,12 @@ class DurableNodeLifecycle:
                 self._event(
                     workflow_id=workflow.id,
                     workflow_version=workflow.version,
-                    event_type="workflow.human_input.required",
+                    event_type=EventType.WORKFLOW_HUMAN_INPUT_REQUIRED,
                     trace_id=trace_id,
-                    payload={"step_id": step.id, "step_key": step.step_key},
+                    payload=WorkflowHumanInputRequiredPayload(
+                        step_id=step.id,
+                        step_key=step.step_key,
+                    ).model_dump(mode="json"),
                     now=now,
                 )
             )
@@ -292,9 +308,12 @@ class DurableNodeLifecycle:
                     self._event(
                         workflow_id=workflow.id,
                         workflow_version=workflow.version,
-                        event_type="workflow.human_input.received",
+                        event_type=EventType.WORKFLOW_HUMAN_INPUT_RECEIVED,
                         trace_id=trace_id,
-                        payload={"step_id": step.id, "decision": output_data.get("decision")},
+                        payload=WorkflowHumanInputReceivedPayload(
+                            step_id=step.id,
+                            decision=output_data.get("decision"),
+                        ).model_dump(mode="json"),
                         now=now,
                     )
                 )
@@ -406,9 +425,12 @@ class DurableNodeLifecycle:
                     self._event(
                         workflow_id=workflow.id,
                         workflow_version=workflow.version,
-                        event_type="workflow.run.requested",
+                        event_type=EventType.WORKFLOW_RUN_REQUESTED,
                         trace_id=trace_id,
-                        payload={"workflow_id": workflow.id, "action": "retry"},
+                        payload=WorkflowRunRequestedPayload(
+                            workflow_id=workflow.id,
+                            action="retry",
+                        ).model_dump(mode="json", exclude_none=True),
                         now=retry_at,
                     )
                 )
@@ -430,13 +452,13 @@ class DurableNodeLifecycle:
                     self._event(
                         workflow_id=workflow.id,
                         workflow_version=workflow.version,
-                        event_type="workflow.failed",
+                        event_type=EventType.WORKFLOW_FAILED,
                         trace_id=trace_id,
-                        payload={
-                            "workflow_id": workflow.id,
-                            "step_id": step.id,
-                            "error_class": type(error).__name__,
-                        },
+                        payload=WorkflowFailedPayload(
+                            workflow_id=workflow.id,
+                            step_id=step.id,
+                            error_class=type(error).__name__,
+                        ).model_dump(mode="json"),
                         now=now,
                     )
                 )
@@ -448,14 +470,14 @@ class DurableNodeLifecycle:
         *,
         workflow_id: str,
         workflow_version: int,
-        event_type: str,
+        event_type: EventType,
         trace_id: str,
         payload: dict[str, Any],
         now: datetime,
     ) -> OutboxEvent:
         return OutboxEvent(
             envelope=EventEnvelope.create(
-                event_type=event_type,
+                event_type=event_type.value,
                 aggregate_type="workflow",
                 aggregate_id=workflow_id,
                 aggregate_version=workflow_version,

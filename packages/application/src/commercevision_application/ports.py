@@ -96,8 +96,21 @@ class OutboxRepositoryPort(Protocol):
         available_at: datetime,
         error_message: str,
     ) -> None: ...
+    def schedule_retry(
+        self,
+        event_id: str,
+        *,
+        available_at: datetime,
+        error_message: str,
+    ) -> None: ...
     def list_for_aggregate(self, aggregate_id: str, *, limit: int = 200) -> list[OutboxEvent]: ...
-    def has_unpublished(self, *, aggregate_id: str, event_type: str) -> bool: ...
+    def has_unpublished(
+        self,
+        *,
+        aggregate_id: str,
+        event_type: str,
+        exclude_event_id: str | None = None,
+    ) -> bool: ...
 
 
 class InboxRepositoryPort(Protocol):
@@ -108,6 +121,7 @@ class InboxRepositoryPort(Protocol):
 
 class DeadLetterRepositoryPort(Protocol):
     def add(self, message: DeadLetterMessage) -> None: ...
+    def get(self, *, consumer: str, message_id: str) -> DeadLetterMessage | None: ...
 
 
 class AuditRepositoryPort(Protocol):
@@ -134,4 +148,4 @@ UnitOfWorkFactory = Callable[[], UnitOfWorkPort]
 
 
 class MessagePublisher(Protocol):
-    def publish(self, event_id: str) -> None: ...
+    def publish_event(self, event: OutboxEvent) -> None: ...

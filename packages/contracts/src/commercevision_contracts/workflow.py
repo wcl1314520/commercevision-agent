@@ -16,6 +16,8 @@ from commercevision_domain import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from .events import WorkflowResumeRequestedPayload
+
 
 class WorkflowCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -122,14 +124,4 @@ class EventResponse(BaseModel):
     payload: dict[str, Any]
 
 
-class ResumePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    workflow_id: str
-    approval_id: str
-    approval_type: ApprovalType
-    decision: ApprovalDecision
-    expected_workflow_version: int
-    resulting_workflow_version: int
-    subject_id: str
-    subject_version: int
+ResumePayload = WorkflowResumeRequestedPayload

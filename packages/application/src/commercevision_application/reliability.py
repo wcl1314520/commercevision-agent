@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from commercevision_domain import NotFoundError
+from commercevision_contracts.events import EventType, WorkflowRunRequestedPayload
+from commercevision_domain import LeaseConflictError, NotFoundError
 from commercevision_domain.messaging import DeadLetterMessage, EventEnvelope, OutboxEvent
 
 from .ports import MessagePublisher, UnitOfWorkFactory
+from .routing import EventRoutingError
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +18,7 @@ class MessageClaim:
     should_process: bool
     already_processed: bool
     dead: bool
+    retry_not_ready: bool
     lease_token: str | None
     delivery_attempt: int
 
@@ -54,7 +57,7 @@ class OutboxDispatcher:
             if lock_token is None:
                 continue
             try:
-                self._publisher.publish(event.envelope.event_id)
+                self._publisher.publish_event(event)
             except Exception as exc:
                 failed += 1
                 delay_seconds = min(300, 2 ** min(event.publish_attempts, 8))
@@ -67,15 +70,24 @@ class OutboxDispatcher:
                     )
                     uow.commit()
             else:
+                try:
+                    with self._uow_factory() as uow:
+                        uow.outbox.mark_published(
+                            event.envelope.event_id,
+                            lock_token,
+                            now=datetime.now(UTC),
+                        )
+                        uow.commit()
+                except LeaseConflictError:
+                    if not self._delivery_state_advanced(event):
+                        raise
                 published += 1
-                with self._uow_factory() as uow:
-                    uow.outbox.mark_published(
-                        event.envelope.event_id,
-                        lock_token,
-                        now=datetime.now(UTC),
-                    )
-                    uow.commit()
         return published, failed
+
+    def _delivery_state_advanced(self, delivered_event: OutboxEvent) -> bool:
+        with self._uow_factory() as uow:
+            current = uow.outbox.get(delivered_event.envelope.event_id)
+        return current is not None and current.available_at > delivered_event.available_at
 
 
 class InboxCoordinator:
@@ -87,12 +99,16 @@ class InboxCoordinator:
         owner: str,
         lease_duration: timedelta,
         max_attempts: int,
+        retry_initial: timedelta = timedelta(seconds=1),
+        retry_max: timedelta = timedelta(minutes=5),
     ) -> None:
         self._uow_factory = uow_factory
         self._consumer = consumer
         self._owner = owner
         self._lease_duration = lease_duration
         self._max_attempts = max_attempts
+        self._retry_initial = retry_initial
+        self._retry_max = retry_max
 
     def claim(self, event_id: str) -> tuple[MessageClaim, OutboxEvent]:
         now = datetime.now(UTC)
@@ -100,6 +116,18 @@ class InboxCoordinator:
             event = uow.outbox.get(event_id)
             if event is None:
                 raise NotFoundError(f"outbox event {event_id} was not found")
+            if event.published_at is None and event.available_at > now:
+                return (
+                    MessageClaim(
+                        should_process=False,
+                        already_processed=False,
+                        dead=False,
+                        retry_not_ready=True,
+                        lease_token=None,
+                        delivery_attempt=0,
+                    ),
+                    event,
+                )
             raw_claim = uow.inbox.claim(
                 consumer=self._consumer,
                 message_id=event_id,
@@ -127,6 +155,7 @@ class InboxCoordinator:
                 should_process=raw_claim.should_process,
                 already_processed=raw_claim.already_processed,
                 dead=raw_claim.dead,
+                retry_not_ready=False,
                 lease_token=raw_claim.lease_token,
                 delivery_attempt=raw_claim.delivery_attempt,
             ),
@@ -155,6 +184,71 @@ class InboxCoordinator:
             )
             uow.commit()
 
+    def schedule_retry(
+        self,
+        event_id: str,
+        lease_token: str,
+        error: Exception,
+        *,
+        delivery_attempt: int,
+    ) -> datetime:
+        now = datetime.now(UTC)
+        retry_delay = self._retry_initial * (2 ** max(delivery_attempt - 1, 0))
+        available_at = now + min(retry_delay, self._retry_max)
+        error_message = f"{type(error).__name__}: {error}"
+        with self._uow_factory() as uow:
+            uow.inbox.mark_failed(
+                consumer=self._consumer,
+                message_id=event_id,
+                lease_token=lease_token,
+                now=now,
+                error_class=type(error).__name__,
+                error_message=str(error),
+            )
+            uow.outbox.schedule_retry(
+                event_id,
+                available_at=available_at,
+                error_message=error_message,
+            )
+            uow.commit()
+        return available_at
+
+    def mark_permanent_failed(
+        self,
+        event_id: str,
+        lease_token: str,
+        error: EventRoutingError,
+        delivery_attempt: int,
+    ) -> None:
+        now = datetime.now(UTC)
+        with self._uow_factory() as uow:
+            event = uow.outbox.get(event_id)
+            if event is None:
+                raise NotFoundError(f"outbox event {event_id} was not found")
+            uow.inbox.mark_dead(
+                consumer=self._consumer,
+                message_id=event_id,
+                lease_token=lease_token,
+                now=now,
+                error_class=type(error).__name__,
+                error_message=str(error),
+            )
+            uow.dead_letters.add(
+                DeadLetterMessage.create(
+                    consumer=self._consumer,
+                    message_id=event_id,
+                    event_type=event.envelope.event_type,
+                    payload=event.envelope.payload,
+                    reason=error.reason,
+                    attempt_count=delivery_attempt,
+                    original_created_at=event.envelope.occurred_at,
+                    error_class=type(error).__name__,
+                    error_message=str(error),
+                    now=now,
+                )
+            )
+            uow.commit()
+
 
 class RecoveryService:
     def __init__(
@@ -178,7 +272,7 @@ class RecoveryService:
                 uow.steps.save(step)
                 if not uow.outbox.has_unpublished(
                     aggregate_id=step.workflow_id,
-                    event_type="workflow.run.requested",
+                    event_type=EventType.WORKFLOW_RUN_REQUESTED.value,
                 ):
                     uow.outbox.add(
                         self._run_event(
@@ -197,7 +291,7 @@ class RecoveryService:
             ):
                 if not uow.outbox.has_unpublished(
                     aggregate_id=workflow.id,
-                    event_type="workflow.run.requested",
+                    event_type=EventType.WORKFLOW_RUN_REQUESTED.value,
                 ):
                     uow.outbox.add(
                         self._run_event(
@@ -221,12 +315,16 @@ class RecoveryService:
     ) -> OutboxEvent:
         return OutboxEvent(
             envelope=EventEnvelope.create(
-                event_type="workflow.run.requested",
+                event_type=EventType.WORKFLOW_RUN_REQUESTED.value,
                 aggregate_type="workflow",
                 aggregate_id=workflow_id,
                 aggregate_version=workflow_version,
                 trace_id=f"recovery:{workflow_id}",
-                payload={"workflow_id": workflow_id, "action": "recover", "reason": reason},
+                payload=WorkflowRunRequestedPayload(
+                    workflow_id=workflow_id,
+                    action="recover",
+                    reason=reason,
+                ).model_dump(mode="json"),
                 now=now,
             ),
             available_at=now,

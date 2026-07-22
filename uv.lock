@@ -535,6 +535,7 @@ dependencies = [
     { name = "commercevision-persistence" },
     { name = "commercevision-providers" },
     { name = "commercevision-tool-runtime" },
+    { name = "kombu" },
 ]
 
 [package.metadata]
@@ -548,6 +549,7 @@ requires-dist = [
     { name = "commercevision-persistence", editable = "packages/persistence" },
     { name = "commercevision-providers", editable = "packages/providers" },
     { name = "commercevision-tool-runtime", editable = "packages/tool-runtime" },
+    { name = "kombu", specifier = ">=5.6,<6" },
 ]
 
 [[package]]
