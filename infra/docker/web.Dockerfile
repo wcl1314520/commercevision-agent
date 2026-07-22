@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 ENV NEXT_OUTPUT=standalone \
@@ -13,7 +13,7 @@ RUN pnpm --filter @commercevision/web... install --frozen-lockfile --ignore-scri
 RUN pnpm --filter @commercevision/web exec node -e "console.log(require.resolve('next/package.json')); console.log(require.resolve('next/dist/pages/_app'))"
 RUN pnpm --filter @commercevision/web build
 
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production \
