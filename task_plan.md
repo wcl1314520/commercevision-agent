@@ -82,14 +82,14 @@
 - 已确认 `to-spec` 测试接缝：HTTP、Durable Worker/Event、真实基础设施检索、MCP、Provider Adapter
 
 ### Phase 10：Phase 2 规格与工单
-**Status:** in_progress
+**Status:** complete
 - 已确认测试接缝
 - 已生成 `.scratch/phase-2-assets-retrieval/spec.md`
-- 将规格拆为 blockers-first 的独立 Ticket
-- 每个 Ticket 写入 `.scratch/phase-2-assets-retrieval/issues/`
+- 已将规格拆为 17 个 blockers-first 独立 Ticket
+- 每个 Ticket 已写入 `.scratch/phase-2-assets-retrieval/issues/`
 
 ### Phase 11：Phase 2 独立上下文实现
-**Status:** pending
+**Status:** in_progress
 - 每个 Ticket 使用独立子 Agent 上下文和 TDD
 - 逐 Ticket 审查、测试和提交
 - 不跨 Ticket 复用隐式上下文
