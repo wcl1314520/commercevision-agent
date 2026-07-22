@@ -161,4 +161,9 @@
 - 已将全部 Critical/Required 审查意见退回原 Ticket 01 独立上下文，要求补齐 MySQL 主导重试闭环、全量 Phase 1 事件契约、严格配置、真实 Durable Worker/Event 接缝测试与架构文档，并 amend 原提交。
 - Ticket 01 修复已 amend 为 `088203f`，保留为该 Ticket 的单一实现提交；独立 Standards、Spec 和五轴质量审查均批准。
 - 主控复验通过：83 项 pytest、Ruff format/check、Python 依赖审计、Compose 配置和工单验收；仅有既有 Starlette 弃用警告，Pyright 仍未安装。
-- Ticket 01 已解除 Phase 2 后续实现阻塞，下一步执行无阻塞的 Ticket 03。
+- Ticket 01 与状态日志已推送；最新 GitHub Actions 运行 `29921552040` 已全部通过，前一运行因并发取消策略被后续提交正常取代。
+- Ticket 01 已解除 Phase 2 后续实现阻塞。
+- Ticket 03 已在新的独立 Worker 上下文中启动，范围固定为 Product/SKU Catalog、Workspace 隔离、MySQL/HTTP Contract、OpenAPI 和 Web 工作台。
+- Ticket 03 已完成并 amend 为 `856f57b`，包含 Product/SKU 共享外部身份注册表、复合 Workspace 外键、并发幂等快照、运行时 Web Proxy、过期元数据和 9 项 Playwright 测试；独立 Standards、Spec 和五轴质量审查均批准。
+- 主控复验通过：94 项 pytest、9 项 Playwright、Web lint/typecheck/build、Ruff、Python 依赖审计、迁移 upgrade/`alembic check`、OpenAPI/前端类型漂移和 Compose 配置；仅有既有 Starlette/httpx 弃用警告。
+- Ticket 03 已解除 Ticket 04、05、06、07、08、09 之外的直接依赖，并正式解锁 Ticket 02 的实现。
