@@ -1,0 +1,23 @@
+version: 0.1.0
+environment: local
+log_level: INFO
+readiness_probe_external: false
+milvus_uri: http://milvus:19530
+milvus_health_uri: http://milvus:9091/healthz
+object_store_endpoint: http://minio:9000
+object_store_bucket: task-assets
+mysql_pool_size: 10
+mysql_max_overflow: 20
+mysql_pool_recycle_seconds: 1800
+workflow_retention_hours: 72
+workflow_step_lease_seconds: 300
+workflow_message_max_attempts: 8
+worker_consumer_name: agent-worker
+scheduler_poll_seconds: 2
+scheduler_batch_size: 50
+scheduler_lease_seconds: 30
+scheduler_recovery_interval_seconds: 10
+cors_origins:
+  - http://localhost:13000
+scheduler_host: 0.0.0.0
+scheduler_port: 8002

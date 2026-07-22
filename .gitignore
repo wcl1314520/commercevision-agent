@@ -1,0 +1,24 @@
+# Obsidian local UI state
+.obsidian/workspace*.json
+.obsidian/cache/
+.trash/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+secrets/
+
+# Build and dependency artifacts
+.venv/
+node_modules/
+**/.next/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.tsbuildinfo
+
+# Operating system metadata
+.DS_Store
+Thumbs.db

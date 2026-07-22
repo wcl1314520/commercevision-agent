@@ -1,0 +1,36 @@
+[project]
+name = "commercevision-api"
+version = "0.1.0"
+description = "CommerceVision Control API"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "aio-pika>=9.5,<10",
+  "aiomysql>=0.2,<1",
+  "commercevision-application",
+  "commercevision-contracts",
+  "commercevision-domain",
+  "commercevision-observability",
+  "commercevision-persistence",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "redis>=5,<7",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.scripts]
+commercevision-api = "commercevision_api.main:run"
+
+[tool.uv.sources]
+commercevision-application = { workspace = true }
+commercevision-contracts = { workspace = true }
+commercevision-domain = { workspace = true }
+commercevision-observability = { workspace = true }
+commercevision-persistence = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/commercevision_api"]

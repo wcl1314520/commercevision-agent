@@ -1,0 +1,38 @@
+[project]
+name = "commercevision-workspace"
+version = "0.1.0"
+description = "CommerceVision Agent monorepo workspace"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pip-audit>=2.9,<3",
+  "pytest>=9.0.3,<10",
+  "pytest-asyncio>=1.2,<2",
+  "ruff>=0.11,<1",
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev"]
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["database/migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+markers = [
+  "integration: requires the MySQL integration database",
+]

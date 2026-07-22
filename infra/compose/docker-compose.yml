@@ -1,0 +1,341 @@
+name: commercevision
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: commercevision
+      MYSQL_USER: commercevision
+      MYSQL_PASSWORD: ${CV_MYSQL_PASSWORD:-commercevision}
+      MYSQL_ROOT_PASSWORD: ${CV_MYSQL_ROOT_PASSWORD:-root-change-me}
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_MYSQL_HOST_PORT:-13316}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        UV_INDEX_URL: ${CV_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      CV_SERVICE_NAME: migration
+      CV_ENVIRONMENT: local
+      CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+    networks: [commercevision]
+
+  redis:
+    image: valkey/valkey:8.1.8-alpine@sha256:94365b275456ae14621001c03556c732b1d93a0cdeacc317d1bdd52eba680885
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_REDIS_HOST_PORT:-16379}:6379"
+    volumes:
+      - cache_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [commercevision]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: commercevision
+      RABBITMQ_DEFAULT_PASS: ${CV_RABBITMQ_PASSWORD:-commercevision}
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_RABBITMQ_HOST_PORT:-15673}:5672"
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_RABBITMQ_MANAGEMENT_PORT:-25672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5672"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
+      MINIO_ROOT_PASSWORD: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_MINIO_API_HOST_PORT:-19000}:9000"
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    restart: unless-stopped
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
+      MINIO_SECRET_ACCESS_KEY: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_MILVUS_HOST_PORT:-19531}:19530"
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_MILVUS_HEALTH_HOST_PORT:-19091}:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [commercevision]
+
+  otel-collector:
+    build:
+      context: ../..
+      dockerfile: infra/docker/otel.Dockerfile
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ../otel/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_GRPC_HOST_PORT:-14317}:4317"
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_HTTP_HOST_PORT:-14318}:4318"
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_HEALTH_HOST_PORT:-14319}:13133"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        UV_INDEX_URL: ${CV_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command:
+      - uvicorn
+      - commercevision_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      CV_SERVICE_NAME: control-api
+      CV_ENVIRONMENT: local
+      CV_READINESS_PROBE_EXTERNAL: "true"
+      CV_MYSQL_DSN: mysql+aiomysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_REDIS_URL: redis://redis:6379/0
+      CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
+      CV_MILVUS_URI: http://milvus:19530
+      CV_MILVUS_HEALTH_URI: http://milvus:9091/healthz
+      CV_OBJECT_STORE_ENDPOINT: http://minio:9000
+      CV_OBJECT_STORE_ACCESS_KEY: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
+      CV_OBJECT_STORE_SECRET_KEY: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_API_HOST_PORT:-18000}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        UV_INDEX_URL: ${CV_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command:
+      - celery
+      - -A
+      - commercevision_worker.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=${CV_WORKER_CONCURRENCY:-2}
+    environment:
+      CV_SERVICE_NAME: agent-worker
+      CV_ENVIRONMENT: local
+      CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib, socket; assert b'celery' in pathlib.Path('/proc/1/cmdline').read_bytes(); socket.create_connection(('rabbitmq', 5672), 3).close()",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    networks: [commercevision]
+
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        UV_INDEX_URL: ${CV_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command:
+      - commercevision-scheduler
+    environment:
+      CV_SERVICE_NAME: scheduler
+      CV_ENVIRONMENT: local
+      CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_SCHEDULER_HOST: 0.0.0.0
+      CV_SCHEDULER_PORT: "8002"
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_SCHEDULER_HOST_PORT:-18002}:8002"
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/live', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  mcp-server:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        UV_INDEX_URL: ${CV_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command:
+      - commercevision-mcp
+    environment:
+      CV_SERVICE_NAME: mcp-server
+      CV_ENVIRONMENT: local
+      CV_MCP_TRANSPORT: streamable-http
+      CV_MCP_HOST: 0.0.0.0
+      CV_MCP_PORT: "8001"
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_MCP_HOST_PORT:-18001}:8001"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web.Dockerfile
+    environment:
+      NODE_ENV: production
+    ports:
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_WEB_HOST_PORT:-13000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [commercevision]
+
+volumes:
+  cache_data:
+  etcd_data:
+  milvus_data:
+  minio_data:
+  mysql_data:
+  rabbitmq_data:
+
+networks:
+  commercevision:
+    driver: bridge
