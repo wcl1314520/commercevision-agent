@@ -1,5 +1,6 @@
 """Application use cases independent of HTTP, Celery, and SQLAlchemy."""
 
+from .catalog import CatalogApplicationService
 from .execution import DurableNodeLifecycle
 from .reliability import InboxCoordinator, OutboxDispatcher, RecoveryService
 from .routing import (
@@ -17,6 +18,7 @@ from .workflows import WorkflowApplicationService
 
 __all__ = [
     "DurableNodeLifecycle",
+    "CatalogApplicationService",
     "DuplicateEventRegistrationError",
     "EventRoute",
     "EventRoutingError",

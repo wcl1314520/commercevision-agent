@@ -10,6 +10,7 @@ from commercevision_observability import configure_logging, get_logger
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from .catalog_routes import router as catalog_router
 from .container import ApiContainer
 from .errors import install_error_handlers
 from .readiness import probe_dependencies
@@ -103,6 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             phase="phase-1",
         )
 
+    api.include_router(catalog_router)
     api.include_router(workflow_router)
     return api
 

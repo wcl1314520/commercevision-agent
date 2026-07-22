@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CommerceVision Agent",
-  description: "Durable ecommerce visual workflow control plane",
+  title: "商品目录 | CommerceVision",
+  description: "Workspace-scoped product and SKU catalog workbench",
 };
 
 export default function RootLayout({

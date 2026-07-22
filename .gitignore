@@ -18,6 +18,8 @@ node_modules/
 .ruff_cache/
 *.pyc
 *.tsbuildinfo
+**/playwright-report/
+**/test-results/
 
 # Operating system metadata
 .DS_Store

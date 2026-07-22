@@ -11,9 +11,11 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
+    PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
@@ -78,6 +80,91 @@ class WorkflowModel(Base):
     result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     cancellation_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class CatalogExternalIdentityModel(Base):
+    __tablename__ = "catalog_external_identities"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "workspace_id",
+            "source_namespace",
+            "external_id",
+            name="pk_catalog_external_identity",
+        ),
+        Index("ix_catalog_external_identity_owner", "owner_type", "owner_id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class ProductModel(Base):
+    __tablename__ = "products"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "source_namespace",
+            "external_id",
+            name="uq_products_external_identity",
+        ),
+        UniqueConstraint("workspace_id", "id", name="uq_products_workspace_id"),
+        Index("ix_products_workspace_created", "workspace_id", "created_at", "id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_version: Mapped[str | None] = mapped_column(String(128))
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    category_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    brand: Mapped[str] = mapped_column(String(128), nullable=False)
+    attributes_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class SKUModel(Base):
+    __tablename__ = "skus"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "source_namespace",
+            "external_id",
+            name="uq_skus_external_identity",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_id"],
+            ["products.workspace_id", "products.id"],
+            name="fk_skus_workspace_product",
+            ondelete="RESTRICT",
+        ),
+        Index("ix_skus_workspace_product", "workspace_id", "product_id", "created_at", "id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_version: Mapped[str | None] = mapped_column(String(128))
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    category_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    brand: Mapped[str] = mapped_column(String(128), nullable=False)
+    attributes_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 

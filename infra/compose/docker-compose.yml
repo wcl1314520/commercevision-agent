@@ -315,6 +315,7 @@ services:
       dockerfile: infra/docker/web.Dockerfile
     environment:
       NODE_ENV: production
+      CV_API_PROXY_URL: http://api:8000
     ports:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_WEB_HOST_PORT:-13000}:3000"
     depends_on:

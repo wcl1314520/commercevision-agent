@@ -17,6 +17,7 @@ from commercevision_domain.workflow.entities import (
 )
 from commercevision_domain.workflow.enums import InboxStatus, StepStatus
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.orm import Session
 
 from .mappers import (
@@ -421,6 +422,60 @@ class IdempotencyRepository:
                 expires_at=expires_at,
             )
         )
+
+    def claim(
+        self,
+        *,
+        scope: str,
+        key_hash: str,
+        request_hash: str,
+        expires_at: datetime,
+    ) -> IdempotencyRecord:
+        statement = mysql_insert(IdempotencyKeyModel).values(
+            id=new_uuid7(),
+            scope=scope,
+            key_hash=key_hash,
+            request_hash=request_hash,
+            resource_type="PENDING",
+            resource_id="",
+            response_json=None,
+            status="PENDING",
+            created_at=datetime.now(expires_at.tzinfo),
+            expires_at=expires_at,
+        )
+        statement = statement.on_duplicate_key_update(scope=statement.inserted.scope)
+        self.session.execute(statement)
+        record = self.get(scope, key_hash, for_update=True)
+        if record is None:
+            raise ConcurrencyError("idempotency claim disappeared before serialization")
+        return record
+
+    def complete(
+        self,
+        *,
+        scope: str,
+        key_hash: str,
+        request_hash: str,
+        resource_type: str,
+        resource_id: str,
+        response_data: dict[str, Any],
+    ) -> None:
+        result = self.session.execute(
+            update(IdempotencyKeyModel)
+            .where(
+                IdempotencyKeyModel.scope == scope,
+                IdempotencyKeyModel.key_hash == key_hash,
+                IdempotencyKeyModel.request_hash == request_hash,
+            )
+            .values(
+                resource_type=resource_type,
+                resource_id=resource_id,
+                response_json=response_data,
+                status="COMPLETED",
+            )
+        )
+        if result.rowcount != 1:
+            raise ConcurrencyError("idempotency claim was not completed")
 
 
 class OutboxRepository:

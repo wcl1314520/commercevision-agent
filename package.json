@@ -6,6 +6,8 @@
     "web:dev": "pnpm --filter @commercevision/web dev",
     "web:build": "pnpm --filter @commercevision/web build",
     "web:lint": "pnpm --filter @commercevision/web lint",
-    "web:typecheck": "pnpm --filter @commercevision/web typecheck"
+    "web:typecheck": "pnpm --filter @commercevision/web typecheck",
+    "web:api-types:check": "python scripts\\generate_web_types.py --check",
+    "web:e2e": "pnpm --filter @commercevision/web e2e"
   }
 }

@@ -52,6 +52,7 @@
 
 - `id`
 - `workspace_id`
+- `source_namespace`
 - `external_id`
 - `category_code`
 - `title`
@@ -59,14 +60,26 @@
 - `attributes_json`
 - `source_version`
 - `expires_at`
+- external identity is unique within the shared catalog namespace
+  `(workspace_id, source_namespace, external_id)`
 
 ### `skus`
 
 - `id`
+- `workspace_id`
 - `product_id`
-- `external_sku`
+- `source_namespace`
+- `external_id`
 - `attributes_json`
 - `expires_at`
+- `(workspace_id, product_id)` references the owning Product with a composite foreign key
+
+### `catalog_external_identities`
+
+Product and SKU external identities reserve one shared registry row keyed by
+`(workspace_id, source_namespace, external_id)`. Reservations are created and released in the same
+transaction as the owning catalog mutation. Expired catalog rows remain readable and listable for
+audit and renewal; this metadata does not enforce asset-rights usability.
 
 ### `assets`
 
