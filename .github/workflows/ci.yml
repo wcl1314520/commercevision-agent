@@ -37,7 +37,7 @@ jobs:
       CV_MYSQL_DSN: mysql+pymysql://commercevision:commercevision@127.0.0.1:3306/commercevision
       CV_TEST_MYSQL_DSN: mysql+pymysql://root:root-change-me@127.0.0.1:3306/commercevision_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.11.7"
@@ -55,7 +55,7 @@ jobs:
     name: Web checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -73,7 +73,7 @@ jobs:
     name: Container builds
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker compose -f infra/compose/docker-compose.yml config --quiet
       - run: >-
           docker compose -f infra/compose/docker-compose.yml build
@@ -83,7 +83,7 @@ jobs:
     name: Security and SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
