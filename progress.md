@@ -153,4 +153,12 @@
 
 - 用户已明确批准 17 个 Ticket 的粒度与依赖关系。
 - 已按 blockers-first 顺序发布 17 个 Local Markdown Ticket。
+- Ticket 基线已提交为 `f0dffb0` 并推送到 `origin/main`。
+- Ticket 基线 GitHub Actions 运行 `29910220853` 已全部通过。
 - Phase 10 已完成，Phase 11 独立上下文实现已开始。
+- Ticket 01 已在不继承会话历史的独立 Worker 上下文中启动，执行 `/implement`、TDD、完整测试与代码审查。
+- Ticket 01 初版提交 `3bc4a4d` 的主控双轴审查未通过：发现 Phase 1 通知事件误入 DLQ、普通 Worker 异常可能被 ACK 后搁置、队列配置与事件 Contract 边界不完整。
+- 已将全部 Critical/Required 审查意见退回原 Ticket 01 独立上下文，要求补齐 MySQL 主导重试闭环、全量 Phase 1 事件契约、严格配置、真实 Durable Worker/Event 接缝测试与架构文档，并 amend 原提交。
+- Ticket 01 修复已 amend 为 `088203f`，保留为该 Ticket 的单一实现提交；独立 Standards、Spec 和五轴质量审查均批准。
+- 主控复验通过：83 项 pytest、Ruff format/check、Python 依赖审计、Compose 配置和工单验收；仅有既有 Starlette 弃用警告，Pyright 仍未安装。
+- Ticket 01 已解除 Phase 2 后续实现阻塞，下一步执行无阻塞的 Ticket 03。

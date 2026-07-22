@@ -93,6 +93,8 @@
 - 每个 Ticket 使用独立子 Agent 上下文和 TDD
 - 逐 Ticket 审查、测试和提交
 - 不跨 Ticket 复用隐式上下文
+- Ticket 01 已完成独立上下文实现、主控双轴审查和全量门禁；当前提交为 `088203f`。
+- 下一步进入无阻塞的 Ticket 03，仍保持单 Ticket、单独立上下文、单独提交。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending
