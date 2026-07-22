@@ -2,7 +2,7 @@
 
 ## 本轮目标
 
-在 `D:\个人项目\电商生图agent\mine` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整项目架构，并逐阶段实现可上线系统。当前实施 Phase 1：领域状态与 Durable Agent Runtime，不进入真实模型、生图、资产检索和完整产品 UI。
+在 `D:\个人项目\电商生图agent\mine` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。当前建立远程 Git 与 CI 基线，并按 `grill-with-docs -> to-spec -> to-tickets -> 独立上下文 implement` 完成 Phase 2：资产、商品理解与多模态记忆。
 
 ## 输入
 
@@ -64,6 +64,44 @@
 - 打通 API、Celery Worker、Scheduler 和可靠消息链路
 - 通过并发、重复消息、非法转换、Worker 恢复和人工等待验收
 
+### Phase 8：GitHub 公开仓库与远程 CI 基线
+**Status:** complete
+- 安全完成 GitHub CLI OAuth 认证，不使用已暴露 PAT
+- 创建公开仓库 `commercevision-agent`
+- 配置 `origin` 并推送 `main`
+- 验证全部 GitHub Actions 门禁
+- 使用未暴露的 30 天 classic PAT 为 `gh` 提供 `repo`、`workflow`、`read:org` 权限
+- 已暴露 PAT 的撤销等待用户在删除动作前再次确认
+
+### Phase 9：Phase 2 领域澄清与活文档
+**Status:** in_progress
+- 建立根目录 `CONTEXT.md`
+- 固化任务资产与基础资产保留边界
+- 创建 ADR-006
+- 完成 `PLAN.md` 并锁定 Phase 2 范围、深模块和 Provider 基线
+- 等待确认 `to-spec` 测试接缝
+
+### Phase 10：Phase 2 规格与工单
+**Status:** pending
+- 确认测试接缝
+- 生成 `.scratch/phase-2-assets-retrieval/spec.md`
+- 将规格拆为 blockers-first 的独立 Ticket
+- 每个 Ticket 写入 `.scratch/phase-2-assets-retrieval/issues/`
+
+### Phase 11：Phase 2 独立上下文实现
+**Status:** pending
+- 每个 Ticket 使用独立子 Agent 上下文和 TDD
+- 逐 Ticket 审查、测试和提交
+- 不跨 Ticket 复用隐式上下文
+
+### Phase 12：Phase 2 集成、可靠性与退出验收
+**Status:** pending
+- 运行完整静态、单元、集成、迁移、容器和安全门禁
+- 验证未授权素材召回率为 0
+- 验证增量索引和 Milvus 可重建
+- 验证固定检索集指标与 ProductBrief 人工确认
+- 更新路线图、Runbook、OpenAPI、评测与 GitHub CI 证据
+
 ## 成功标准
 
 1. `README.md` 是公开项目入口。
@@ -83,7 +121,7 @@
 - Phase 1 使用确定性 Fixture Tool，不包含真实模型、生图 Provider 和多模态检索。
 - MySQL `DATETIME(6)` 类型升级需要 `ALGORITHM=COPY`；生产大表必须使用维护窗口或受控在线 schema 迁移。
 - Milvus 生产部署方式需要在目标阿里云地域完成容量和运维评估。
-- GitHub Actions 工作流已配置并完成对应本地门禁验证，远程 CI 需在仓库首次 push 后取得运行证据。
+- GitHub Actions 初始远程运行 `29905132767` 已通过 Python、Web、容器构建、Secret Scan 和 SBOM。
 
 ## 错误记录
 
@@ -132,3 +170,10 @@
 | 2026-07-22 | 新增时间精度测试首次 Ruff 检查发现导入顺序和两个无用导入 | 删除无用导入、按 Ruff 规则排序，并改为直接用 `isinstance(..., UTCDateTime)` 枚举 schema contract |
 | 2026-07-22 | 主库迁移后误请求 Scheduler 不存在的 `/health/ready` 得到 404 | 按服务已定义 Contract 使用 `/health/live`；Compose 健康状态和 Scheduler heartbeat 均正常 |
 | 2026-07-22 | 最终文档一致性检查发现 Phase 0 路线图仍使用旧 Runbook 显示名称 | 更新为 `Phase 0-1 Runbook`，链接目标未变化 |
+| 2026-07-22 | 新 PowerShell 会话未刷新 PATH，`gh` 命令不可见 | 使用已验证的绝对路径 `C:\Program Files\GitHub CLI\gh.exe`，后续再统一刷新 PATH |
+| 2026-07-22 | 首次 GitHub CLI 设备授权码因浏览器控件未实际录入字符而无效 | 终止旧 OAuth 等待进程，创建新设备码并使用逐键输入验证页面显示 |
+| 2026-07-22 | GitHub CLI OAuth 确认页的授权按钮持续 disabled | 保留当前有效 OAuth 会话并检查页面安全状态；不回退到已暴露 PAT |
+| 2026-07-22 | GitHub OAuth Token 缺少 `workflow` scope，服务器拒绝推送 CI 文件 | 创建未暴露的 30 天 classic PAT，仅授予 `repo`、`workflow`、`read:org` 并安全写入 keyring |
+| 2026-07-22 | Git 直连 GitHub 多次 connection reset | 验证本机 v2rayN HTTP 代理后，只在当前仓库配置 `127.0.0.1:10809` |
+| 2026-07-22 | 首次 Git push 等待 Git Credential Manager 超时 | 配置 `gh auth setup-git`，终止本轮残留 Git 进程并使用非交互凭据重试 |
+| 2026-07-22 | classic PAT 首次创建因 Note 重名失败 | 使用唯一 Note 重新创建，未产生额外有效 Token |

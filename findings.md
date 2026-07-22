@@ -49,8 +49,9 @@
 
 ## 数据和安全
 
-- 任务数据和 Checkpoint 默认保存 72 小时。
-- 品牌、Prompt 和公开评测集长期保存到删除/退役。
+- 任务资产和承载任务正文的 Checkpoint 节点数据从 Workflow 创建起保存 72 小时。
+- 基础资产包括品牌素材、Prompt 模板、模型配置、注册 LoRA、授权参考素材和公开评测集，保存至管理员删除或权利到期。
+- 任务资产与基础资产是正式领域边界，不能再使用“所有数据保存三天”的笼统口径。
 - 无权资产不能检索或生成。
 - 原始 Prompt、OCR 和模型响应写加密 Task Bucket，不长期写 MySQL。
 - 公开 Demo 使用独立数据、Secret、配额和 Bucket。
@@ -95,3 +96,9 @@
 - Alembic 默认 `compare_type=True` 没有识别 `UTCDateTime` 的 MySQL `fsp=6` 与已部署 `DATETIME(0)` 之间的差异，`alembic check` 产生假阴性。迁移之外需要加入自定义类型比较器，并用 `INFORMATION_SCHEMA.DATETIME_PRECISION` 集成测试锁定 schema contract。
 - Alembic 历史迁移不能引用会继续演进的运行时 `TypeDecorator`，否则从零建库时历史 revision 的行为会改变。基线 revision 必须固定原始 `DATETIME(0)`，后续 revision 再显式升级到 `DATETIME(6)`。
 - 原 GitHub Actions 没有设置 `CV_TEST_MYSQL_DSN`，集成测试会尝试连接本地开发端口 `13316` 并因数据库不可用而 skip；CI 必须显式提供独立 MySQL 测试库 DSN，避免“测试命令成功但集成测试未执行”。
+
+## Phase 2 决策
+
+- `Task Asset` 与 `Foundation Asset` 是 Phase 2 的规范术语，定义见根目录 `CONTEXT.md`。
+- Foundation Asset 的终止条件采用“管理员删除或权利到期，以先发生者为准”，而不是无期限保存。
+- MySQL 权利状态必须先阻断使用，Milvus 和对象存储随后最终一致收敛。

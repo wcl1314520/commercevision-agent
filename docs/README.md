@@ -56,6 +56,7 @@
 - [ADR-003：MySQL 与 Milvus 分离](07-decisions/ADR-003-mysql-and-milvus.md)
 - [ADR-004：单一 Agent 与 LangGraph](07-decisions/ADR-004-single-agent-langgraph.md)
 - [ADR-005：开源许可与来源代码边界](07-decisions/ADR-005-open-source-boundary.md)
+- [ADR-006：任务资产与基础资产采用不同保留边界](07-decisions/ADR-006-asset-retention-boundary.md)
 
 ## 08 研究
 

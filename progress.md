@@ -116,3 +116,17 @@
 - Phase 1 已完成；Phase 2 尚未启动。
 - 最终五轴代码审查通过：correctness、readability、architecture、security、performance 均无阻断问题。
 - 最终门禁：35 passed、Ruff 全通过、Alembic head/漂移检查通过、33 个时间列均为 `DATETIME(6)`、Markdown 链接与 OpenAPI 稳定性检查通过、Outbox 无未发布或活动锁残留。
+
+### GitHub 与 Phase 2 启动
+
+- 已确认 GitHub CLI 2.96.0 安装于 `C:\Program Files\GitHub CLI\gh.exe`，当前 shell 仅未刷新 PATH。
+- 已拒绝使用聊天中暴露的 fine-grained PAT，并改走 GitHub CLI 官方 OAuth 设备授权。
+- 已创建公开仓库 `wcl1314520/commercevision-agent`，配置 `origin` 并推送 `main`。
+- GitHub OAuth 基础权限缺少 `workflow` scope；改为生成未暴露的 30 天 classic PAT，只授予 `repo`、`workflow`、`read:org`，通过浏览器剪贴板直接写入 Windows keyring并清空剪贴板。
+- 当前仓库单独配置 v2rayN HTTP 代理 `127.0.0.1:10809`，解决 Git HTTPS connection reset，不修改系统或全局 Git 代理。
+- GitHub Actions 首次运行 `29905132767` 全绿：Python、Web、容器构建、Security/SBOM 均成功。
+- 已创建根目录 `CONTEXT.md`，定义 Task Asset、Foundation Asset、Rights Record、ProductBrief、Brand Profile 和 Retrieval Citation 等统一领域术语。
+- 已创建 ADR-006，正式确定任务资产保存 72 小时；基础资产保存至管理员删除或权利到期。
+- 已同步更新数据架构、ADR 索引、文档索引和研究结论。
+- 已生成并锁定 `PLAN.md`，覆盖资产直传隔离、权利、安全校验、商品理解、Brand Profile、增量 Embedding、混合检索、MCP、删除/重建、观测与评测。
+- 已将 GitHub 远程基线、Phase 2 规格、工单、独立上下文实现和最终验收加入持久执行计划。
