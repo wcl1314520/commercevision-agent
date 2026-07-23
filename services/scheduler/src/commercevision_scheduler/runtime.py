@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import socket
-from dataclasses import dataclass
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
 
 from celery import Celery
 from commercevision_application import (
     EventRoutingError,
+    OperationRecoveryService,
     OutboxDispatcher,
     RecoveryService,
     build_event_routing_registry,
@@ -17,7 +21,12 @@ from commercevision_application import (
 from commercevision_contracts import Settings
 from commercevision_contracts.events import EventQueue
 from commercevision_domain.messaging import OutboxEvent
-from commercevision_persistence import Database, SqlAlchemyUnitOfWork, create_database
+from commercevision_persistence import (
+    Database,
+    SqlAlchemyOperationUnitOfWork,
+    SqlAlchemyUnitOfWork,
+    create_database,
+)
 
 
 class CeleryMessagePublisher:
@@ -63,14 +72,149 @@ class CeleryMessagePublisher:
 
 
 @dataclass(slots=True)
+class ScannerStatus:
+    last_started_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_error: str | None = None
+    last_duration_ms: float | None = None
+    last_count: int = 0
+    total_count: int = 0
+    in_progress: bool = False
+    timed_out: bool = False
+    timeout_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ScannerDefinition:
+    name: str
+    interval_seconds: float
+    run_once: Callable[[], int]
+
+
+@dataclass(slots=True)
+class _ScannerRun:
+    scanner: ScannerDefinition
+    started_counter: float
+    completed: Event = field(default_factory=Event)
+    thread: Thread | None = None
+    result: int | None = None
+    error: Exception | None = None
+    timed_out: bool = False
+    completed_counter: float | None = None
+
+
+class IndependentScannerOrchestrator:
+    def __init__(
+        self,
+        *,
+        scanners: tuple[ScannerDefinition, ...],
+        timeout_seconds: float = 30.0,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        names = [scanner.name for scanner in scanners]
+        if len(set(names)) != len(names):
+            raise ValueError("scanner names must be unique")
+        if any(scanner.interval_seconds <= 0 for scanner in scanners):
+            raise ValueError("scanner intervals must be positive")
+        if timeout_seconds <= 0:
+            raise ValueError("scanner timeout must be positive")
+        self._scanners = scanners
+        self._timeout_seconds = timeout_seconds
+        self._monotonic_clock = monotonic_clock
+        self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
+        self._next_due = {scanner.name: 0.0 for scanner in scanners}
+        self.statuses = {scanner.name: ScannerStatus() for scanner in scanners}
+        self._active: dict[str, _ScannerRun] = {}
+
+    def run_due(self) -> None:
+        tick = self._monotonic_clock()
+        self._collect_completed_and_timeouts()
+        for scanner in self._scanners:
+            if tick < self._next_due[scanner.name] or scanner.name in self._active:
+                continue
+            self._start(scanner, tick=tick)
+
+    def _start(self, scanner: ScannerDefinition, *, tick: float) -> None:
+        status = self.statuses[scanner.name]
+        status.last_started_at = self._wall_clock()
+        status.in_progress = True
+        status.timed_out = False
+        run = _ScannerRun(
+            scanner=scanner,
+            started_counter=time.perf_counter(),
+        )
+        run.thread = Thread(
+            target=self._run_scanner,
+            args=(run,),
+            name=f"scanner-{scanner.name}",
+            daemon=True,
+        )
+        self._active[scanner.name] = run
+        self._next_due[scanner.name] = tick + scanner.interval_seconds
+        run.thread.start()
+
+    @staticmethod
+    def _run_scanner(run: _ScannerRun) -> None:
+        try:
+            run.result = run.scanner.run_once()
+        except Exception as exc:
+            run.error = exc
+        finally:
+            run.completed_counter = time.perf_counter()
+            run.completed.set()
+
+    def _collect_completed_and_timeouts(self) -> None:
+        now = time.perf_counter()
+        for name, run in tuple(self._active.items()):
+            elapsed = (run.completed_counter or now) - run.started_counter
+            if not run.timed_out and elapsed >= self._timeout_seconds:
+                self._mark_timed_out(run)
+            if not run.completed.is_set():
+                continue
+            status = self.statuses[name]
+            status.in_progress = False
+            del self._active[name]
+            if run.timed_out:
+                continue
+            status.last_duration_ms = elapsed * 1000
+            if run.error is not None:
+                status.last_error = f"{type(run.error).__name__}: {run.error}"
+            else:
+                count = run.result or 0
+                status.last_success_at = self._wall_clock()
+                status.last_error = None
+                status.last_count = count
+                status.total_count += count
+
+    def _mark_timed_out(self, run: _ScannerRun) -> None:
+        run.timed_out = True
+        status = self.statuses[run.scanner.name]
+        status.timed_out = True
+        status.timeout_count += 1
+        status.last_duration_ms = self._timeout_seconds * 1000
+        status.last_error = f"TimeoutError: scanner exceeded {self._timeout_seconds:.3f} seconds"
+
+
+@dataclass(slots=True)
 class SchedulerState:
     last_dispatch_at: datetime | None = None
     last_recovery_at: datetime | None = None
-    last_error: str | None = None
     published_total: int = 0
     publish_failed_total: int = 0
     recovered_steps_total: int = 0
     recovered_workflows_total: int = 0
+    recovered_operations_total: int = 0
+    scanners: dict[str, ScannerStatus] | None = None
+
+    @property
+    def last_error(self) -> str | None:
+        errors = [
+            f"{name}: {status.last_error}"
+            for name, status in (self.scanners or {}).items()
+            if status.last_error
+        ]
+        return "; ".join(errors) or None
 
 
 class SchedulerRuntime:
@@ -80,6 +224,9 @@ class SchedulerRuntime:
 
         def uow_factory() -> SqlAlchemyUnitOfWork:
             return SqlAlchemyUnitOfWork(self.database.session_factory)
+
+        def operation_uow_factory() -> SqlAlchemyOperationUnitOfWork:
+            return SqlAlchemyOperationUnitOfWork(self.database.session_factory)
 
         owner = f"{socket.gethostname()}:{settings.service_name}"
         self.dispatcher = OutboxDispatcher(
@@ -99,30 +246,59 @@ class SchedulerRuntime:
                 )
             ),
         )
+        self.operation_recovery = OperationRecoveryService(
+            uow_factory=operation_uow_factory,
+            batch_size=settings.scheduler_batch_size,
+            reconciliation_max_elapsed=timedelta(
+                seconds=settings.operation_reconciliation_max_elapsed_seconds
+            ),
+        )
         self.state = SchedulerState()
+        self.orchestrator = IndependentScannerOrchestrator(
+            scanners=(
+                ScannerDefinition(
+                    "outbox_dispatch",
+                    settings.scheduler_poll_seconds,
+                    self._dispatch_once,
+                ),
+                ScannerDefinition(
+                    "workflow_recovery",
+                    settings.scheduler_recovery_interval_seconds,
+                    self._recover_workflows_once,
+                ),
+                ScannerDefinition(
+                    "operation_recovery",
+                    settings.scheduler_operation_recovery_interval_seconds,
+                    self._recover_operations_once,
+                ),
+            ),
+            timeout_seconds=settings.scheduler_scanner_timeout_seconds,
+        )
+        self.state.scanners = self.orchestrator.statuses
 
     async def run(self) -> None:
-        next_recovery = 0.0
-        loop = asyncio.get_running_loop()
         while True:
             await asyncio.sleep(self.settings.scheduler_poll_seconds)
-            try:
-                published, failed = await asyncio.to_thread(self.dispatcher.dispatch_once)
-                self.state.last_dispatch_at = datetime.now(UTC)
-                self.state.published_total += published
-                self.state.publish_failed_total += failed
-                now = loop.time()
-                if now >= next_recovery:
-                    recovered_steps, recovered_workflows = await asyncio.to_thread(
-                        self.recovery.recover_once
-                    )
-                    self.state.last_recovery_at = datetime.now(UTC)
-                    self.state.recovered_steps_total += recovered_steps
-                    self.state.recovered_workflows_total += recovered_workflows
-                    next_recovery = now + self.settings.scheduler_recovery_interval_seconds
-                self.state.last_error = None
-            except Exception as exc:
-                self.state.last_error = f"{type(exc).__name__}: {exc}"
+            await asyncio.to_thread(self.orchestrator.run_due)
+
+    def _dispatch_once(self) -> int:
+        published, failed = self.dispatcher.dispatch_once()
+        self.state.last_dispatch_at = datetime.now(UTC)
+        self.state.published_total += published
+        self.state.publish_failed_total += failed
+        return published
+
+    def _recover_workflows_once(self) -> int:
+        recovered_steps, recovered_workflows = self.recovery.recover_once()
+        self.state.last_recovery_at = datetime.now(UTC)
+        self.state.recovered_steps_total += recovered_steps
+        self.state.recovered_workflows_total += recovered_workflows
+        return recovered_steps + recovered_workflows
+
+    def _recover_operations_once(self) -> int:
+        recovered = self.operation_recovery.recover_once()
+        self.state.recovered_operations_total += recovered
+        return recovered
 
     def close(self) -> None:
         self.database.dispose()

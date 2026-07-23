@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-from commercevision_domain import ApprovalDecision, ApprovalType, WorkflowStatus
+from commercevision_domain import ApprovalDecision, ApprovalType, OperationKind, WorkflowStatus
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel
+
+from .workspace_identity import WorkspaceId
 
 
 class EventQueue(StrEnum):
@@ -51,6 +53,8 @@ class EventType(StrEnum):
     ASSET_DELETE_REQUESTED = "asset.delete.requested"
     ASSET_DELETE_COMPLETED = "asset.delete.completed"
     RECONCILIATION_REQUESTED = "reconciliation.requested"
+    OPERATION_RECOVERY_REQUESTED = "operation.recovery.requested"
+    DEAD_LETTER_REPLAY_RECORDED = "dead-letter.replay.recorded"
 
 
 class CompatibleEventPayload(BaseModel):
@@ -104,6 +108,28 @@ class WorkflowFailedPayload(CompatibleEventPayload):
 
 class WorkflowCancelledPayload(CompatibleEventPayload):
     workflow_id: str = Field(min_length=1, max_length=36)
+
+
+class OperationRecoveryReason(StrEnum):
+    READY_RETRY = "READY_RETRY"
+    EXPIRED_CLAIM = "EXPIRED_CLAIM"
+    UNKNOWN_EXTERNAL_OUTCOME = "UNKNOWN_EXTERNAL_OUTCOME"
+    RECONCILIATION_PENDING = "RECONCILIATION_PENDING"
+
+
+class OperationRecoveryRequestedPayload(CompatibleEventPayload):
+    operation_id: str = Field(min_length=1, max_length=36)
+    workspace_id: WorkspaceId
+    operation_kind: OperationKind
+    recovery_reason: OperationRecoveryReason
+    recovery_generation: int = Field(default=0, ge=0)
+
+
+class DeadLetterReplayRecordedPayload(CompatibleEventPayload):
+    source_dead_letter_id: str = Field(min_length=1, max_length=36)
+    replay_id: str = Field(min_length=1, max_length=36)
+    workspace_id: WorkspaceId
+    replay_attempt: int = Field(ge=1)
 
 
 class PendingPhase2Payload(RootModel[dict[str, JsonValue]]):
@@ -190,6 +216,21 @@ PHASE1_EVENT_CONTRACTS = (
     WORKFLOW_CANCELLED_V1,
 )
 
+OPERATION_RECOVERY_REQUESTED_V1 = EventContract(
+    EventType.OPERATION_RECOVERY_REQUESTED,
+    1,
+    EventQueue.MAINTENANCE,
+    OperationRecoveryRequestedPayload,
+    EventHandling.COMMAND,
+)
+DEAD_LETTER_REPLAY_RECORDED_V1 = EventContract(
+    EventType.DEAD_LETTER_REPLAY_RECORDED,
+    1,
+    EventQueue.MAINTENANCE,
+    DeadLetterReplayRecordedPayload,
+    EventHandling.OBSERVATION,
+)
+
 
 def _phase2_contract(
     event_type: EventType,
@@ -200,6 +241,8 @@ def _phase2_contract(
 
 
 PHASE2_EVENT_CONTRACTS = (
+    OPERATION_RECOVERY_REQUESTED_V1,
+    DEAD_LETTER_REPLAY_RECORDED_V1,
     _phase2_contract(
         EventType.ASSET_UPLOAD_FINALIZED,
         EventQueue.ASSET,

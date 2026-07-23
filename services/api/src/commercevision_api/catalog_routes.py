@@ -16,6 +16,8 @@ from commercevision_contracts import (
 from fastapi import APIRouter, Header, Query, Request, status
 from fastapi.responses import Response
 
+from .workspace_identity import WorkspaceHeader
+
 router = APIRouter(prefix="/api/v1/products", tags=["products"])
 CATALOG_ERROR_RESPONSES = {
     400: {"model": ErrorResponse, "description": "Invalid catalog argument"},
@@ -24,7 +26,6 @@ CATALOG_ERROR_RESPONSES = {
     422: {"model": ErrorResponse, "description": "Catalog validation failed"},
 }
 
-WorkspaceHeader = Annotated[str, Header(alias="X-Workspace-Id", min_length=1, max_length=128)]
 ActorHeader = Annotated[str, Header(alias="X-Actor-Id", min_length=1, max_length=128)]
 IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=256)]
 

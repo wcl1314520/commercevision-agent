@@ -4,9 +4,11 @@ import pytest
 from commercevision_contracts.events import (
     EVENT_CONTRACTS,
     PHASE1_EVENT_CONTRACTS,
+    DeadLetterReplayRecordedPayload,
     EventHandling,
     EventQueue,
     EventType,
+    OperationRecoveryRequestedPayload,
     WorkflowNodeStartedPayload,
     WorkflowRunRequestedPayload,
     event_contract_for,
@@ -108,3 +110,37 @@ def test_workflow_run_payload_accepts_all_existing_phase1_actions() -> None:
             reason="expired_step_lease" if action == "recover" else None,
         )
         assert payload.action == action
+
+
+def test_operation_recovery_contract_is_typed_and_routes_to_maintenance() -> None:
+    contract = event_contract_for(EventType.OPERATION_RECOVERY_REQUESTED, 1)
+
+    payload = contract.validate_payload(
+        {
+            "operation_id": "operation-1",
+            "workspace_id": "workspace-a",
+            "operation_kind": "ASSET_INDEXING",
+            "recovery_reason": "UNKNOWN_EXTERNAL_OUTCOME",
+        }
+    )
+
+    assert isinstance(payload, OperationRecoveryRequestedPayload)
+    assert contract.queue == EventQueue.MAINTENANCE
+    assert contract.handling == EventHandling.COMMAND
+
+
+def test_dead_letter_replay_contract_carries_source_identity_and_attempt() -> None:
+    contract = event_contract_for(EventType.DEAD_LETTER_REPLAY_RECORDED, 1)
+
+    payload = contract.validate_payload(
+        {
+            "source_dead_letter_id": "dead-letter-1",
+            "replay_id": "replay-1",
+            "workspace_id": "workspace-a",
+            "replay_attempt": 2,
+        }
+    )
+
+    assert isinstance(payload, DeadLetterReplayRecordedPayload)
+    assert payload.replay_attempt == 2
+    assert contract.handling == EventHandling.OBSERVATION

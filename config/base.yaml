@@ -15,6 +15,7 @@ workflow_message_max_attempts: 8
 worker_message_retry_initial_seconds: 1
 worker_message_retry_max_seconds: 300
 worker_consumer_name: agent-worker
+worker_readiness_path: /tmp/commercevision-worker-ready.json
 workflow_queue_name: commercevision.workflow
 asset_queue_name: commercevision.asset
 index_queue_name: commercevision.index
@@ -23,6 +24,21 @@ scheduler_poll_seconds: 2
 scheduler_batch_size: 50
 scheduler_lease_seconds: 30
 scheduler_recovery_interval_seconds: 10
+scheduler_operation_recovery_interval_seconds: 10
+scheduler_scanner_timeout_seconds: 30
+operation_retry_initial_seconds: 1
+operation_retry_max_seconds: 300
+operation_retry_max_elapsed_seconds: 86400
+operation_reconciliation_initial_seconds: 2
+operation_reconciliation_max_seconds: 300
+operation_reconciliation_max_elapsed_seconds: 86400
+trusted_principal_current_key_id: null
+trusted_principal_current_hmac_secret: null
+trusted_principal_previous_key_id: null
+trusted_principal_previous_hmac_secret: null
+trusted_principal_max_age_seconds: 300
+trusted_principal_future_skew_seconds: 30
+worker_required_operation_kinds: []
 cors_origins:
   - http://localhost:13000
 scheduler_host: 0.0.0.0

@@ -146,6 +146,7 @@ class DurableNodeLifecycle:
             uow.workflows.save(workflow)
             uow.outbox.add(
                 self._event(
+                    workspace_id=workflow.workspace_id,
                     workflow_id=workflow.id,
                     workflow_version=workflow.version,
                     event_type=EventType.WORKFLOW_NODE_STARTED,
@@ -203,6 +204,7 @@ class DurableNodeLifecycle:
             uow.workflows.save(workflow)
             uow.outbox.add(
                 self._event(
+                    workspace_id=workflow.workspace_id,
                     workflow_id=workflow.id,
                     workflow_version=workflow.version,
                     event_type=EventType.WORKFLOW_NODE_COMPLETED,
@@ -273,6 +275,7 @@ class DurableNodeLifecycle:
             uow.steps.add(step)
             uow.outbox.add(
                 self._event(
+                    workspace_id=workflow.workspace_id,
                     workflow_id=workflow.id,
                     workflow_version=workflow.version,
                     event_type=EventType.WORKFLOW_HUMAN_INPUT_REQUIRED,
@@ -306,6 +309,7 @@ class DurableNodeLifecycle:
                 uow.steps.save(step)
                 uow.outbox.add(
                     self._event(
+                        workspace_id=workflow.workspace_id,
                         workflow_id=workflow.id,
                         workflow_version=workflow.version,
                         event_type=EventType.WORKFLOW_HUMAN_INPUT_RECEIVED,
@@ -423,6 +427,7 @@ class DurableNodeLifecycle:
                 )
                 uow.outbox.add(
                     self._event(
+                        workspace_id=workflow.workspace_id,
                         workflow_id=workflow.id,
                         workflow_version=workflow.version,
                         event_type=EventType.WORKFLOW_RUN_REQUESTED,
@@ -450,6 +455,7 @@ class DurableNodeLifecycle:
                     uow.workflows.save(workflow)
                 uow.outbox.add(
                     self._event(
+                        workspace_id=workflow.workspace_id,
                         workflow_id=workflow.id,
                         workflow_version=workflow.version,
                         event_type=EventType.WORKFLOW_FAILED,
@@ -468,6 +474,7 @@ class DurableNodeLifecycle:
     @staticmethod
     def _event(
         *,
+        workspace_id: str,
         workflow_id: str,
         workflow_version: int,
         event_type: EventType,
@@ -486,4 +493,5 @@ class DurableNodeLifecycle:
                 now=now,
             ),
             available_at=now,
+            workspace_id=workspace_id,
         )

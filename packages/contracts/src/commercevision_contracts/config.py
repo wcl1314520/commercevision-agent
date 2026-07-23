@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from commercevision_domain import OperationKind
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -62,6 +63,8 @@ class Settings(BaseSettings):
     worker_message_retry_max_seconds: float = Field(default=300.0, gt=0, le=86400)
     worker_consumer_name: str = "agent-worker"
     worker_queues: list[str] | None = None
+    worker_required_operation_kinds: list[OperationKind] = Field(default_factory=list)
+    worker_readiness_path: str = "/tmp/commercevision-worker-ready.json"
     workflow_queue_name: str = "commercevision.workflow"
     asset_queue_name: str = "commercevision.asset"
     index_queue_name: str = "commercevision.index"
@@ -70,6 +73,44 @@ class Settings(BaseSettings):
     scheduler_batch_size: int = Field(default=50, ge=1, le=500)
     scheduler_lease_seconds: int = Field(default=30, ge=5, le=300)
     scheduler_recovery_interval_seconds: float = Field(default=10.0, gt=0.5, le=300)
+    scheduler_operation_recovery_interval_seconds: float = Field(
+        default=10.0,
+        gt=0.5,
+        le=300,
+    )
+    scheduler_scanner_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
+    operation_retry_initial_seconds: float = Field(default=1.0, gt=0, le=3600)
+    operation_retry_max_seconds: float = Field(default=300.0, gt=0, le=86400)
+    operation_retry_max_elapsed_seconds: float = Field(default=86400.0, gt=0, le=604800)
+    operation_reconciliation_initial_seconds: float = Field(default=2.0, gt=0, le=3600)
+    operation_reconciliation_max_seconds: float = Field(default=300.0, gt=0, le=86400)
+    operation_reconciliation_max_elapsed_seconds: float = Field(
+        default=86400.0,
+        gt=0,
+        le=604800,
+    )
+    trusted_principal_current_key_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    trusted_principal_current_hmac_secret: SecretStr | None = Field(
+        default=None,
+        min_length=32,
+    )
+    trusted_principal_previous_key_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    trusted_principal_previous_hmac_secret: SecretStr | None = Field(
+        default=None,
+        min_length=32,
+    )
+    trusted_principal_max_age_seconds: int = Field(default=300, ge=30, le=3600)
+    trusted_principal_future_skew_seconds: int = Field(default=30, ge=0, le=300)
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:13000"])
     mcp_transport: Literal["stdio", "sse", "streamable-http"] = "streamable-http"
@@ -80,6 +121,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "worker_consumer_name",
+        "worker_readiness_path",
         "workflow_queue_name",
         "asset_queue_name",
         "index_queue_name",
@@ -106,6 +148,16 @@ class Settings(BaseSettings):
             raise ValueError("worker queue selections must be unique")
         return normalized
 
+    @field_validator("worker_required_operation_kinds")
+    @classmethod
+    def _validate_required_operation_kinds(
+        cls,
+        value: list[OperationKind],
+    ) -> list[OperationKind]:
+        if len(set(value)) != len(value):
+            raise ValueError("required operation kinds must be unique")
+        return value
+
     @model_validator(mode="after")
     def _validate_queue_topology(self) -> Settings:
         logical_queues = (
@@ -125,6 +177,34 @@ class Settings(BaseSettings):
                 )
         if self.worker_message_retry_max_seconds < self.worker_message_retry_initial_seconds:
             raise ValueError("worker message retry maximum must not be below the initial delay")
+        if self.operation_retry_max_seconds < self.operation_retry_initial_seconds:
+            raise ValueError("operation retry maximum must not be below the initial delay")
+        if (
+            self.operation_reconciliation_max_seconds
+            < self.operation_reconciliation_initial_seconds
+        ):
+            raise ValueError("operation reconciliation maximum must not be below the initial delay")
+        if self.environment == "production" and not self.worker_required_operation_kinds:
+            raise ValueError("production requires explicit required operation kinds")
+        current_key_configured = self.trusted_principal_current_key_id is not None
+        current_secret_configured = self.trusted_principal_current_hmac_secret is not None
+        if current_key_configured != current_secret_configured:
+            raise ValueError(
+                "current trusted-principal key id and HMAC secret must be configured together"
+            )
+        previous_key_configured = self.trusted_principal_previous_key_id is not None
+        previous_secret_configured = self.trusted_principal_previous_hmac_secret is not None
+        if previous_key_configured != previous_secret_configured:
+            raise ValueError(
+                "previous trusted-principal key id and HMAC secret must be configured together"
+            )
+        if previous_key_configured and not current_key_configured:
+            raise ValueError("a previous trusted-principal key requires a current key")
+        if (
+            self.trusted_principal_current_key_id is not None
+            and self.trusted_principal_current_key_id == self.trusted_principal_previous_key_id
+        ):
+            raise ValueError("trusted-principal current and previous key ids must be distinct")
         return self
 
     @property

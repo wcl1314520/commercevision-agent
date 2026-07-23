@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from commercevision_contracts import validate_workspace_id
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -20,6 +22,9 @@ class ToolExecutionContext:
     idempotency_key: str
     policy_version: str
     started_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)
 
 
 @dataclass(frozen=True, slots=True)

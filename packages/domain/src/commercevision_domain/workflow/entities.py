@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from commercevision_domain.ids import new_uuid7
+from commercevision_domain.workspace_identity import validate_workspace_id
 
 from .enums import (
     ApprovalDecision,
@@ -47,6 +48,9 @@ class Workflow:
     cancellation_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)
 
     @classmethod
     def create(

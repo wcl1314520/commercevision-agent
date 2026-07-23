@@ -1,6 +1,15 @@
 """Mappings between framework-independent entities and ORM rows."""
 
-from commercevision_domain.messaging import DeadLetterMessage, EventEnvelope, OutboxEvent
+from commercevision_domain.messaging import (
+    DeadLetterMessage,
+    DeadLetterReplay,
+    EventEnvelope,
+    OperationReplayLifecycle,
+    OutboxEvent,
+    ReplayLifecycleState,
+    ReplayPreparationKind,
+    ReplayWorkKind,
+)
 from commercevision_domain.workflow.entities import (
     Approval,
     Workflow,
@@ -20,6 +29,7 @@ from commercevision_domain.workflow.enums import (
 from .models import (
     ApprovalModel,
     DeadLetterMessageModel,
+    DeadLetterReplayModel,
     OutboxEventModel,
     WorkflowAttemptModel,
     WorkflowModel,
@@ -220,6 +230,9 @@ def outbox_to_model(entity: OutboxEvent) -> OutboxEventModel:
         lock_token=entity.lock_token,
         locked_until=entity.locked_until,
         last_error=entity.last_error,
+        workspace_id=entity.workspace_id,
+        source_dead_letter_id=entity.source_dead_letter_id,
+        replay_attempt=entity.replay_attempt,
     )
 
 
@@ -243,6 +256,9 @@ def outbox_from_model(model: OutboxEventModel) -> OutboxEvent:
         lock_token=model.lock_token,
         locked_until=model.locked_until,
         last_error=model.last_error,
+        workspace_id=model.workspace_id,
+        source_dead_letter_id=model.source_dead_letter_id,
+        replay_attempt=model.replay_attempt,
     )
 
 
@@ -259,6 +275,9 @@ def dead_letter_to_model(entity: DeadLetterMessage) -> DeadLetterMessageModel:
         attempt_count=entity.attempt_count,
         original_created_at=entity.original_created_at,
         created_at=entity.created_at,
+        workspace_id=entity.workspace_id,
+        source_dead_letter_id=entity.source_dead_letter_id,
+        replay_attempt=entity.replay_attempt,
     )
 
 
@@ -275,4 +294,57 @@ def dead_letter_from_model(model: DeadLetterMessageModel) -> DeadLetterMessage:
         attempt_count=model.attempt_count,
         original_created_at=model.original_created_at,
         created_at=model.created_at,
+        workspace_id=model.workspace_id,
+        source_dead_letter_id=model.source_dead_letter_id,
+        replay_attempt=model.replay_attempt,
+    )
+
+
+def dead_letter_replay_to_model(entity: DeadLetterReplay) -> DeadLetterReplayModel:
+    return DeadLetterReplayModel(
+        id=entity.id,
+        source_dead_letter_id=entity.source_dead_letter_id,
+        workspace_id=entity.workspace_id,
+        actor_id=entity.actor_id,
+        reason=entity.reason,
+        replayed_at=entity.replayed_at,
+        replay_attempt=entity.replay_attempt,
+        replay_event_id=entity.replay_event_id,
+    )
+
+
+def dead_letter_replay_from_model(model: DeadLetterReplayModel) -> DeadLetterReplay:
+    return DeadLetterReplay(
+        id=model.id,
+        source_dead_letter_id=model.source_dead_letter_id,
+        workspace_id=model.workspace_id,
+        actor_id=model.actor_id,
+        reason=model.reason,
+        replayed_at=model.replayed_at,
+        replay_attempt=model.replay_attempt,
+        replay_event_id=model.replay_event_id,
+    )
+
+
+def operation_replay_lifecycle_from_model(
+    model: DeadLetterReplayModel,
+) -> OperationReplayLifecycle:
+    return OperationReplayLifecycle(
+        source_dead_letter_id=model.source_dead_letter_id,
+        replay_attempt=model.replay_attempt,
+        replay_event_id=model.replay_event_id,
+        workspace_id=model.workspace_id,
+        state=ReplayLifecycleState(model.lifecycle_state),
+        operation_id=model.operation_id,
+        preparation_kind=(
+            ReplayPreparationKind(model.preparation_kind) if model.preparation_kind else None
+        ),
+        work_kind=ReplayWorkKind(model.work_kind) if model.work_kind else None,
+        prepared_at=model.prepared_at,
+        prepared_operation_version=model.prepared_operation_version,
+        claim_token=model.claim_token,
+        claimed_at=model.claimed_at,
+        claimed_operation_version=model.claimed_operation_version,
+        completed_at=model.completed_at,
+        completed_operation_version=model.completed_operation_version,
     )

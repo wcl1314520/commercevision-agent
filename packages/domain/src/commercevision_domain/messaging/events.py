@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 from commercevision_domain.ids import new_uuid7
 from commercevision_domain.workflow.entities import utc_now
 from commercevision_domain.workflow.enums import InboxStatus
+from commercevision_domain.workspace_identity import validate_workspace_id
+
+
+def _require_aware_utc(value: datetime, name: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware UTC")
+    if value.utcoffset() != timedelta(0):
+        raise ValueError(f"{name} must use UTC")
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +68,13 @@ class OutboxEvent:
     lock_token: str | None = None
     locked_until: datetime | None = None
     last_error: str | None = None
+    workspace_id: str | None = None
+    source_dead_letter_id: str | None = None
+    replay_attempt: int = 0
+
+    def __post_init__(self) -> None:
+        if self.workspace_id is not None:
+            validate_workspace_id(self.workspace_id)
 
 
 @dataclass(slots=True)
@@ -90,6 +106,13 @@ class DeadLetterMessage:
     attempt_count: int
     original_created_at: datetime
     created_at: datetime
+    workspace_id: str | None = None
+    source_dead_letter_id: str | None = None
+    replay_attempt: int = 0
+
+    def __post_init__(self) -> None:
+        if self.workspace_id is not None:
+            validate_workspace_id(self.workspace_id)
 
     @classmethod
     def create(
@@ -104,6 +127,9 @@ class DeadLetterMessage:
         original_created_at: datetime,
         error_class: str | None = None,
         error_message: str | None = None,
+        workspace_id: str | None = None,
+        source_dead_letter_id: str | None = None,
+        replay_attempt: int = 0,
         now: datetime | None = None,
     ) -> DeadLetterMessage:
         return cls(
@@ -118,4 +144,90 @@ class DeadLetterMessage:
             attempt_count=attempt_count,
             original_created_at=original_created_at,
             created_at=now or utc_now(),
+            workspace_id=workspace_id,
+            source_dead_letter_id=source_dead_letter_id,
+            replay_attempt=replay_attempt,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class DeadLetterReplay:
+    id: str
+    source_dead_letter_id: str
+    workspace_id: str
+    actor_id: str
+    reason: str
+    replayed_at: datetime
+    replay_attempt: int
+    replay_event_id: str
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        source_dead_letter_id: str,
+        workspace_id: str,
+        actor_id: str,
+        reason: str,
+        replay_attempt: int,
+        replay_event_id: str,
+        now: datetime | None = None,
+    ) -> DeadLetterReplay:
+        if not reason or len(reason) > 512:
+            raise ValueError("dead-letter replay reason must contain 1-512 characters")
+        if replay_attempt < 1:
+            raise ValueError("dead-letter replay attempt must be positive")
+        replayed_at = now or datetime.now(UTC)
+        _require_aware_utc(replayed_at, "replayed_at")
+        return cls(
+            id=new_uuid7(),
+            source_dead_letter_id=source_dead_letter_id,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+            reason=reason,
+            replayed_at=replayed_at,
+            replay_attempt=replay_attempt,
+            replay_event_id=replay_event_id,
+        )
+
+
+class ReplayLifecycleState(StrEnum):
+    RECORDED = "RECORDED"
+    PREPARED = "PREPARED"
+    CLAIMED = "CLAIMED"
+    COMPLETED = "COMPLETED"
+
+
+class ReplayPreparationKind(StrEnum):
+    TERMINAL_OPERATION = "TERMINAL_OPERATION"
+    TRANSPORT = "TRANSPORT"
+
+
+class ReplayWorkKind(StrEnum):
+    EXECUTION = "EXECUTION"
+    RECONCILIATION = "RECONCILIATION"
+
+
+@dataclass(frozen=True, slots=True)
+class OperationReplayLifecycle:
+    source_dead_letter_id: str
+    replay_attempt: int
+    replay_event_id: str
+    workspace_id: str
+    state: ReplayLifecycleState
+    operation_id: str | None
+    preparation_kind: ReplayPreparationKind | None
+    work_kind: ReplayWorkKind | None
+    prepared_at: datetime | None
+    prepared_operation_version: int | None
+    claim_token: str | None
+    claimed_at: datetime | None
+    claimed_operation_version: int | None
+    completed_at: datetime | None
+    completed_operation_version: int | None
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)

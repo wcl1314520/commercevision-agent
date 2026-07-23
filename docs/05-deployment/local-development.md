@@ -116,7 +116,7 @@ Compose 启动时 `migrate` 服务会在 API、Worker 和 Scheduler 之前执行
 4. Secret file source。
 5. `config/base.yaml` 非敏感默认值。
 
-启动时由 Pydantic 校验类型和枚举，未知环境值会拒绝启动。Secret file 默认从容器内 `/run/secrets` 或项目本地 `secrets` 目录读取，也可通过 `CV_SECRETS_DIR` 指定；文件名使用完整 `CV_` 前缀，例如 `CV_OBJECT_STORE_SECRET_KEY`。
+启动时由 Pydantic 校验类型和枚举，未知环境值会拒绝启动。Secret file 默认从容器内 `/run/secrets` 或项目本地 `secrets` 目录读取，也可通过 `CV_SECRETS_DIR` 指定；文件名使用完整 `CV_` 前缀，例如 `CV_OBJECT_STORE_SECRET_KEY`。Trusted Principal 轮换的 Current/Previous HMAC Secret 分别使用 `CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET` 和 `CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET`，Key ID 通过同名环境配置显式绑定；两个配置必须成对且 ID 不得相同。
 
 ## 故障排查
 

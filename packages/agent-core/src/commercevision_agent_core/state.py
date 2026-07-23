@@ -2,6 +2,7 @@
 
 from typing import Any, Literal
 
+from commercevision_contracts import WorkspaceId
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,7 +12,7 @@ class FixtureAgentState(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     workflow_id: str
     workflow_version: int = Field(ge=1)
-    workspace_id: str
+    workspace_id: WorkspaceId
     actor_id: str
     trace_id: str
     input_ref: str | None = None

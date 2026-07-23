@@ -7,12 +7,19 @@ from typing import Any
 
 from commercevision_contracts import ErrorResponse
 from commercevision_domain import (
+    AdminRequiredError,
+    AuthenticationError,
+    AuthorizationError,
     ConcurrencyError,
     DomainError,
     DuplicateExternalIdentifierError,
+    InvalidDataError,
     InvalidTransitionError,
     LeaseConflictError,
     NotFoundError,
+    ReferenceConstraintError,
+    UniqueConstraintError,
+    WorkspaceAccessError,
 )
 from commercevision_domain.workflow.errors import (
     ApprovalConflictError,
@@ -82,12 +89,26 @@ def install_error_handlers(app: FastAPI) -> None:
 
 
 def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
+    if isinstance(exc, AuthenticationError):
+        return 401, "AUTHENTICATION_REQUIRED", "authentication", False
+    if isinstance(exc, WorkspaceAccessError):
+        return 403, "WORKSPACE_ACCESS_DENIED", "authorization", False
+    if isinstance(exc, AdminRequiredError):
+        return 403, "ADMIN_REQUIRED", "authorization", False
+    if isinstance(exc, AuthorizationError):
+        return 403, "AUTHORIZATION_DENIED", "authorization", False
     if isinstance(exc, NotFoundError):
         return 404, "NOT_FOUND", "not_found", False
     if isinstance(exc, IdempotencyConflictError):
         return 409, "IDEMPOTENCY_CONFLICT", "conflict", False
     if isinstance(exc, DuplicateExternalIdentifierError):
         return 409, "DUPLICATE_EXTERNAL_IDENTIFIER", "conflict", False
+    if isinstance(exc, UniqueConstraintError):
+        return 409, "UNIQUE_CONSTRAINT_CONFLICT", "conflict", False
+    if isinstance(exc, ReferenceConstraintError):
+        return 409, "REFERENCE_CONSTRAINT_CONFLICT", "conflict", False
+    if isinstance(exc, InvalidDataError):
+        return 422, "INVALID_DATA", "validation", False
     if isinstance(exc, (ConcurrencyError, ApprovalConflictError)):
         return 409, "VERSION_CONFLICT", "conflict", False
     if isinstance(exc, InvalidTransitionError):

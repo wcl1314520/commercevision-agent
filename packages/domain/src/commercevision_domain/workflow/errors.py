@@ -13,6 +13,22 @@ class ConcurrencyError(DomainError):
     """Optimistic version validation failed."""
 
 
+class DataIntegrityError(DomainError):
+    """Persisted data violates a database-enforced invariant."""
+
+
+class UniqueConstraintError(DataIntegrityError):
+    """A unique logical or physical identity already exists."""
+
+
+class ReferenceConstraintError(DataIntegrityError):
+    """A referenced durable record does not exist or cannot be changed."""
+
+
+class InvalidDataError(DataIntegrityError):
+    """Data is null, malformed, out of range, or violates a check."""
+
+
 class InvalidTransitionError(DomainError):
     """A state transition is not part of the declared state machine."""
 
@@ -35,3 +51,19 @@ class RetryNotReadyError(DomainError):
 
 class RetryExhaustedError(DomainError):
     """A step or message exhausted its retry budget."""
+
+
+class AuthorizationError(DomainError):
+    """The current identity is not permitted to perform the requested action."""
+
+
+class AuthenticationError(AuthorizationError):
+    """No valid trusted principal was supplied."""
+
+
+class WorkspaceAccessError(AuthorizationError):
+    """The principal is not a member of the requested workspace."""
+
+
+class AdminRequiredError(AuthorizationError):
+    """The principal is not an administrator of the requested workspace."""

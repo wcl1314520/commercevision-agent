@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from types import TracebackType
 
-from commercevision_domain import ConcurrencyError
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import enter_unit_of_work, exit_unit_of_work
+from .integrity import classify_database_error, flush_with_integrity_classification
 from .repositories import (
     ApprovalRepository,
     AttemptRepository,
@@ -48,10 +48,18 @@ class SqlAlchemyUnitOfWork:
             raise RuntimeError("unit of work is not active")
         try:
             self.session.commit()
-        except IntegrityError as exc:
+        except DBAPIError as exc:
             self.session.rollback()
-            raise ConcurrencyError("database uniqueness or reference constraint conflict") from exc
+            classified = classify_database_error(exc)
+            if classified is None:
+                raise
+            raise classified from exc
         self._committed = True
+
+    def flush(self) -> None:
+        if self.session is None:
+            raise RuntimeError("unit of work is not active")
+        flush_with_integrity_classification(self.session)
 
     def rollback(self) -> None:
         if self.session is not None:

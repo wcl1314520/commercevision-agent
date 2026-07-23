@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .catalog_routes import router as catalog_router
 from .container import ApiContainer
 from .errors import install_error_handlers
+from .operation_routes import router as operation_router
 from .readiness import probe_dependencies
 from .workflow_routes import router as workflow_router
 
@@ -105,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     api.include_router(catalog_router)
+    api.include_router(operation_router)
     api.include_router(workflow_router)
     return api
 

@@ -51,19 +51,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @scheduler.get("/health/ready")
-    async def readiness(response: Response) -> dict[str, str | int | None]:
+    async def readiness(response: Response) -> dict[str, object]:
         runtime: SchedulerRuntime = scheduler.state.runtime
         ready = runtime.state.last_error is None
         if not ready:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {
+        payload = {
             "status": "ok" if ready else "degraded",
             "last_error": runtime.state.last_error,
             "published_total": runtime.state.published_total,
             "publish_failed_total": runtime.state.publish_failed_total,
             "recovered_steps_total": runtime.state.recovered_steps_total,
             "recovered_workflows_total": runtime.state.recovered_workflows_total,
+            "recovered_operations_total": runtime.state.recovered_operations_total,
+            "scanners": {
+                name: {
+                    "last_started_at": scanner.last_started_at,
+                    "last_success_at": scanner.last_success_at,
+                    "last_error": scanner.last_error,
+                    "last_duration_ms": scanner.last_duration_ms,
+                    "last_count": scanner.last_count,
+                    "total_count": scanner.total_count,
+                    "in_progress": scanner.in_progress,
+                    "timed_out": scanner.timed_out,
+                    "timeout_count": scanner.timeout_count,
+                }
+                for name, scanner in (runtime.state.scanners or {}).items()
+            },
         }
+        return payload
 
     return scheduler
 

@@ -224,6 +224,7 @@ services:
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
+      CV_WORKER_READINESS_PATH: /tmp/commercevision-worker-ready.json
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -236,7 +237,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import pathlib, socket; assert b'celery' in pathlib.Path('/proc/1/cmdline').read_bytes(); socket.create_connection(('rabbitmq', 5672), 3).close()",
+          "import pathlib, socket; assert b'celery' in pathlib.Path('/proc/1/cmdline').read_bytes(); assert pathlib.Path('/tmp/commercevision-worker-ready.json').is_file(); socket.create_connection(('rabbitmq', 5672), 3).close()",
         ]
       interval: 15s
       timeout: 10s

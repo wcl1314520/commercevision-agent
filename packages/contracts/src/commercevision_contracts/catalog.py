@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .workspace_identity import WorkspaceId
+
 
 class CatalogContractV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -79,7 +81,7 @@ class CatalogDeleteRequestV1(CatalogContractV1):
 
 class SKUResponseV1(BaseModel):
     id: str
-    workspace_id: str
+    workspace_id: WorkspaceId
     product_id: str
     source_namespace: str
     external_id: str
@@ -96,7 +98,7 @@ class SKUResponseV1(BaseModel):
 
 class ProductSummaryResponseV1(BaseModel):
     id: str
-    workspace_id: str
+    workspace_id: WorkspaceId
     source_namespace: str
     external_id: str
     source_version: str | None

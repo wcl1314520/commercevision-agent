@@ -2,6 +2,14 @@
 
 from .catalog import SKU, DuplicateExternalIdentifierError, Product
 from .ids import new_uuid7
+from .operations import (
+    DurableOperation,
+    NormalizedOperationError,
+    OperationKind,
+    OperationState,
+    ReconciliationOutcome,
+    normalize_provider_request_id,
+)
 from .workflow.entities import Approval, Workflow, WorkflowAttempt, WorkflowStep
 from .workflow.enums import (
     ApprovalDecision,
@@ -13,32 +21,68 @@ from .workflow.enums import (
     WorkflowStatus,
 )
 from .workflow.errors import (
+    AdminRequiredError,
+    AuthenticationError,
+    AuthorizationError,
     ConcurrencyError,
+    DataIntegrityError,
     DomainError,
+    InvalidDataError,
     InvalidTransitionError,
     LeaseConflictError,
     NotFoundError,
+    ReferenceConstraintError,
+    RetryExhaustedError,
+    RetryNotReadyError,
+    UniqueConstraintError,
+    WorkspaceAccessError,
+)
+from .workspace_identity import (
+    WORKSPACE_ID_MAX_CHARACTERS,
+    WORKSPACE_ID_PATTERN,
+    is_valid_workspace_id,
+    validate_workspace_id,
 )
 
 __all__ = [
     "Approval",
+    "AdminRequiredError",
+    "AuthenticationError",
+    "AuthorizationError",
     "ApprovalDecision",
     "ApprovalType",
     "AttemptStatus",
     "ConcurrencyError",
+    "DataIntegrityError",
     "DomainError",
     "DuplicateExternalIdentifierError",
+    "DurableOperation",
+    "InvalidDataError",
     "InvalidTransitionError",
     "LeaseConflictError",
+    "NormalizedOperationError",
     "NotFoundError",
+    "OperationKind",
+    "OperationState",
     "Product",
+    "ReferenceConstraintError",
     "RetentionStatus",
+    "ReconciliationOutcome",
+    "RetryExhaustedError",
+    "RetryNotReadyError",
     "StepStatus",
     "StepType",
     "SKU",
+    "UniqueConstraintError",
     "Workflow",
     "WorkflowAttempt",
     "WorkflowStatus",
     "WorkflowStep",
+    "WORKSPACE_ID_MAX_CHARACTERS",
+    "WORKSPACE_ID_PATTERN",
+    "WorkspaceAccessError",
+    "is_valid_workspace_id",
     "new_uuid7",
+    "normalize_provider_request_id",
+    "validate_workspace_id",
 ]

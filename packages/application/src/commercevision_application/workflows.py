@@ -29,6 +29,7 @@ from commercevision_domain import (
     NotFoundError,
     Workflow,
     WorkflowStatus,
+    validate_workspace_id,
 )
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 from commercevision_domain.workflow.errors import (
@@ -81,6 +82,7 @@ class WorkflowApplicationService:
         idempotency_key: str,
         trace_id: str,
     ) -> WorkflowResponse:
+        validate_workspace_id(workspace_id)
         scope = f"workflow:create:{workspace_id}"
         key_hash = _key_hash(idempotency_key)
         request_hash = _canonical_hash(request.model_dump(mode="json"))
@@ -419,6 +421,7 @@ class WorkflowApplicationService:
                 now=now,
             ),
             available_at=now,
+            workspace_id=workflow.workspace_id,
         )
 
     @staticmethod

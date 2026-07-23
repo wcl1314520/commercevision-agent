@@ -152,6 +152,16 @@ Browser
 - 公共 Demo 滥用和预算失控。
 - 数据未按期删除。
 
+Scheduler readiness 同时报告 `outbox_dispatch`、`workflow_recovery` 和
+`operation_recovery` 的最近开始、最近成功、最近错误、耗时、最近处理数和累计处理数。
+Scanner 同轮并发启动并受独立超时约束；单个 Scanner 异常或卡住只降低自己的状态，不阻止
+其他 Scanner。状态另外报告 `in_progress`、`timed_out` 和累计超时数。
+
+Celery Worker 在 `WorkController` 启动阶段验证 `worker_required_operation_kinds` 与
+`commercevision.operation_executors` Entry Point。每个 Worker Process 完成 Runtime 和
+Executor 初始化后写入 `CV_WORKER_READINESS_PATH`；容器健康检查要求该标记存在。缺失
+Executor、Factory 加载失败或 Runtime 初始化失败均发生在接收任务前，不依赖首条消息触发。
+
 ## 成本治理
 
 - 每个 Workflow 记录模型和存储成本。
@@ -173,4 +183,3 @@ P1/P2 事故需要：
 - 根因和促成因素。
 - 可验证修复。
 - 后续评测/测试用例。
-

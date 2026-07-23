@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -14,13 +15,22 @@ from commercevision_agent_core import (
 )
 from commercevision_application import (
     DurableNodeLifecycle,
+    DurableOperationWorker,
     EventRoutingError,
     EventRoutingRegistry,
     InboxCoordinator,
+    OperationApplicationService,
+    OperationExecutionBoundary,
+    OperationExecutor,
+    OperationExecutorRegistry,
+    OperationReconciliationPolicy,
+    OperationRetryPolicy,
     build_event_routing_registry,
 )
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
+    DEAD_LETTER_REPLAY_RECORDED_V1,
+    OPERATION_RECOVERY_REQUESTED_V1,
     WORKFLOW_CANCELLED_V1,
     WORKFLOW_FAILED_V1,
     WORKFLOW_HUMAN_INPUT_RECEIVED_V1,
@@ -32,11 +42,12 @@ from commercevision_contracts.events import (
     EventQueue,
     EventType,
 )
-from commercevision_domain import LeaseConflictError, NotFoundError
+from commercevision_domain import LeaseConflictError, NotFoundError, OperationKind
 from commercevision_domain.messaging import OutboxEvent
 from commercevision_persistence import (
     Database,
     MySQLCheckpointSaver,
+    SqlAlchemyOperationUnitOfWork,
     SqlAlchemyUnitOfWork,
     create_database,
     is_unit_of_work_active,
@@ -58,13 +69,30 @@ class WorkerRuntime:
     inbox: InboxCoordinator
     agent: FixtureAgentRuntime
     event_router: EventRoutingRegistry
+    operation_worker: DurableOperationWorker
+    operation_executors: OperationExecutorRegistry
 
     @classmethod
-    def build(cls, settings: Settings) -> WorkerRuntime:
+    def build(
+        cls,
+        settings: Settings,
+        *,
+        operation_executors: Mapping[OperationKind, OperationExecutor] | None = None,
+    ) -> WorkerRuntime:
+        configured_executors = dict(operation_executors or {})
+        missing_executors = set(settings.worker_required_operation_kinds).difference(
+            configured_executors
+        )
+        if missing_executors:
+            missing = ", ".join(sorted(kind.value for kind in missing_executors))
+            raise RuntimeError(f"required operation executors are unavailable: {missing}")
         database = create_database(settings)
 
         def uow_factory() -> SqlAlchemyUnitOfWork:
             return SqlAlchemyUnitOfWork(database.session_factory)
+
+        def operation_uow_factory() -> SqlAlchemyOperationUnitOfWork:
+            return SqlAlchemyOperationUnitOfWork(database.session_factory)
 
         worker_id = f"{socket.gethostname()}:{settings.service_name}"
         lifecycle = DurableNodeLifecycle(
@@ -115,6 +143,35 @@ class WorkerRuntime:
             checkpointer=checkpointer,
             worker_id=worker_id,
         )
+        executor_registry = OperationExecutorRegistry()
+        for kind, executor in configured_executors.items():
+            executor_registry.register(kind=kind, executor=executor)
+        operation_worker = DurableOperationWorker(
+            operations=OperationApplicationService(
+                uow_factory=operation_uow_factory,
+                execution_max_elapsed=timedelta(
+                    seconds=settings.operation_retry_max_elapsed_seconds
+                ),
+            ),
+            execution=OperationExecutionBoundary(
+                executor=executor_registry,
+                transaction_active=is_unit_of_work_active,
+            ),
+            owner=worker_id,
+            lease_duration=timedelta(seconds=settings.workflow_step_lease_seconds),
+            retry_policy=OperationRetryPolicy(
+                initial_delay=timedelta(seconds=settings.operation_retry_initial_seconds),
+                maximum_delay=timedelta(seconds=settings.operation_retry_max_seconds),
+                maximum_elapsed=timedelta(seconds=settings.operation_retry_max_elapsed_seconds),
+            ),
+            reconciliation_policy=OperationReconciliationPolicy(
+                initial_delay=timedelta(seconds=settings.operation_reconciliation_initial_seconds),
+                maximum_delay=timedelta(seconds=settings.operation_reconciliation_max_seconds),
+                maximum_elapsed=timedelta(
+                    seconds=settings.operation_reconciliation_max_elapsed_seconds
+                ),
+            ),
+        )
         runtime = cls(
             database=database,
             settings=settings,
@@ -129,6 +186,8 @@ class WorkerRuntime:
                 retry_max=timedelta(seconds=settings.worker_message_retry_max_seconds),
             ),
             agent=FixtureAgentRuntime(graph, checkpointer),
+            operation_worker=operation_worker,
+            operation_executors=executor_registry,
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
@@ -158,7 +217,27 @@ class WorkerRuntime:
                 contract=contract,
                 handler=runtime._observe_workflow_event,
             )
+        runtime.event_router.register_handler(
+            contract=OPERATION_RECOVERY_REQUESTED_V1,
+            handler=runtime._handle_operation_recovery,
+        )
+        runtime.event_router.register_handler(
+            contract=DEAD_LETTER_REPLAY_RECORDED_V1,
+            handler=runtime._observe_replay_event,
+        )
         return runtime
+
+    def operation_executor_readiness(self) -> dict[str, object]:
+        required = frozenset(self.settings.worker_required_operation_kinds)
+        missing = self.operation_executors.missing(required)
+        return {
+            "ready": not missing,
+            "required_kinds": sorted(kind.value for kind in required),
+            "registered_kinds": sorted(
+                kind.value for kind in self.operation_executors.registered_kinds
+            ),
+            "missing_kinds": sorted(kind.value for kind in missing),
+        }
 
     def process_event(self, event_id: str) -> str:
         claim, event = self.inbox.claim(event_id)
@@ -245,6 +324,13 @@ class WorkerRuntime:
                 event_type=EventType.WORKFLOW_RUN_REQUESTED.value,
                 exclude_event_id=event.envelope.event_id,
             )
+
+    def _handle_operation_recovery(self, event: OutboxEvent) -> None:
+        self.operation_worker.handle_recovery_event(event)
+
+    @staticmethod
+    def _observe_replay_event(_event: OutboxEvent) -> None:
+        """Acknowledge immutable replay audit observations through the Inbox."""
 
     @staticmethod
     def _observe_workflow_event(_event: OutboxEvent) -> None:

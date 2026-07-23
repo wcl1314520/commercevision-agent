@@ -146,6 +146,9 @@ class InboxCoordinator:
                         reason="message retry budget exhausted",
                         attempt_count=raw_claim.delivery_attempt,
                         original_created_at=event.envelope.occurred_at,
+                        workspace_id=event.workspace_id,
+                        source_dead_letter_id=event.source_dead_letter_id,
+                        replay_attempt=event.replay_attempt,
                         now=now,
                     )
                 )
@@ -244,6 +247,9 @@ class InboxCoordinator:
                     original_created_at=event.envelope.occurred_at,
                     error_class=type(error).__name__,
                     error_message=str(error),
+                    workspace_id=event.workspace_id,
+                    source_dead_letter_id=event.source_dead_letter_id,
+                    replay_attempt=event.replay_attempt,
                     now=now,
                 )
             )
@@ -268,6 +274,9 @@ class RecoveryService:
         recovered_workflows = 0
         with self._uow_factory() as uow:
             for step in uow.steps.list_expired_leases(now=now, limit=self._batch_size):
+                workflow = uow.workflows.get(step.workflow_id)
+                if workflow is None:
+                    raise NotFoundError(f"workflow {step.workflow_id} was not found")
                 step.recover_expired_lease(retry_at=now, now=now)
                 uow.steps.save(step)
                 if not uow.outbox.has_unpublished(
@@ -276,6 +285,7 @@ class RecoveryService:
                 ):
                     uow.outbox.add(
                         self._run_event(
+                            workspace_id=workflow.workspace_id,
                             workflow_id=step.workflow_id,
                             workflow_version=step.expected_workflow_version,
                             reason="expired_step_lease",
@@ -295,6 +305,7 @@ class RecoveryService:
                 ):
                     uow.outbox.add(
                         self._run_event(
+                            workspace_id=workflow.workspace_id,
                             workflow_id=workflow.id,
                             workflow_version=workflow.version,
                             reason="stale_workflow",
@@ -308,6 +319,7 @@ class RecoveryService:
     @staticmethod
     def _run_event(
         *,
+        workspace_id: str,
         workflow_id: str,
         workflow_version: int,
         reason: str,
@@ -328,4 +340,5 @@ class RecoveryService:
                 now=now,
             ),
             available_at=now,
+            workspace_id=workspace_id,
         )

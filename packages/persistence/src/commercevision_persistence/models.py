@@ -9,6 +9,9 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
+    CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -24,6 +27,8 @@ from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
+
+from .workspace_identity import exact_string_sql_type, workspace_id_sql_type
 
 MYSQL_DATETIME_FSP = 6
 
@@ -69,7 +74,7 @@ class WorkflowModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)
     workflow_type: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -97,7 +102,7 @@ class CatalogExternalIdentityModel(Base):
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
-    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
     source_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
     owner_type: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -120,7 +125,7 @@ class ProductModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
     source_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
     source_version: Mapped[str | None] = mapped_column(String(128))
@@ -154,7 +159,7 @@ class SKUModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
     product_id: Mapped[str] = mapped_column(String(36), nullable=False)
     source_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -281,7 +286,7 @@ class IdempotencyKeyModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    scope: Mapped[str] = mapped_column(String(160), nullable=False)
+    scope: Mapped[str] = mapped_column(exact_string_sql_type(160), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -295,8 +300,28 @@ class IdempotencyKeyModel(Base):
 class OutboxEventModel(Base):
     __tablename__ = "outbox_events"
     __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_outbox_workspace_id",
+        ),
+        CheckConstraint(
+            "source_dead_letter_id IS NULL OR workspace_id IS NOT NULL",
+            name="ck_outbox_source_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "source_dead_letter_id"],
+            ["dead_letter_messages.workspace_id", "dead_letter_messages.id"],
+            name="fk_outbox_source_dead_letter",
+            ondelete="RESTRICT",
+        ),
         Index("ix_outbox_ready", "published_at", "available_at", "locked_until"),
         Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id", "occurred_at"),
+        Index(
+            "ix_outbox_workspace_source_dead_letter",
+            "workspace_id",
+            "source_dead_letter_id",
+        ),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
@@ -316,6 +341,9 @@ class OutboxEventModel(Base):
     lock_token: Mapped[str | None] = mapped_column(String(36))
     locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_error: Mapped[str | None] = mapped_column(Text)
+    workspace_id: Mapped[str | None] = mapped_column(workspace_id_sql_type())
+    source_dead_letter_id: Mapped[str | None] = mapped_column(String(36))
+    replay_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class InboxMessageModel(Base):
@@ -339,11 +367,146 @@ class InboxMessageModel(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
+class DurableOperationModel(Base):
+    __tablename__ = "durable_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "kind",
+            "target_type",
+            "target_id",
+            "target_version",
+            "input_hash",
+            name="uq_durable_operation_logical",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_durable_operation_workspace_id",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "dead_letter_id"],
+            ["dead_letter_messages.workspace_id", "dead_letter_messages.id"],
+            name="fk_durable_operation_dead_letter",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "replay_source_dead_letter_id"],
+            ["dead_letter_messages.workspace_id", "dead_letter_messages.id"],
+            name="fk_durable_operation_replay_source",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_durable_operation_ready",
+            "state",
+            "next_attempt_at",
+            "next_reconciliation_at",
+            "lease_expires_at",
+        ),
+        Index(
+            "ix_durable_operation_workspace_created",
+            "workspace_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_durable_operation_recovery_scan",
+            "state",
+            "recovery_pending",
+            "updated_at",
+            "id",
+        ),
+        Index(
+            "ix_durable_operation_workspace_dead_letter",
+            "workspace_id",
+            "dead_letter_id",
+        ),
+        Index(
+            "ix_durable_operation_workspace_replay_source",
+            "workspace_id",
+            "replay_source_dead_letter_id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_ref: Mapped[str | None] = mapped_column(String(512))
+    output_ref: Mapped[str | None] = mapped_column(String(512))
+    provider_request_id: Mapped[str | None] = mapped_column(String(256))
+    state: Mapped[str] = mapped_column(String(40), nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    execution_deadline_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    reconciliation_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_reconciliation_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_reconciliation_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reconciliation_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reconciliation_deadline_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reconciliation_required: Mapped[bool] = mapped_column(nullable=False)
+    reconciliation_outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    dead_letter_id: Mapped[str | None] = mapped_column(String(36))
+    replay_source_dead_letter_id: Mapped[str | None] = mapped_column(String(36))
+    replay_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recovery_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recovery_consumed_generation: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    recovery_pending: Mapped[bool | None] = mapped_column(
+        Boolean,
+        Computed("recovery_generation <> recovery_consumed_generation", persisted=True),
+        nullable=True,
+    )
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_category: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    error_retryable: Mapped[bool | None] = mapped_column()
+    error_provider_request_id: Mapped[str | None] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class DeadLetterMessageModel(Base):
     __tablename__ = "dead_letter_messages"
     __table_args__ = (
         UniqueConstraint("consumer", "message_id", name="uq_dead_letter_message"),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_dead_letter_workspace_id",
+        ),
+        CheckConstraint(
+            "source_dead_letter_id IS NULL OR workspace_id IS NOT NULL",
+            name="ck_dead_letter_source_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "source_dead_letter_id"],
+            ["dead_letter_messages.workspace_id", "dead_letter_messages.id"],
+            name="fk_dead_letter_source",
+            ondelete="RESTRICT",
+        ),
         Index("ix_dead_letter_created", "created_at"),
+        Index("ix_dead_letter_workspace_created", "workspace_id", "created_at", "id"),
+        Index(
+            "ix_dead_letter_workspace_source",
+            "workspace_id",
+            "source_dead_letter_id",
+        ),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
@@ -359,6 +522,95 @@ class DeadLetterMessageModel(Base):
     original_created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     replayed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    workspace_id: Mapped[str | None] = mapped_column(workspace_id_sql_type())
+    source_dead_letter_id: Mapped[str | None] = mapped_column(String(36))
+    replay_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class DeadLetterReplayModel(Base):
+    __tablename__ = "dead_letter_replays"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_dead_letter_id",
+            "replay_attempt",
+            name="uq_dead_letter_replay_attempt",
+        ),
+        UniqueConstraint(
+            "replay_event_id",
+            name="uq_dead_letter_replay_event",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "source_dead_letter_id"],
+            ["dead_letter_messages.workspace_id", "dead_letter_messages.id"],
+            name="fk_dead_letter_replay_source",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "replay_event_id"],
+            ["outbox_events.workspace_id", "outbox_events.id"],
+            name="fk_dead_letter_replay_event",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "operation_id"],
+            ["durable_operations.workspace_id", "durable_operations.id"],
+            name="fk_dead_letter_replay_operation",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_dead_letter_replay_source",
+            "source_dead_letter_id",
+            "replayed_at",
+            "id",
+        ),
+        Index(
+            "ix_dead_letter_replay_claim",
+            "operation_id",
+            "lifecycle_state",
+            "claim_token",
+        ),
+        Index(
+            "ix_dead_letter_replay_workspace_source",
+            "workspace_id",
+            "source_dead_letter_id",
+        ),
+        Index(
+            "ix_dead_letter_replay_workspace_event",
+            "workspace_id",
+            "replay_event_id",
+        ),
+        Index(
+            "ix_dead_letter_replay_workspace_operation",
+            "workspace_id",
+            "operation_id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_dead_letter_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason: Mapped[str] = mapped_column(String(512), nullable=False)
+    replayed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    replay_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    replay_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="RECORDED",
+        server_default="RECORDED",
+    )
+    operation_id: Mapped[str | None] = mapped_column(String(36))
+    preparation_kind: Mapped[str | None] = mapped_column(String(24))
+    work_kind: Mapped[str | None] = mapped_column(String(20))
+    prepared_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    prepared_operation_version: Mapped[int | None] = mapped_column(Integer)
+    claim_token: Mapped[str | None] = mapped_column(String(36))
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    claimed_operation_version: Mapped[int | None] = mapped_column(Integer)
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    completed_operation_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class AgentCheckpointModel(Base):
@@ -419,7 +671,7 @@ class AuditEventModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
     actor_type: Mapped[str] = mapped_column(String(32), nullable=False)
     actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
     action: Mapped[str] = mapped_column(String(128), nullable=False)

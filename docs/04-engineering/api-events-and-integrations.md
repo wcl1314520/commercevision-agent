@@ -67,6 +67,45 @@ GET    /api/v1/reference-assets:search
 
 配置发布和删除需要管理员权限与审计。
 
+### Operations
+
+```text
+GET  /api/v1/operations
+GET  /api/v1/operations/{operationId}
+GET  /api/v1/operator/dead-letters
+GET  /api/v1/operator/dead-letters/{deadLetterId}
+POST /api/v1/operator/dead-letters/{deadLetterId}:replay
+GET  /api/v1/operator/legacy-dead-letters
+GET  /api/v1/operator/legacy-dead-letters/{deadLetterId}
+```
+
+- `X-Workspace-Id` 只选择工作区，不承担认证。入口网关必须移除调用方同名 Header，并生成
+  HMAC-SHA256 签名的短期 `X-Trusted-Principal`，包含 Actor、工作区成员关系、工作区管理员
+  授权和系统管理员声明。签名 Secret 缺失、签名无效、过期或授权缺失时 API 关闭式拒绝。
+- Principal Token 格式为 `<key-id>.<base64url-claims>.<hex-signature>`，签名输入包含
+  `key-id` 和 Claims。API 同时验证一个 Current Key 和一个 Previous Key，未知 Key ID
+  即使签名格式正确也关闭式拒绝；滚动轮换完成后必须删除 Previous Key。`actor_id` 在签名
+  身份解析阶段按 Unicode 字符计数并强制为 1–128 个字符，空值或超长值在写审计记录前返回
+  `AUTHENTICATION_REQUIRED`。`workspace_ids` 和 `admin_workspace_ids` 中每个值也必须为
+  匹配 `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$` 的 ASCII Token；Header 和 Claims 中的
+  空白、控制字符、非 ASCII 或超长值分别在路由校验或身份解析阶段稳定拒绝。系统不修剪、
+  折叠大小写或规范化身份，授权、持久化和幂等范围使用完全相同的合法 Token。
+- 这是当前 Phase 2 身份 Adapter seam，不是完整认证系统；生产入口负责先完成真实身份认证。
+- Operation 和死信查询在授权后按工作区限定；已授权工作区中的跨工作区 ID 与不存在 ID 均
+  返回 `NOT_FOUND`，未加入请求工作区则返回 `WORKSPACE_ACCESS_DENIED`。
+- 重放要求 `Idempotency-Key`，返回 `202`，相同请求返回同一不可变重放记录。持久化 Scope
+  使用版本化命名空间、完整 Workspace SHA-256 和可读 Dead Letter ID，固定保持在
+  `idempotency_keys.scope` 的 160 字符上限内。Dead Letter 路径只接受带连字符的 ASCII
+  UUID；大写十六进制输入在 HTTP 和 Application 边界规范化为小写后才允许进入数据库查询，
+  查询还使用二进制比较。重音、NFC/NFD、全角、零宽、空白或额外字符别名与跨工作区查询均
+  返回相同的 `NOT_FOUND` 语义。同一 UUID 的大小写变体因此命中同一重放和幂等 Scope。
+- 死信详情通过 `child_limit`/`child_cursor` 返回直接子死信和
+  `child_dead_letters_next_cursor`。调用方逐层读取即可完整遍历任意深度和宽度的重放失败
+  链，服务端不会用隐式深度或总行数上限截断。同一详情通过独立的
+  `replay_limit`/`replay_cursor` 和 `replays_next_cursor` 分页读取不可变重放尝试。
+  无法回填工作区的历史死信只允许系统管理员通过 Legacy API 读取；Legacy API 不提供重放。
+- 列表使用最大 100 条的稳定游标分页。
+
 ### Export
 
 ```text
@@ -148,6 +187,12 @@ Phase 1 已发布的 v1 契约全部路由至 Workflow Queue：
 
 未知事件类型、已知事件的不支持版本、未绑定处理器和格式错误的 Payload 都先发布至
 Maintenance Queue，再由 Worker 记录为永久失败并写入 DLQ；不会静默成功。
+
+Operation Recovery 和 Dead-letter Replay 使用版本化 v1 Payload。Recovery Payload 包含
+Operation、Workspace、Kind、恢复原因和单调递增的 `recovery_generation`；该代次从事件
+创建持续占用至 Worker 成功消费，发布完成本身不释放。Replay Payload 包含源死信、重放
+记录、Workspace 和重放序号。新建 Outbox 事件携带内部 Workspace 归属元数据，使永久失败
+可被工作区隔离的 Operator API 查询；该元数据不改变版本化事件 Envelope。
 
 ## Webhook
 

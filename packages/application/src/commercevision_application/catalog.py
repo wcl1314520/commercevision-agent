@@ -25,6 +25,7 @@ from commercevision_domain import (
     ConcurrencyError,
     NotFoundError,
     Product,
+    validate_workspace_id,
 )
 from commercevision_domain.workflow.errors import IdempotencyConflictError
 
@@ -96,6 +97,7 @@ class CatalogApplicationService:
         idempotency_key: str,
         trace_id: str,
     ) -> ProductResponseV1:
+        validate_workspace_id(workspace_id)
         scope = _scope("product-create", workspace_id)
         key_hash = _key_hash(idempotency_key)
         request_hash = _canonical_hash(request.model_dump(mode="json"))

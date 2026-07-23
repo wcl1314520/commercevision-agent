@@ -13,9 +13,10 @@ from commercevision_contracts.workflow import (
 from commercevision_domain import ApprovalDecision, ApprovalType
 from fastapi import APIRouter, Header, Query, Request, status
 
+from .workspace_identity import WorkspaceHeader
+
 router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
 
-WorkspaceHeader = Annotated[str, Header(alias="X-Workspace-Id", min_length=1, max_length=128)]
 ActorHeader = Annotated[str, Header(alias="X-Actor-Id", min_length=1, max_length=128)]
 IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=256)]
 

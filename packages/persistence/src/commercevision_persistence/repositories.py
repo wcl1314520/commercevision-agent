@@ -8,7 +8,15 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from commercevision_domain import ConcurrencyError, LeaseConflictError, new_uuid7
-from commercevision_domain.messaging import DeadLetterMessage, OutboxEvent
+from commercevision_domain.messaging import (
+    DeadLetterMessage,
+    DeadLetterReplay,
+    OperationReplayLifecycle,
+    OutboxEvent,
+    ReplayLifecycleState,
+    ReplayPreparationKind,
+    ReplayWorkKind,
+)
 from commercevision_domain.workflow.entities import (
     Approval,
     Workflow,
@@ -20,13 +28,20 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.orm import Session
 
+from .integrity import (
+    execute_with_integrity_classification,
+    flush_with_integrity_classification,
+)
 from .mappers import (
     approval_from_model,
     approval_to_model,
     attempt_from_model,
     attempt_to_model,
     dead_letter_from_model,
+    dead_letter_replay_from_model,
+    dead_letter_replay_to_model,
     dead_letter_to_model,
+    operation_replay_lifecycle_from_model,
     outbox_from_model,
     outbox_to_model,
     step_from_model,
@@ -38,6 +53,7 @@ from .models import (
     ApprovalModel,
     AuditEventModel,
     DeadLetterMessageModel,
+    DeadLetterReplayModel,
     IdempotencyKeyModel,
     InboxMessageModel,
     OutboxEventModel,
@@ -100,7 +116,8 @@ class WorkflowRepository:
         if original_version is None:
             raise ConcurrencyError(f"workflow {workflow.id} was not loaded by this unit of work")
         values = workflow_to_model(workflow)
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(WorkflowModel)
             .where(
                 WorkflowModel.id == workflow.id,
@@ -116,7 +133,7 @@ class WorkflowRepository:
                 expires_at=values.expires_at,
                 cancellation_requested_at=values.cancellation_requested_at,
                 updated_at=values.updated_at,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"workflow {workflow.id} was concurrently modified")
@@ -215,7 +232,8 @@ class StepRepository:
         if original_version is None:
             raise ConcurrencyError(f"step {step.id} was not loaded by this unit of work")
         values = step_to_model(step)
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(WorkflowStepModel)
             .where(
                 WorkflowStepModel.id == step.id,
@@ -240,7 +258,7 @@ class StepRepository:
                 completed_at=values.completed_at,
                 updated_at=values.updated_at,
                 version=values.version,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"step {step.id} was concurrently modified")
@@ -314,7 +332,8 @@ class AttemptRepository:
         if original_version is None:
             raise ConcurrencyError(f"attempt {attempt.id} was not loaded by this unit of work")
         values = attempt_to_model(attempt)
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(WorkflowAttemptModel)
             .where(
                 WorkflowAttemptModel.id == attempt.id,
@@ -331,7 +350,7 @@ class AttemptRepository:
                 started_at=values.started_at,
                 completed_at=values.completed_at,
                 version=values.version,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"attempt {attempt.id} was concurrently modified")
@@ -444,7 +463,7 @@ class IdempotencyRepository:
             expires_at=expires_at,
         )
         statement = statement.on_duplicate_key_update(scope=statement.inserted.scope)
-        self.session.execute(statement)
+        execute_with_integrity_classification(self.session, statement)
         record = self.get(scope, key_hash, for_update=True)
         if record is None:
             raise ConcurrencyError("idempotency claim disappeared before serialization")
@@ -460,7 +479,8 @@ class IdempotencyRepository:
         resource_id: str,
         response_data: dict[str, Any],
     ) -> None:
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(IdempotencyKeyModel)
             .where(
                 IdempotencyKeyModel.scope == scope,
@@ -472,7 +492,7 @@ class IdempotencyRepository:
                 resource_id=resource_id,
                 response_json=response_data,
                 status="COMPLETED",
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError("idempotency claim was not completed")
@@ -521,11 +541,12 @@ class OutboxRepository:
             model.lock_token = new_uuid7()
             model.locked_until = now + lease_duration
             model.publish_attempts += 1
-        self.session.flush()
+        flush_with_integrity_classification(self.session)
         return [outbox_from_model(model) for model in models]
 
     def mark_published(self, event_id: str, lock_token: str, *, now: datetime) -> None:
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(OutboxEventModel)
             .where(
                 OutboxEventModel.id == event_id,
@@ -538,7 +559,7 @@ class OutboxRepository:
                 lock_token=None,
                 locked_until=None,
                 last_error=None,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise LeaseConflictError(f"outbox event {event_id} lease does not match")
@@ -551,7 +572,8 @@ class OutboxRepository:
         available_at: datetime,
         error_message: str,
     ) -> None:
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(OutboxEventModel)
             .where(
                 OutboxEventModel.id == event_id,
@@ -564,7 +586,7 @@ class OutboxRepository:
                 lock_token=None,
                 locked_until=None,
                 last_error=error_message[:4000],
-            )
+            ),
         )
         if result.rowcount != 1:
             raise LeaseConflictError(f"outbox event {event_id} lease does not match")
@@ -576,7 +598,8 @@ class OutboxRepository:
         available_at: datetime,
         error_message: str,
     ) -> None:
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(OutboxEventModel)
             .where(OutboxEventModel.id == event_id)
             .values(
@@ -586,7 +609,7 @@ class OutboxRepository:
                 lock_token=None,
                 locked_until=None,
                 last_error=error_message[:4000],
-            )
+            ),
         )
         if result.rowcount != 1:
             raise LeaseConflictError(f"outbox event {event_id} was not available for retry")
@@ -756,7 +779,8 @@ class InboxRepository:
         error_class: str | None,
         error_message: str | None,
     ) -> None:
-        result = self.session.execute(
+        result = execute_with_integrity_classification(
+            self.session,
             update(InboxMessageModel)
             .where(
                 InboxMessageModel.consumer == consumer,
@@ -773,7 +797,7 @@ class InboxRepository:
                 error_class=error_class,
                 error_message=(error_message[:4000] if error_message else None),
                 updated_at=now,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise LeaseConflictError(f"inbox message {consumer}/{message_id} lease does not match")
@@ -801,6 +825,312 @@ class DeadLetterRepository:
             )
         )
         return dead_letter_from_model(model) if model else None
+
+    def get_by_id(
+        self,
+        *,
+        workspace_id: str,
+        dead_letter_id: str,
+        for_update: bool = False,
+    ) -> DeadLetterMessage | None:
+        statement = select(DeadLetterMessageModel).where(
+            DeadLetterMessageModel.id.collate("utf8mb4_0900_bin") == dead_letter_id,
+            DeadLetterMessageModel.workspace_id == workspace_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        model = self.session.scalar(statement)
+        return dead_letter_from_model(model) if model else None
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+    ) -> list[DeadLetterMessage]:
+        statement = select(DeadLetterMessageModel).where(
+            DeadLetterMessageModel.workspace_id == workspace_id
+        )
+        if cursor is not None:
+            created_at, dead_letter_id = cursor
+            statement = statement.where(
+                or_(
+                    DeadLetterMessageModel.created_at < created_at,
+                    and_(
+                        DeadLetterMessageModel.created_at == created_at,
+                        DeadLetterMessageModel.id < dead_letter_id,
+                    ),
+                )
+            )
+        models = list(
+            self.session.scalars(
+                statement.order_by(
+                    DeadLetterMessageModel.created_at.desc(),
+                    DeadLetterMessageModel.id.desc(),
+                ).limit(limit)
+            )
+        )
+        return [dead_letter_from_model(model) for model in models]
+
+    def add_replay(self, replay: DeadLetterReplay) -> None:
+        self.session.add(dead_letter_replay_to_model(replay))
+
+    def get_replay(self, replay_id: str) -> DeadLetterReplay | None:
+        model = self.session.get(DeadLetterReplayModel, replay_id)
+        return dead_letter_replay_from_model(model) if model else None
+
+    def get_replay_lifecycle(
+        self,
+        *,
+        source_dead_letter_id: str,
+        replay_attempt: int,
+        replay_event_id: str,
+        workspace_id: str,
+        for_update: bool = False,
+    ) -> OperationReplayLifecycle | None:
+        statement = select(DeadLetterReplayModel).where(
+            DeadLetterReplayModel.source_dead_letter_id == source_dead_letter_id,
+            DeadLetterReplayModel.replay_attempt == replay_attempt,
+            DeadLetterReplayModel.replay_event_id == replay_event_id,
+            DeadLetterReplayModel.workspace_id == workspace_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        model = self.session.scalar(statement)
+        return operation_replay_lifecycle_from_model(model) if model else None
+
+    def mark_replay_prepared(
+        self,
+        *,
+        replay_event_id: str,
+        operation_id: str,
+        preparation_kind: ReplayPreparationKind,
+        work_kind: ReplayWorkKind,
+        prepared_operation_version: int,
+        prepared_at: datetime,
+        completed: bool,
+    ) -> None:
+        state = ReplayLifecycleState.COMPLETED if completed else ReplayLifecycleState.PREPARED
+        result = execute_with_integrity_classification(
+            self.session,
+            update(DeadLetterReplayModel)
+            .where(
+                DeadLetterReplayModel.replay_event_id == replay_event_id,
+                DeadLetterReplayModel.lifecycle_state == ReplayLifecycleState.RECORDED.value,
+            )
+            .values(
+                lifecycle_state=state.value,
+                operation_id=operation_id,
+                preparation_kind=preparation_kind.value,
+                work_kind=work_kind.value,
+                prepared_at=prepared_at,
+                prepared_operation_version=prepared_operation_version,
+                completed_at=prepared_at if completed else None,
+                completed_operation_version=prepared_operation_version if completed else None,
+            ),
+        )
+        self._require_replay_transition(result.rowcount, replay_event_id, "prepare")
+
+    def mark_replay_claimed(
+        self,
+        *,
+        replay_event_id: str,
+        operation_id: str,
+        claim_token: str,
+        claimed_operation_version: int,
+        claimed_at: datetime,
+    ) -> None:
+        result = execute_with_integrity_classification(
+            self.session,
+            update(DeadLetterReplayModel)
+            .where(
+                DeadLetterReplayModel.replay_event_id == replay_event_id,
+                DeadLetterReplayModel.operation_id == operation_id,
+                DeadLetterReplayModel.lifecycle_state == ReplayLifecycleState.PREPARED.value,
+            )
+            .values(
+                lifecycle_state=ReplayLifecycleState.CLAIMED.value,
+                claim_token=claim_token,
+                claimed_at=claimed_at,
+                claimed_operation_version=claimed_operation_version,
+            ),
+        )
+        self._require_replay_transition(result.rowcount, replay_event_id, "claim")
+
+    def mark_replay_completed(
+        self,
+        *,
+        replay_event_id: str,
+        operation_id: str,
+        completed_operation_version: int,
+        completed_at: datetime,
+        expected_state: ReplayLifecycleState,
+        claim_token: str | None = None,
+    ) -> None:
+        conditions = [
+            DeadLetterReplayModel.replay_event_id == replay_event_id,
+            DeadLetterReplayModel.operation_id == operation_id,
+            DeadLetterReplayModel.lifecycle_state == expected_state.value,
+        ]
+        if expected_state == ReplayLifecycleState.CLAIMED:
+            conditions.append(DeadLetterReplayModel.claim_token == claim_token)
+        result = execute_with_integrity_classification(
+            self.session,
+            update(DeadLetterReplayModel)
+            .where(*conditions)
+            .values(
+                lifecycle_state=ReplayLifecycleState.COMPLETED.value,
+                claim_token=None,
+                completed_at=completed_at,
+                completed_operation_version=completed_operation_version,
+            ),
+        )
+        self._require_replay_transition(result.rowcount, replay_event_id, "complete")
+
+    def complete_claimed_replays(
+        self,
+        *,
+        operation_id: str,
+        claim_token: str,
+        completed_operation_version: int,
+        completed_at: datetime,
+    ) -> int:
+        result = execute_with_integrity_classification(
+            self.session,
+            update(DeadLetterReplayModel)
+            .where(
+                DeadLetterReplayModel.operation_id == operation_id,
+                DeadLetterReplayModel.lifecycle_state == ReplayLifecycleState.CLAIMED.value,
+                DeadLetterReplayModel.claim_token == claim_token,
+            )
+            .values(
+                lifecycle_state=ReplayLifecycleState.COMPLETED.value,
+                claim_token=None,
+                completed_at=completed_at,
+                completed_operation_version=completed_operation_version,
+            ),
+        )
+        return result.rowcount
+
+    @staticmethod
+    def _require_replay_transition(
+        rowcount: int,
+        replay_event_id: str,
+        action: str,
+    ) -> None:
+        if rowcount != 1:
+            raise ConcurrencyError(
+                f"replay event {replay_event_id} could not {action} from its expected state"
+            )
+
+    def list_replays(
+        self,
+        *,
+        source_dead_letter_id: str,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+    ) -> list[DeadLetterReplay]:
+        statement = select(DeadLetterReplayModel).where(
+            DeadLetterReplayModel.source_dead_letter_id == source_dead_letter_id
+        )
+        if cursor is not None:
+            replayed_at, replay_id = cursor
+            statement = statement.where(
+                or_(
+                    DeadLetterReplayModel.replayed_at > replayed_at,
+                    and_(
+                        DeadLetterReplayModel.replayed_at == replayed_at,
+                        DeadLetterReplayModel.id > replay_id,
+                    ),
+                )
+            )
+        models = self.session.scalars(
+            statement.order_by(
+                DeadLetterReplayModel.replayed_at,
+                DeadLetterReplayModel.id,
+            ).limit(limit)
+        )
+        return [dead_letter_replay_from_model(model) for model in models]
+
+    def list_children(
+        self,
+        *,
+        source_dead_letter_id: str,
+        workspace_id: str | None,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+    ) -> list[DeadLetterMessage]:
+        statement = select(DeadLetterMessageModel).where(
+            DeadLetterMessageModel.source_dead_letter_id == source_dead_letter_id
+        )
+        if workspace_id is None:
+            statement = statement.where(DeadLetterMessageModel.workspace_id.is_(None))
+        else:
+            statement = statement.where(DeadLetterMessageModel.workspace_id == workspace_id)
+        if cursor is not None:
+            created_at, dead_letter_id = cursor
+            statement = statement.where(
+                or_(
+                    DeadLetterMessageModel.created_at > created_at,
+                    and_(
+                        DeadLetterMessageModel.created_at == created_at,
+                        DeadLetterMessageModel.id > dead_letter_id,
+                    ),
+                )
+            )
+        models = self.session.scalars(
+            statement.order_by(
+                DeadLetterMessageModel.created_at,
+                DeadLetterMessageModel.id,
+            ).limit(limit)
+        )
+        return [dead_letter_from_model(model) for model in models]
+
+    def get_legacy(self, *, dead_letter_id: str) -> DeadLetterMessage | None:
+        model = self.session.scalar(
+            select(DeadLetterMessageModel).where(
+                DeadLetterMessageModel.id.collate("utf8mb4_0900_bin") == dead_letter_id,
+                DeadLetterMessageModel.workspace_id.is_(None),
+            )
+        )
+        return dead_letter_from_model(model) if model else None
+
+    def list_legacy(
+        self,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None,
+    ) -> list[DeadLetterMessage]:
+        statement = select(DeadLetterMessageModel).where(
+            DeadLetterMessageModel.workspace_id.is_(None)
+        )
+        if cursor is not None:
+            created_at, dead_letter_id = cursor
+            statement = statement.where(
+                or_(
+                    DeadLetterMessageModel.created_at < created_at,
+                    and_(
+                        DeadLetterMessageModel.created_at == created_at,
+                        DeadLetterMessageModel.id < dead_letter_id,
+                    ),
+                )
+            )
+        models = self.session.scalars(
+            statement.order_by(
+                DeadLetterMessageModel.created_at.desc(),
+                DeadLetterMessageModel.id.desc(),
+            ).limit(limit)
+        )
+        return [dead_letter_from_model(model) for model in models]
+
+    def next_replay_attempt(self, source_dead_letter_id: str) -> int:
+        current = self.session.scalar(
+            select(func.max(DeadLetterReplayModel.replay_attempt)).where(
+                DeadLetterReplayModel.source_dead_letter_id == source_dead_letter_id
+            )
+        )
+        return (current or 0) + 1
 
 
 class AuditRepository:

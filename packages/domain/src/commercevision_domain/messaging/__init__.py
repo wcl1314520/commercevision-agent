@@ -1,5 +1,25 @@
 """Reliable messaging domain objects."""
 
-from .events import DeadLetterMessage, EventEnvelope, InboxMessage, OutboxEvent
+from .events import (
+    DeadLetterMessage,
+    DeadLetterReplay,
+    EventEnvelope,
+    InboxMessage,
+    OperationReplayLifecycle,
+    OutboxEvent,
+    ReplayLifecycleState,
+    ReplayPreparationKind,
+    ReplayWorkKind,
+)
 
-__all__ = ["DeadLetterMessage", "EventEnvelope", "InboxMessage", "OutboxEvent"]
+__all__ = [
+    "DeadLetterMessage",
+    "DeadLetterReplay",
+    "EventEnvelope",
+    "InboxMessage",
+    "OperationReplayLifecycle",
+    "OutboxEvent",
+    "ReplayLifecycleState",
+    "ReplayPreparationKind",
+    "ReplayWorkKind",
+]

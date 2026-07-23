@@ -17,6 +17,7 @@ from commercevision_domain import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from .events import WorkflowResumeRequestedPayload
+from .workspace_identity import WorkspaceId
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -89,7 +90,7 @@ class ApprovalResponse(BaseModel):
 
 class WorkflowResponse(BaseModel):
     id: str
-    workspace_id: str
+    workspace_id: WorkspaceId
     created_by: str
     workflow_type: str
     status: WorkflowStatus

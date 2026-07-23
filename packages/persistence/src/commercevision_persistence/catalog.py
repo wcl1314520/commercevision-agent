@@ -10,14 +10,34 @@ from commercevision_domain import (
     ConcurrencyError,
     DuplicateExternalIdentifierError,
     Product,
+    UniqueConstraintError,
 )
 from sqlalchemy import and_, delete, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import enter_unit_of_work, exit_unit_of_work
+from .integrity import (
+    classify_database_error,
+    database_constraint_name,
+    execute_with_integrity_classification,
+)
 from .models import CatalogExternalIdentityModel, ProductModel, SKUModel
 from .repositories import AuditRepository, IdempotencyRepository
+
+_CATALOG_EXTERNAL_IDENTITY_CONSTRAINTS = {
+    "catalog_external_identities.primary",
+    "pk_catalog_external_identity",
+    "uq_products_external_identity",
+    "uq_skus_external_identity",
+}
+
+
+def _is_external_identity_constraint(constraint_name: str) -> bool:
+    return any(
+        constraint_name == expected or constraint_name.endswith(f".{expected}")
+        for expected in _CATALOG_EXTERNAL_IDENTITY_CONSTRAINTS
+    )
 
 
 def _product_from_model(model: ProductModel) -> Product:
@@ -153,7 +173,8 @@ class ProductRepository:
         original_version = self._loaded_versions.get(product.id)
         if original_version is None:
             raise ConcurrencyError(f"product {product.id} was not loaded by this transaction")
-        result = self._session.execute(
+        result = execute_with_integrity_classification(
+            self._session,
             update(ProductModel)
             .where(
                 ProductModel.workspace_id == product.workspace_id,
@@ -169,19 +190,20 @@ class ProductRepository:
                 expires_at=product.expires_at,
                 version=product.version,
                 updated_at=product.updated_at,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"product {product.id} was concurrently modified")
         self._loaded_versions[product.id] = product.version
 
     def delete(self, *, workspace_id: str, product_id: str, expected_version: int) -> None:
-        result = self._session.execute(
+        result = execute_with_integrity_classification(
+            self._session,
             delete(ProductModel).where(
                 ProductModel.workspace_id == workspace_id,
                 ProductModel.id == product_id,
                 ProductModel.version == expected_version,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"product {product_id} was concurrently modified")
@@ -279,7 +301,8 @@ class SKURepository:
         original_version = self._loaded_versions.get(sku.id)
         if original_version is None:
             raise ConcurrencyError(f"sku {sku.id} was not loaded by this transaction")
-        result = self._session.execute(
+        result = execute_with_integrity_classification(
+            self._session,
             update(SKUModel)
             .where(
                 SKUModel.workspace_id == sku.workspace_id,
@@ -296,7 +319,7 @@ class SKURepository:
                 expires_at=sku.expires_at,
                 version=sku.version,
                 updated_at=sku.updated_at,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"sku {sku.id} was concurrently modified")
@@ -310,13 +333,14 @@ class SKURepository:
         sku_id: str,
         expected_version: int,
     ) -> None:
-        result = self._session.execute(
+        result = execute_with_integrity_classification(
+            self._session,
             delete(SKUModel).where(
                 SKUModel.workspace_id == workspace_id,
                 SKUModel.product_id == product_id,
                 SKUModel.id == sku_id,
                 SKUModel.version == expected_version,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError(f"sku {sku_id} was concurrently modified")
@@ -367,14 +391,15 @@ class CatalogIdentityRepository:
         owner_type: str,
         owner_id: str,
     ) -> None:
-        result = self._session.execute(
+        result = execute_with_integrity_classification(
+            self._session,
             delete(CatalogExternalIdentityModel).where(
                 CatalogExternalIdentityModel.workspace_id == workspace_id,
                 CatalogExternalIdentityModel.source_namespace == source_namespace,
                 CatalogExternalIdentityModel.external_id == external_id,
                 CatalogExternalIdentityModel.owner_type == owner_type,
                 CatalogExternalIdentityModel.owner_id == owner_id,
-            )
+            ),
         )
         if result.rowcount != 1:
             raise ConcurrencyError("catalog external identity reservation was not found")
@@ -402,18 +427,18 @@ class SqlAlchemyCatalogUnitOfWork:
             raise RuntimeError("catalog unit of work is not active")
         try:
             self._session.commit()
-        except IntegrityError as exc:
+        except DBAPIError as exc:
             self._session.rollback()
-            constraint_text = str(exc.orig)
-            if (
-                "uq_products_external_identity" in constraint_text
-                or "uq_skus_external_identity" in constraint_text
-                or "PRIMARY" in constraint_text
+            classified = classify_database_error(exc)
+            if isinstance(classified, UniqueConstraintError) and (
+                _is_external_identity_constraint(database_constraint_name(exc))
             ):
                 raise DuplicateExternalIdentifierError(
                     "external identifier already exists in this workspace and source namespace"
                 ) from exc
-            raise ConcurrencyError("catalog transaction constraint conflict") from exc
+            if classified is None:
+                raise
+            raise classified from exc
         self._committed = True
 
     def __exit__(
