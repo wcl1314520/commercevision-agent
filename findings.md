@@ -122,3 +122,7 @@
 - MySQL 中文与混合语言 FULLTEXT 采用并验证 ngram parser；原始 cosine 与 FULLTEXT 分数不直接相加。
 - MCP 是入站 Adapter，调用 Catalog、Product Understanding、Brand Profile 和 Retrieval 应用接口，不直接访问 SQL、MinIO 或 Milvus。
 - 评测除 UnauthorizedRecall@K 外还必须报告 `unauthorized_return_count` 和 `queries_with_unauthorized`，三者都必须为 0。
+- 2026-07-23 的 `pnpm audit --audit-level=moderate` 发现 Next.js 15.5.20 已落入多个已修复安全公告区间；15.5.21 是同一维护线的修复版本，因此将框架与 `eslint-config-next` 同步精确升级，并保持为独立安全维护提交，不混入 Ticket 02 的 Durable Operation 变更。
+- Durable Operation 的回放不能从聚合版本偏移推导状态；回放准备、认领和完成必须使用显式持久状态，才能在并发、红elivery 和崩溃恢复后确定收敛。
+- Workspace 是跨 HTTP、领域、MySQL 和事件链的安全身份，采用 1–128 字符 ASCII token、binary-exact 存储和复合所有权外键；任何模糊排序规则或迁移时 trim 都可能把数据错误归属给另一个 Workspace。
+- 外部 ID（包括 dead-letter UUID）必须在数据库查找前严格解析并 canonicalize；不能依赖 MySQL 大小写或重音不敏感排序规则代替输入验证。

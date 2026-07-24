@@ -95,7 +95,9 @@
 - 不跨 Ticket 复用隐式上下文
 - Ticket 01 已完成独立上下文实现、主控双轴审查和全量门禁；当前提交为 `088203f`。
 - Ticket 03 已完成独立上下文实现、主控双轴审查和全量门禁；当前提交为 `856f57b`。
-- 下一步进入已解除阻塞的 Ticket 02，仍保持单 Ticket、单独立上下文、单独提交。
+- Ticket 02 已完成独立上下文实现、反复对抗审查和全量门禁；最终单一实现提交为 `9b88493`。
+- Next.js 15.5.21 安全维护作为独立提交 `083004d` 落地，不混入 Ticket 02 的业务实现。
+- 下一步进入已由 Ticket 02 与 Ticket 03 共同解除阻塞的 Ticket 04，仍保持单 Ticket、单独立上下文、单独提交。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending
@@ -183,3 +185,11 @@
 | 2026-07-22 | 恢复 Phase 2 时 `.scratch/phase-2-assets-retrieval` 不存在 | 以已提交的 `PLAN.md`、`CONTEXT.md`、ADR-006 和仓库现状为事实来源重建本地规格目录 |
 | 2026-07-22 | 首次批量写入 Phase 2 spec 时因 `CONTEXT.md` 匹配文本与实际文件差异导致补丁整体拒绝 | 拆分补丁，先独立创建 spec，再按真实上下文更新领域术语和进度 |
 | 2026-07-22 | Phase 2 spec 推送后首次 `gh run list` 直连 GitHub API 超时 | `gh` 不读取仓库级 Git HTTP 代理；改为仅对查询进程设置已验证的本地 HTTPS 代理 |
+| 2026-07-23 | Next.js 15.5.21 锁文件更新后首次 `pnpm install --frozen-lockfile` 超过 120 秒 | 保留已验证锁文件，不重复短超时调用；改用更长超时完成确定性安装与审计 |
+| 2026-07-23 | Ticket 02 修复 Worker 的 Codex 后端响应流在完成前断开 | 工作树改动完整保留；恢复同一个 Agent ID 和上下文，从现状继续测试、审查与 amend |
+| 2026-07-23 | 本地主库已执行 Ticket 02 同 revision 的中间版迁移，最终代码下 `alembic check` 检出列与索引漂移 | 先确认 Ticket 02 新表均为 0 行，再兼容旧 downgrade 并执行受控 downgrade/upgrade；Phase 1 表数据由迁移重新回填 |
+| 2026-07-23 | Ticket 02 第四轮修复 Worker 从多 Agent 注册表消失并返回 `not_found` | 保留全部共享工作树改动；创建新的无历史恢复 Worker，仅审计现有 diff、完成门禁并 amend 原 Ticket 提交 |
+| 2026-07-24 | Ticket 02 最终提交后的本地主库仍停留在同 revision 中间版 schema，`alembic check` 检出复合 Workspace 索引与外键漂移 | 停止应用写入，完成非事务性 downgrade suffix 并 stamp 父 revision，再由正式 migration 升级；逐表数据量、drift、Phase 0/1 均通过 |
+| 2026-07-24 | 原生 `INFORMATION_SCHEMA` 一行 Python 探针被 PowerShell 的嵌套双引号提前解析 | 不重复该引号结构；改用 PowerShell 单引号包裹 Python 程序、Python 双引号包裹 SQL |
+| 2026-07-24 | 查询测试 DSN 时假定根目录存在 `tests/conftest.py`，`rg` 报路径不存在 | 改为在 `tests/` 全目录按配置键检索真实夹具位置 |
+| 2026-07-24 | 给中间 schema 补兼容索引/唯一约束后 downgrade 在缺失的 `ck_outbox_source_workspace` 处失败；MySQL 已提交此前 DDL | 未原样重试；按 Inspector 结果手工完成剩余 suffix、stamp `9a7e3c1f5b20`，正式 upgrade 后无漂移 |

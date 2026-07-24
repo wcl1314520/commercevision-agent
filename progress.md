@@ -166,4 +166,54 @@
 - Ticket 03 已在新的独立 Worker 上下文中启动，范围固定为 Product/SKU Catalog、Workspace 隔离、MySQL/HTTP Contract、OpenAPI 和 Web 工作台。
 - Ticket 03 已完成并 amend 为 `856f57b`，包含 Product/SKU 共享外部身份注册表、复合 Workspace 外键、并发幂等快照、运行时 Web Proxy、过期元数据和 9 项 Playwright 测试；独立 Standards、Spec 和五轴质量审查均批准。
 - 主控复验通过：94 项 pytest、9 项 Playwright、Web lint/typecheck/build、Ruff、Python 依赖审计、迁移 upgrade/`alembic check`、OpenAPI/前端类型漂移和 Compose 配置；仅有既有 Starlette/httpx 弃用警告。
+- Ticket 03 与状态日志已推送；GitHub Actions 运行 `29952486669` 的 Python、Web、容器构建、Secret Scan 和 SBOM 全部通过。
 - Ticket 03 已解除 Ticket 04、05、06、07、08、09 之外的直接依赖，并正式解锁 Ticket 02 的实现。
+- Ticket 02 已经只读依赖审计确认无隐藏阻塞，并在新的独立 Worker 上下文中启动，范围固定为 Durable Operation、恢复控制面、DLQ Replay、独立 Scanner 与 Operator HTTP。
+- 一次 `wait_agent` 空目标调用因参数校验失败；没有启动、终止或修改任何 Agent/文件，后续只使用非空 Agent ID。
+- Ticket 02 独立 Worker 已产出提交 `f62ec5f`；主控正在等待固定比较点 `a6d597c...f62ec5f` 的 Standards 与 Spec 双轴审查。
+- 独立安全门禁发现 Next.js 15.5.20 存在 3 个 High、5 个 Moderate 公告；已将 Next.js 与 `eslint-config-next` 精确升级到 15.5.21 并成功重建锁文件，修复将作为 Ticket 之外的独立安全维护提交。
+- 首次 `pnpm install --frozen-lockfile` 在本地依赖拉取阶段超过 120 秒而被终止；没有修改业务代码，下一次使用更长超时继续确定性安装。
+- 使用更长超时后 `pnpm install --frozen-lockfile` 成功；Next.js 15.5.21 安全升级已通过 `pnpm audit --audit-level=moderate`、Web lint、TypeScript、生产构建和 9 项 Playwright 回归。
+- Ticket 02 主控双轴审查发现身份可信边界、未知结果对账、终态 DLQ、恢复公平性、旧数据迁移与 Scanner 隔离等阻断问题；全部意见已退回原独立 Worker，要求红绿修复并 amend 原提交。
+- Ticket 02 修复过程中独立 Worker 的 Codex 响应流连接中断；约 45 个文件的实现与测试改动仍保留在工作树，已恢复同一个 Agent ID 和上下文继续验证与 amend，没有重建上下文或丢弃工作。
+- Ticket 02 第一轮修复已 amend 为 `3134501`；主控复验通过 151 项 pytest、Ruff、Python 审计、Alembic upgrade/check、OpenAPI 稳定性、Phase 0/1 验证和 Compose 配置。
+- 第二轮独立 Standards/Spec 审查确认第一轮大部分阻断已关闭，但仍发现生产 Worker 未在启动时装配 executor、Provider task identity 不可持续对账、累计时限在 claim 时未强制、已发布恢复事件仍可能队头饥饿、回放族谱静默截断和可信网关缺少双钥轮换；已全部退回原 Worker 继续 TDD 并 amend。
+- 第二轮修复已 amend 为 `91c428e`；主控最终提交复验通过 165 项 pytest 和 Ruff。
+- 主控 MySQL 因此前执行过同 revision 的中间版迁移而出现“版本号在 head、schema 内容仍旧”的本地漂移；确认 `durable_operations` 与 `dead_letter_replays` 均为 0 行，将通过受控 downgrade/upgrade 重建未使用的 Ticket 02 表并保留 Phase 1 数据。
+- 本地主库已通过兼容索引完成受控 `downgrade 9a7e3c1f5b20 -> upgrade head`，最终 `alembic check` 无漂移，Phase 1 端到端验证继续通过。
+- 第三轮独立审查将 Ticket 02 剩余问题收敛为四项：成功结果未持久化 Provider request ID、execution replay 保留了旧未耗预算、reconciliation replay 同时清零计数并扩张上限、迁移会误接收非字符串或超长 workspace JSON；已退回同一 Worker 补真实 MySQL 回归并 amend。
+- 第三轮修复已 amend 为 `859d958`，主控复验通过 172 项 pytest、Ruff、MySQL drift、迁移/replay 定向测试、Python/pnpm 审计和 Web 构建。
+- 第四轮独立审查继续发现六个边界缺口：非成功 Provider 结果 provenance、IntegrityError 分类、真实 MySQL Scanner 隔离、租约刚过期的 late result、对账 `retry_at <= now`、迁移中的制表符/换行 workspace 规范化；已全部退回同一 Worker 继续 TDD。
+- 第四轮修复 Worker 在完成大部分实现和测试后从多 Agent 注册表消失，原 Agent ID 返回 `not_found`；约 1200 行修改及新增 Integrity/Scanner 测试完整保留在共享工作树。
+- 已启动新的无历史独立恢复 Worker，只允许审计和完成现有 Ticket 02 diff、运行门禁并 amend `859d958`，禁止重做、清理或提交五个主控文件。
+- 恢复 Worker 已将第四轮修复 amend 为 `18cce7f`；主控复验通过 204 项 pytest、59 项定向真实 MySQL、迁移往返、Ruff、Phase 0/1 和漏洞审计。
+- 最终独立复审仍复现 replay event 红elivery 重复授权、未知查询异常提前终态、late reconciliation provenance、通用/Catalog UoW Integrity 分类未统一、损坏 JSON 迁移未防护五项阻断；已退回同一恢复 Worker 继续 amend。
+- 第六轮修复已 amend 为 `4b04485`，主控复验通过 232 项 pytest、Ruff 和 Phase 0/1；Standards release gate 已批准。
+- Spec release gate 仍复现 Transport DLQ replay 被误走终态 operation replay、Repository 在 `save()` 立即执行 SQL 时绕过 Integrity 分类两项阻断；已退回同一恢复 Worker 完成最终 TDD。
+- 第七轮修复已 amend 为 `bd77392`，全量 238 项与 focused MySQL/recovery 134 项通过；Spec release gate 已批准。
+- Standards release gate 通过 deterministic interleaving 发现 Transport replay 终态失败未继承 source DLQ 祖先、marker winner 输掉 provider claim 时仍抛异常两项并发缺口；已退回同一恢复 Worker 修复。
+- 第八轮修复已 amend 为 `7260509`，242 项全量与 138 项 focused MySQL/recovery 通过；Spec release gate 已批准。
+- 最终 Standards gate 发现 replay claim 仍依赖 `source_aggregate_version + 2` 推导，合法的终态后 generation/provenance 写入会让 prepared-but-unclaimed replay 被误判并永久搁置；已要求同一 Worker 改为显式持久 replay preparation/claim 状态。
+- 第九轮修复已 amend 为 `27c521f`，显式 replay lifecycle 取代版本偏移，244 项全量与 147 项 focused MySQL/recovery 通过。
+- 最终结构审查发现 `CLAIMED` 后崩溃仍可能未收敛到 `COMPLETED`、128 字符 workspace 生成的 replay 幂等 scope 超列长、签名 actor ID 未限制为 1–128 字符三项边界；已退回同一 Worker 修复。
+- 第十轮修复已 amend 为 `4da0fb5`，248 项全量与 151 项 focused MySQL/recovery 通过。
+- Security release gate 发现 API 的大小写敏感 workspace 授权与 MySQL 默认 `utf8mb4_0900_ai_ci` 过滤不一致，可造成跨 workspace 读取；同时大写 UUID 路径会破坏 replay 幂等。已要求对所有 workspace 查询建立统一精确比较契约并规范化 UUID。
+- 第十一轮安全修复已 amend 为 `acb4417`，255 项全量与 193 项 focused recovery/MySQL 通过，9 个 workspace 列改为 binary-exact，并完成 canonical UUID replay。
+- 安全复审发现迁移仍会 trim 后改派 workspace 身份、Unicode workspace 无可靠 HTTP wire 表示、Replay/Operation/Outbox 关系缺少 workspace 复合 FK。已确定 workspace ID 为 1–128 字符 ASCII 无空白 token，并要求迁移保留原值或 legacy、补齐所有复合所有权 FK。
+- 第十二轮安全修复已 amend 为 `1f499dc`，290 项全量与 186 项 focused 安全/MySQL 通过，workspace ASCII contract 与复合所有权 FK 已全链路落地。
+- 最终 Spec gate 发现 dead-letter UUID 在查库后才 canonicalize，重音伪 UUID 可被 `ai_ci` 命中；同时 Standards 建议历史 migration 内固化 workspace regex。已退回同一 Worker 做严格 pre-lookup UUID 校验和 migration 去运行时依赖。
+- Ticket 02 最终修复已 amend 为 `9b88493`：dead-letter UUID 在数据库查询前完成严格解析与 canonicalize，历史迁移固定 workspace 正则，不再依赖可演进的运行时代码。
+- 独立 Standards 与 Spec 复审均批准；最终实现覆盖显式 replay 生命周期、持久 Provider provenance、累计执行/对账预算、Scanner 隔离、可信双钥操作员身份、严格 workspace 所有权和可恢复生产 Worker 装配。
+- Ticket 02 最终全量 Python 门禁通过 302 项 pytest；Ruff format/check、真实 MySQL 迁移与 drift、Phase 0/1 回归、Python 安全审计及相关 Web 门禁均通过，仅保留既有 Starlette 弃用警告。
+- Next.js 与 `eslint-config-next` 的 15.5.21 安全升级已作为独立提交 `083004d` 落地；`pnpm audit --audit-level=moderate` 返回 0 个已知漏洞，Web lint、TypeScript、生产构建和 9 项 Playwright 回归通过。
+- Ticket 02 与 Ticket 03 的依赖现已满足，下一项实现为 Ticket 04：Direct Upload、Quarantine 与三段式 Finalize。
+- 组合 HEAD 复验已通过 Ruff format/check 与 302 项 pytest；本地主库的 `alembic check` 随后确定性复现同 revision schema 漂移。
+- 漂移修复前审计确认 Alembic revision 为 `b1c8e4f2a703`，`durable_operations`、`dead_letter_replays` 和 `dead_letter_messages` 均为 0 行；`outbox_events` 641 行、`workflows` 31 行，需要在保留 Phase 1 数据的前提下受控重建 Ticket 02 revision。
+- Schema Inspector 与原生 `INFORMATION_SCHEMA` 均确认本地主库保留的是 Ticket 02 中间版：相关关系仍为单列外键，缺少最终复合 Workspace 唯一约束、外键及配套索引；这与 `alembic check` 的完整漂移清单一致。
+- `tests/integration/test_operation_migration_mysql.py` 在独立空库中 4 项全部通过，已排除最终迁移代码、模型元数据或 MySQL 复合约束反射本身存在漂移。
+- 首次本地 downgrade 已在删除两个空 Ticket 02 表、来源外键和兼容索引后，于缺失 CHECK 约束处停止；剩余 suffix 必须删除临时唯一约束与 Ticket 02 列，并把五张既有 Workspace 表及 Idempotency Scope 恢复到父 revision 的默认排序规则。
+- 本地 API、Worker、Scheduler、MCP 与 Web 在 schema 维护开始时仍处于运行状态；完成手工 suffix 前将停止应用层服务，仅保留 MySQL 等基础设施，避免迁移窗口出现并发写入。
+- 应用层服务停止后已手工完成非事务性 downgrade suffix，Alembic stamp 到 `9a7e3c1f5b20`，再由正式 migration 升级到 `b1c8e4f2a703`；`alembic check` 已恢复为无漂移。
+- 升级后 17 张业务表的行数与维护前逐表一致，包括 31 个 Workflow、641 个 Outbox/Inbox、336 个 Checkpoint 和 1804 个 Pending Write；两个 Ticket 02 表继续为 0 行，没有业务数据丢失。
+- 12 个 Compose 服务已恢复 healthy；Phase 1 公共 HTTP 全流程通过两个人工审批并完成，Phase 0 的 8 个 HTTP 与 3 个 TCP 健康验收全部通过。
+- Ticket 02 组合 HEAD 的最终本地门禁全部通过：302 项 pytest、Ruff、Alembic、Python/pnpm 漏洞审计、OpenAPI drift、Web lint/typecheck/build、9 项 Playwright、Compose config 与完整健康检查。
