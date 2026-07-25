@@ -32,6 +32,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -42,6 +43,7 @@ button {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible,
 a:focus-visible {
   outline: 3px solid var(--focus);
@@ -341,6 +343,7 @@ label > span {
 }
 
 input,
+select,
 textarea {
   background: #fff;
   border: 1px solid #b8c4cd;
@@ -351,10 +354,122 @@ textarea {
   width: 100%;
 }
 
+select {
+  appearance: auto;
+}
+
 textarea {
   line-height: 1.45;
   min-height: 92px;
   resize: vertical;
+}
+
+.asset-upload-layout {
+  align-items: start;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+}
+
+.asset-preview {
+  align-items: center;
+  aspect-ratio: 1;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: 14px;
+}
+
+.asset-preview img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.asset-upload-controls {
+  display: grid;
+  gap: 16px;
+}
+
+.asset-status {
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+}
+
+.asset-status-FINALIZED {
+  background: var(--success-soft);
+  border-color: #b7dec8;
+  color: var(--success);
+}
+
+.asset-status-ABORTED,
+.asset-status-EXPIRED {
+  background: var(--danger-soft);
+  border-color: #e6bbb6;
+  color: var(--danger);
+}
+
+.upload-progress {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 42px;
+}
+
+.upload-progress progress {
+  accent-color: var(--accent);
+  height: 12px;
+  width: 100%;
+}
+
+.upload-progress span {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.asset-facts {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 24px 0 0;
+  padding-top: 18px;
+}
+
+.asset-facts div,
+.asset-fact {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.asset-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.asset-facts dd {
+  font-size: 14px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.asset-fact {
+  text-align: center;
+}
+
+.asset-fact span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .form-actions {
@@ -552,6 +667,18 @@ textarea {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-upload-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-preview {
+    aspect-ratio: 4 / 3;
+  }
+
+  .asset-facts {
     grid-template-columns: 1fr;
   }
 

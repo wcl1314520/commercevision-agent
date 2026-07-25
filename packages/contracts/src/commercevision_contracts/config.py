@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
+from urllib.parse import urlsplit
 
-from commercevision_domain import OperationKind
+from commercevision_domain import OperationKind, StorageLocationClass
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -16,12 +17,21 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+_FINALIZE_STORAGE_REQUEST_BOUND = 3
+
 
 def _secret_directories() -> list[Path]:
     configured = os.getenv("CV_SECRETS_DIR")
     if configured:
         return [Path(value) for value in configured.split(os.pathsep) if value]
     return [path for path in (Path("/run/secrets"), Path("secrets")) if path.is_dir()]
+
+
+def _origin_identity(value: str) -> tuple[str, str, int]:
+    parsed = urlsplit(value)
+    assert parsed.hostname is not None
+    default_port = 443 if parsed.scheme.lower() == "https" else 80
+    return parsed.scheme.lower(), parsed.hostname.lower(), parsed.port or default_port
 
 
 class Settings(BaseSettings):
@@ -48,14 +58,68 @@ class Settings(BaseSettings):
     milvus_uri: str = "http://milvus:19530"
     milvus_health_uri: str = "http://milvus:9091/healthz"
 
+    object_store_backend: Literal["minio", "oss"] = "minio"
+    object_store_credential_mode: Literal[
+        "static",
+        "ecs_ram_role",
+        "oidc_role_arn",
+    ] = "static"
     object_store_endpoint: str = "http://minio:9000"
+    object_store_presign_endpoint: str | None = None
+    object_store_region: str = "us-east-1"
     object_store_access_key: str = "commercevision"
-    object_store_secret_key: str = "change-me"
+    object_store_secret_key: SecretStr = SecretStr("change-me")
+    object_store_session_token: SecretStr | None = None
+    object_store_ram_role_name: str | None = None
+    object_store_oidc_role_arn: str | None = None
+    object_store_oidc_provider_arn: str | None = None
+    object_store_oidc_token_file_path: str | None = None
+    object_store_sts_endpoint: str | None = None
+    object_store_role_session_name: str = "commercevision-object-storage"
     object_store_bucket: str = "task-assets"
+    object_store_quarantine_bucket: str = "quarantine-assets"
+    object_store_task_bucket: str = "task-assets"
+    object_store_foundation_bucket: str = "foundation-assets"
+    object_store_provider_result_bucket: str = "provider-results"
+    object_store_tls_verify: bool = True
+    object_store_force_path_style: bool = True
+    object_store_require_encryption: bool = False
+    object_store_connect_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
+    object_store_read_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    object_store_readiness_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    object_store_credential_refresh_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=30,
+    )
+    upload_session_expiry_seconds: int = Field(default=900, ge=60, le=3600)
+    upload_cleanup_presign_grace_seconds: int = Field(default=30, ge=1, le=300)
+    upload_cleanup_max_attempts: int = Field(default=600, ge=2, le=2000)
+    upload_cleanup_reconcile_interval_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+    )
+    upload_cleanup_reconcile_horizon_seconds: int = Field(
+        default=72 * 3600,
+        ge=3600,
+        le=7 * 24 * 3600,
+    )
+    upload_cleanup_reconcile_max_attempts: int = Field(default=80, ge=2, le=1000)
+    upload_finalize_lease_seconds: int = Field(default=120, ge=15, le=900)
+    upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=10 * 1024 * 1024)
+    upload_max_image_dimension: int = Field(default=1280, ge=1, le=1280)
+    upload_max_image_pixels: int = Field(default=1280 * 1280, ge=1, le=1280 * 1280)
+    upload_max_image_frames: int = Field(default=1, ge=1, le=100)
+    upload_max_metadata_bytes: int = Field(default=256 * 1024, ge=1024, le=1024 * 1024)
+    upload_policy_version: str = "direct-put-v1"
+    upload_integrity_policy_version: str = "image-integrity-v1"
+    asset_validation_max_attempts: int = Field(default=5, ge=1, le=50)
 
     mysql_pool_size: int = Field(default=10, ge=1, le=100)
     mysql_max_overflow: int = Field(default=20, ge=0, le=200)
     mysql_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
+    mysql_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     workflow_retention_hours: int = Field(default=72, ge=1, le=168)
     workflow_step_lease_seconds: int = Field(default=300, ge=30, le=3600)
     workflow_message_max_attempts: int = Field(default=8, ge=1, le=50)
@@ -83,9 +147,9 @@ class Settings(BaseSettings):
     operation_retry_max_seconds: float = Field(default=300.0, gt=0, le=86400)
     operation_retry_max_elapsed_seconds: float = Field(default=86400.0, gt=0, le=604800)
     operation_reconciliation_initial_seconds: float = Field(default=2.0, gt=0, le=3600)
-    operation_reconciliation_max_seconds: float = Field(default=300.0, gt=0, le=86400)
+    operation_reconciliation_max_seconds: float = Field(default=3600.0, gt=0, le=86400)
     operation_reconciliation_max_elapsed_seconds: float = Field(
-        default=86400.0,
+        default=345600.0,
         gt=0,
         le=604800,
     )
@@ -119,7 +183,26 @@ class Settings(BaseSettings):
     scheduler_host: str = "0.0.0.0"
     scheduler_port: int = 8002
 
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_legacy_task_bucket(cls, values: object) -> object:
+        if not isinstance(values, dict) or "object_store_task_bucket" in values:
+            return values
+        legacy_bucket = values.get("object_store_bucket")
+        if not isinstance(legacy_bucket, str):
+            return values
+        return {**values, "object_store_task_bucket": legacy_bucket}
+
     @field_validator(
+        "object_store_access_key",
+        "object_store_region",
+        "object_store_quarantine_bucket",
+        "object_store_task_bucket",
+        "object_store_foundation_bucket",
+        "object_store_provider_result_bucket",
+        "object_store_role_session_name",
+        "upload_policy_version",
+        "upload_integrity_policy_version",
         "worker_consumer_name",
         "worker_readiness_path",
         "workflow_queue_name",
@@ -132,6 +215,82 @@ class Settings(BaseSettings):
         normalized = value.strip()
         if not normalized:
             raise ValueError("queue and consumer identities must not be blank")
+        return normalized
+
+    @field_validator(
+        "object_store_ram_role_name",
+        "object_store_oidc_role_arn",
+        "object_store_oidc_provider_arn",
+        "object_store_oidc_token_file_path",
+        "object_store_sts_endpoint",
+        "object_store_session_token",
+        mode="before",
+    )
+    @classmethod
+    def _trim_optional_identity(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("object_store_sts_endpoint")
+    @classmethod
+    def _validate_sts_endpoint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = urlsplit(f"//{value}")
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("OSS STS endpoint must be a valid DNS hostname") from exc
+        hostname = parsed.hostname
+        labels = hostname.split(".") if hostname is not None else []
+        if (
+            "://" in value
+            or port is not None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or not value.isascii()
+            or hostname != value.lower()
+            or len(value) > 253
+            or len(labels) < 2
+            or not any(character.isalpha() for character in labels[-1])
+            or any(
+                not label
+                or len(label) > 63
+                or not label[0].isalnum()
+                or not label[-1].isalnum()
+                or any(not character.isalnum() and character != "-" for character in label)
+                for label in labels
+            )
+        ):
+            raise ValueError("OSS STS endpoint must be a credential-free DNS hostname")
+        return value.lower()
+
+    @field_validator("object_store_endpoint", "object_store_presign_endpoint")
+    @classmethod
+    def _validate_object_store_endpoint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = urlsplit(value)
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("object-store endpoints must be valid HTTP(S) origins") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("object-store endpoints must be credential-free HTTP(S) origins")
+        normalized = value.rstrip("/")
         return normalized
 
     @field_validator("worker_queues")
@@ -179,13 +338,144 @@ class Settings(BaseSettings):
             raise ValueError("worker message retry maximum must not be below the initial delay")
         if self.operation_retry_max_seconds < self.operation_retry_initial_seconds:
             raise ValueError("operation retry maximum must not be below the initial delay")
+        minimum_retry_coverage = 0.0
+        retry_base = self.operation_retry_initial_seconds
+        for _ in range(self.upload_cleanup_max_attempts - 1):
+            minimum_retry_coverage += min(
+                retry_base * 0.5,
+                self.operation_retry_max_seconds,
+            )
+            retry_base = min(
+                retry_base * 2,
+                self.operation_retry_max_seconds,
+            )
+        if minimum_retry_coverage < self.operation_retry_max_elapsed_seconds:
+            raise ValueError(
+                "upload cleanup execution attempts do not cover the elapsed retry budget"
+            )
+        if (
+            self.upload_cleanup_reconcile_horizon_seconds
+            <= self.upload_cleanup_reconcile_interval_seconds
+        ):
+            raise ValueError("upload cleanup reconciliation horizon must exceed its interval")
+        if (
+            self.operation_reconciliation_max_seconds
+            < self.upload_cleanup_reconcile_interval_seconds
+        ):
+            raise ValueError(
+                "operation reconciliation maximum delay must cover the upload cleanup interval"
+            )
+        required_cleanup_attempts = (
+            self.upload_cleanup_reconcile_horizon_seconds
+            + self.upload_cleanup_reconcile_interval_seconds
+            - 1
+        ) // self.upload_cleanup_reconcile_interval_seconds + 1
+        if self.upload_cleanup_reconcile_max_attempts < required_cleanup_attempts:
+            raise ValueError("upload cleanup reconciliation attempts do not cover the horizon")
+        if (
+            self.operation_reconciliation_max_elapsed_seconds
+            <= self.upload_cleanup_reconcile_horizon_seconds
+        ):
+            raise ValueError("operation reconciliation elapsed budget must exceed cleanup horizon")
         if (
             self.operation_reconciliation_max_seconds
             < self.operation_reconciliation_initial_seconds
         ):
             raise ValueError("operation reconciliation maximum must not be below the initial delay")
-        if self.environment == "production" and not self.worker_required_operation_kinds:
+        credential_refresh_budget = (
+            self.object_store_credential_refresh_timeout_seconds
+            if self.object_store_credential_mode != "static"
+            else 0
+        )
+        object_store_request_budget = _FINALIZE_STORAGE_REQUEST_BOUND * (
+            credential_refresh_budget
+            + self.object_store_connect_timeout_seconds
+            + self.object_store_read_timeout_seconds
+        )
+        if object_store_request_budget >= self.upload_finalize_lease_seconds:
+            raise ValueError(
+                "object-store request timeout budget must be shorter than the upload finalize lease"
+            )
+        non_workflow_worker_queues = set(self.configured_worker_queues).difference(
+            {self.workflow_queue_name}
+        )
+        if (
+            self.environment == "production"
+            and non_workflow_worker_queues
+            and not self.worker_required_operation_kinds
+        ):
             raise ValueError("production requires explicit required operation kinds")
+        if self.environment == "production":
+            if self.object_store_backend == "oss" and self.object_store_force_path_style:
+                raise ValueError("production OSS object storage requires virtual-hosted addressing")
+            if self.object_store_backend == "oss" and self.object_store_credential_mode == "static":
+                raise ValueError(
+                    "production OSS object storage requires renewable workload identity"
+                )
+            endpoints = (
+                self.object_store_endpoint,
+                self.object_store_presign_endpoint or self.object_store_endpoint,
+            )
+            if any(not endpoint.startswith("https://") for endpoint in endpoints):
+                raise ValueError("production object-store endpoints must use HTTPS")
+            if not self.object_store_require_encryption:
+                raise ValueError("production object storage requires server-side encryption")
+            if not self.object_store_tls_verify:
+                raise ValueError("production object storage requires TLS verification")
+            physical_buckets = tuple(self.object_store_buckets.values())
+            if len(set(physical_buckets)) != len(physical_buckets):
+                raise ValueError("production object storage requires distinct physical buckets")
+            if (
+                self.object_store_credential_mode == "oidc_role_arn"
+                and self.object_store_sts_endpoint is None
+            ):
+                raise ValueError(
+                    "production OSS OIDC workload identity requires an explicit STS endpoint"
+                )
+            if (
+                self.object_store_backend == "minio"
+                or self.object_store_credential_mode == "static"
+            ) and self.object_store_secret_key.get_secret_value() in {
+                "change-me",
+                "commercevision-secret",
+            }:
+                raise ValueError("production object storage requires a non-default storage secret")
+            if _origin_identity(endpoints[0]) == _origin_identity(endpoints[1]):
+                raise ValueError(
+                    "production object storage requires a distinct browser presign origin"
+                )
+        if self.object_store_backend != "oss" and self.object_store_credential_mode != "static":
+            raise ValueError("renewable object-store credentials are supported only for OSS")
+        if self.object_store_credential_mode == "oidc_role_arn":
+            oidc_values = (
+                self.object_store_oidc_role_arn,
+                self.object_store_oidc_provider_arn,
+                self.object_store_oidc_token_file_path,
+            )
+            if any(value is None for value in oidc_values):
+                raise ValueError(
+                    "OSS OIDC workload identity requires role ARN, provider ARN, "
+                    "and token file path"
+                )
+            assert self.object_store_oidc_token_file_path is not None
+            if not (
+                PurePosixPath(self.object_store_oidc_token_file_path).is_absolute()
+                or PureWindowsPath(self.object_store_oidc_token_file_path).is_absolute()
+            ):
+                raise ValueError("OSS OIDC token file path must be absolute")
+        elif self.object_store_sts_endpoint is not None:
+            raise ValueError("OSS STS endpoint requires oidc_role_arn credential mode")
+        elif any(
+            value is not None
+            for value in (
+                self.object_store_oidc_role_arn,
+                self.object_store_oidc_provider_arn,
+                self.object_store_oidc_token_file_path,
+            )
+        ):
+            raise ValueError(
+                "OSS OIDC workload identity fields require oidc_role_arn credential mode"
+            )
         current_key_configured = self.trusted_principal_current_key_id is not None
         current_secret_configured = self.trusted_principal_current_hmac_secret is not None
         if current_key_configured != current_secret_configured:
@@ -208,6 +498,15 @@ class Settings(BaseSettings):
         return self
 
     @property
+    def object_store_buckets(self) -> dict[StorageLocationClass, str]:
+        return {
+            StorageLocationClass.QUARANTINE: self.object_store_quarantine_bucket,
+            StorageLocationClass.TASK: self.object_store_task_bucket,
+            StorageLocationClass.FOUNDATION: self.object_store_foundation_bucket,
+            StorageLocationClass.PROVIDER_RESULT: self.object_store_provider_result_bucket,
+        }
+
+    @property
     def configured_worker_queues(self) -> tuple[str, ...]:
         if self.worker_queues is not None:
             return tuple(self.worker_queues)
@@ -217,6 +516,10 @@ class Settings(BaseSettings):
             self.index_queue_name,
             self.maintenance_queue_name,
         )
+
+    @property
+    def worker_requires_object_storage(self) -> bool:
+        return self.maintenance_queue_name in self.configured_worker_queues
 
     @classmethod
     def settings_customise_sources(

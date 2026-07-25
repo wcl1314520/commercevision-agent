@@ -1,4 +1,4 @@
-"""Generate the catalog TypeScript types from the committed OpenAPI document."""
+"""Generate Web workbench TypeScript types from the committed OpenAPI document."""
 
 from __future__ import annotations
 
@@ -8,16 +8,35 @@ from pathlib import Path
 from typing import Any
 
 SCHEMAS = (
+    "AssetKind",
+    "AssetObjectState",
+    "AssetResponseV1",
+    "AssetState",
+    "AssetVersionResponseV1",
     "CatalogDeleteRequestV1",
     "ErrorResponse",
+    "OperationErrorResponseV1",
+    "OperationKind",
+    "OperationResponseV1",
+    "OperationState",
+    "PresignedUploadV1",
     "ProductCreateRequestV1",
     "ProductListResponseV1",
     "ProductResponseV1",
     "ProductSummaryResponseV1",
     "ProductUpdateRequestV1",
+    "ReconciliationOutcome",
+    "RetentionClass",
     "SKUCreateRequestV1",
     "SKUResponseV1",
     "SKUUpdateRequestV1",
+    "UploadFinalizeResponseV1",
+    "UploadSessionCreateRequestV1",
+    "UploadSessionCreateResponseV1",
+    "UploadSessionMutationRequestV1",
+    "UploadSessionResponseV1",
+    "UploadSessionState",
+    "ValidationOperationSummaryV1",
 )
 
 

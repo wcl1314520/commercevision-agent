@@ -158,11 +158,27 @@ Milvus 故障不能影响 MySQL 中的审批、历史和任务查询。
 
 独立 Bucket：
 
-- `task-assets`：72 小时，禁用版本控制。
-- `foundation-assets`：版本控制、删除保护。
+- `quarantine-assets`：启用版本控制；Upload Session 终止后由耐久清理和周期复核删除。
+- `task-assets`：启用版本控制；当前版本和非当前版本都必须受 72 小时生命周期约束。
+- `foundation-assets`：启用版本控制、删除保护，按管理员删除或权利到期清理。
+- `provider-results`：启用版本控制，按所属任务的保留边界清理。
 - `public-demo-assets`：只放可公开数据。
 - `milvus-data`：Milvus 对象数据。
 - `audit-export`：必要的脱敏合规导出。
+
+条件删除依赖 Provider Version ID，以上四个业务 Bucket 不允许关闭或暂停版本控制。已有
+Bucket 的发布顺序固定为：先启用 Versioning 和非当前版本 Lifecycle，再验证运行时 RAM
+身份具备读取 Bucket Versioning、读取精确版本及删除精确版本的权限，最后部署 API、
+Worker 和 Scheduler。就绪探针通过前不得切流；关闭 Versioning 属于阻断发布的配置漂移。
+所有指定 Provider Version 的 HEAD 必须回传完全相同且非空的 Version ID，否则 Adapter
+关闭式失败，不能退化到 Latest。隔离区提升使用 `x-oss-forbid-overwrite=true` 和源 ETag/
+Version 条件；并发目标已存在时只允许返回元数据完全匹配的既有版本，不得创建覆盖版本。
+
+生产进程不保存长期 OSS Access Key。ECS 部署使用 RAM Role 且强制 IMDSv2；ACK 使用 OIDC
+工作负载身份时，将投射 Token 只读挂载到 Pod，并配置同 Region 的 STS VPC Endpoint。API
+与 Worker 的 RAM Policy 按职责授予 `GetBucketVersioning`、`GetBucketEncryption`、
+精确版本 HEAD/GET、预签名所需 PUT，以及 Worker 清理所需精确版本 DELETE；就绪探针不依赖
+`GetBucketInfo`。凭据刷新有独立外层截止时间，SDK 内部超时不能替代该边界。
 
 ## 网络
 

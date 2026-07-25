@@ -1183,6 +1183,18 @@ class OperationExecutionFailure(Exception):
         self.retry_at = retry_at
 
 
+class OperationReconciliationRequired(Exception):
+    def __init__(
+        self,
+        error: NormalizedOperationError,
+        *,
+        deadline_at: datetime,
+    ) -> None:
+        super().__init__(error.message)
+        self.error = error
+        self.deadline_at = deadline_at
+
+
 class UnknownOperationOutcome(Exception):
     def __init__(self, error: NormalizedOperationError) -> None:
         super().__init__(error.message)
@@ -1507,6 +1519,18 @@ class DurableOperationWorker:
     ) -> DurableOperation:
         try:
             result = self._execution.execute(OperationExecutionRequest.from_operation(running))
+        except OperationReconciliationRequired as exc:
+            required_at = self._clock()
+            return self._operations.require_reconciliation(
+                workspace_id=running.workspace_id,
+                operation_id=running.id,
+                lease_token=lease_token,
+                error=exc.error,
+                expected_execution_version=running.version,
+                expected_attempt_count=running.attempt_count,
+                reconciliation_deadline_at=exc.deadline_at,
+                now=required_at,
+            )
         except UnknownOperationOutcome as exc:
             required_at = self._clock()
             return self._operations.require_reconciliation(

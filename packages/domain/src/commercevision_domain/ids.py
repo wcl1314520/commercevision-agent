@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from uuid import UUID
+
+UUID_PATTERN = (
+    r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+)
+_HYPHENATED_UUID_PATTERN = re.compile(UUID_PATTERN, re.ASCII)
+
+
+def canonicalize_uuid(value: object) -> str:
+    """Accept exact hyphenated ASCII UUID text and return lowercase form."""
+
+    if not isinstance(value, str) or _HYPHENATED_UUID_PATTERN.fullmatch(value) is None:
+        raise ValueError("identifier must be an exact hyphenated ASCII UUID")
+    try:
+        return str(UUID(value))
+    except ValueError:
+        raise ValueError("identifier must be a valid UUID") from None
 
 
 def new_uuid7() -> str:

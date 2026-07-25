@@ -35,4 +35,5 @@ addopts = "-ra"
 asyncio_mode = "auto"
 markers = [
   "integration: requires the MySQL integration database",
+  "live_oss: opt-in contract against provisioned Alibaba OSS buckets",
 ]

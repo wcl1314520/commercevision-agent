@@ -39,6 +39,7 @@ def create_database(settings: Settings) -> Database:
         pool_size=settings.mysql_pool_size,
         max_overflow=settings.mysql_max_overflow,
         isolation_level="READ COMMITTED",
+        connect_args={"connect_timeout": settings.mysql_connect_timeout_seconds},
     )
     return Database(
         engine=engine,

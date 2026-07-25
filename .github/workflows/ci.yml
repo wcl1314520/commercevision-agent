@@ -42,6 +42,20 @@ jobs:
         with:
           version: "0.11.7"
       - run: uv sync --locked --all-packages
+      - name: Start MinIO integration service
+        run: |
+          docker run --detach --rm --name commercevision-test-minio \
+            --publish 19000:9000 \
+            --env MINIO_ROOT_USER=commercevision \
+            --env MINIO_ROOT_PASSWORD=commercevision-secret \
+            minio/minio:RELEASE.2024-06-13T22-53-53Z server /data
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:19000/minio/health/live; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:19000/minio/health/live
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run ruff format --check .
@@ -66,7 +80,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm web:lint
       - run: pnpm web:typecheck
+      - run: pnpm web:proxy-test
+      - run: pnpm web:unit-test
+      - run: pnpm web:api-types:check
       - run: pnpm web:build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm web:e2e
       - run: pnpm audit --audit-level=moderate
 
   containers:

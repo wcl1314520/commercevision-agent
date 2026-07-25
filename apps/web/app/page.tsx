@@ -15,6 +15,7 @@ import type {
   SKUResponseV1,
   SKUUpdateRequestV1,
 } from "../lib/generated/catalog-api";
+import { AssetUploadWorkbench } from "./asset-upload-workbench";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 
@@ -644,6 +645,11 @@ export default function Home() {
                     </div>
                   </form>
                 </section>
+
+                <AssetUploadWorkbench
+                  categoryCode={selectedProduct.category_code}
+                  productId={selectedProduct.id}
+                />
 
                 <section className="panel" aria-labelledby="sku-heading">
                   <div className="panel-heading">

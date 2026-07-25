@@ -41,16 +41,20 @@ async def _probe_http(url: str) -> None:
         response.raise_for_status()
 
 
-async def _run_probe(probe: Probe) -> str:
+async def _run_probe(probe: Probe, *, timeout_seconds: float = 3) -> str:
     try:
-        async with asyncio.timeout(3):
+        async with asyncio.timeout(timeout_seconds):
             await probe()
     except Exception:
         return "failed"
     return "ok"
 
 
-async def probe_dependencies(settings: Settings) -> dict[str, str]:
+async def probe_dependencies(
+    settings: Settings,
+    *,
+    object_storage_probe: Callable[[], None],
+) -> dict[str, str]:
     """Probe dependencies required for accepting new workflows."""
 
     names = ("mysql", "redis", "rabbitmq", "object_store", "milvus")
@@ -58,8 +62,20 @@ async def probe_dependencies(settings: Settings) -> dict[str, str]:
         lambda: _probe_mysql(settings),
         lambda: _probe_redis(settings),
         lambda: _probe_rabbitmq(settings),
-        lambda: _probe_http(f"{settings.object_store_endpoint}/minio/health/ready"),
+        lambda: asyncio.to_thread(object_storage_probe),
         lambda: _probe_http(settings.milvus_health_uri),
     )
-    results = await asyncio.gather(*(_run_probe(probe) for probe in probes))
+    timeouts = (
+        3,
+        3,
+        3,
+        settings.object_store_readiness_timeout_seconds * 3 + 1,
+        3,
+    )
+    results = await asyncio.gather(
+        *(
+            _run_probe(probe, timeout_seconds=timeout)
+            for probe, timeout in zip(probes, timeouts, strict=True)
+        )
+    )
     return dict(zip(names, results, strict=True))

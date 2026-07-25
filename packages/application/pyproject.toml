@@ -7,6 +7,7 @@ dependencies = [
   "commercevision-contracts",
   "commercevision-domain",
   "commercevision-tool-runtime",
+  "pillow>=11,<13",
 ]
 
 [tool.uv.sources]

@@ -24,7 +24,9 @@ def test_scheduler_readiness_exposes_independent_scanner_status() -> None:
         "outbox_dispatch",
         "workflow_recovery",
         "operation_recovery",
+        "upload_session_expiry",
     }
+    assert response.json()["expired_uploads_total"] == 0
     assert set(response.json()["scanners"]["operation_recovery"]) == {
         "last_started_at",
         "last_success_at",

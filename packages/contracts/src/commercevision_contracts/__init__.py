@@ -1,5 +1,16 @@
 """Public contracts shared by all CommerceVision services."""
 
+from .assets import (
+    AssetResponseV1,
+    AssetVersionResponseV1,
+    PresignedUploadV1,
+    UploadFinalizeResponseV1,
+    UploadSessionCreateRequestV1,
+    UploadSessionCreateResponseV1,
+    UploadSessionMutationRequestV1,
+    UploadSessionResponseV1,
+    ValidationOperationSummaryV1,
+)
 from .catalog import (
     CatalogDeleteRequestV1,
     ProductCreateRequestV1,
@@ -45,6 +56,8 @@ from .workspace_identity import (
 __all__ = [
     "ApprovalRequest",
     "ApprovalResponse",
+    "AssetResponseV1",
+    "AssetVersionResponseV1",
     "CatalogDeleteRequestV1",
     "DeadLetterDetailResponseV1",
     "DeadLetterListResponseV1",
@@ -65,11 +78,18 @@ __all__ = [
     "ProductResponseV1",
     "ProductSummaryResponseV1",
     "ProductUpdateRequestV1",
+    "PresignedUploadV1",
     "ServiceMetadata",
     "Settings",
     "SKUCreateRequestV1",
     "SKUResponseV1",
     "SKUUpdateRequestV1",
+    "UploadFinalizeResponseV1",
+    "UploadSessionCreateRequestV1",
+    "UploadSessionCreateResponseV1",
+    "UploadSessionMutationRequestV1",
+    "UploadSessionResponseV1",
+    "ValidationOperationSummaryV1",
     "WorkflowCancelRequest",
     "WorkflowCreateRequest",
     "WorkflowListResponse",

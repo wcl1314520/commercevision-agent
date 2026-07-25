@@ -6,8 +6,10 @@
     "web:dev": "pnpm --filter @commercevision/web dev",
     "web:build": "pnpm --filter @commercevision/web build",
     "web:lint": "pnpm --filter @commercevision/web lint",
+    "web:proxy-test": "pnpm --filter @commercevision/web test:proxy",
+    "web:unit-test": "pnpm --filter @commercevision/web test:unit",
     "web:typecheck": "pnpm --filter @commercevision/web typecheck",
-    "web:api-types:check": "python scripts\\generate_web_types.py --check",
+    "web:api-types:check": "python scripts/generate_web_types.py --check",
     "web:e2e": "pnpm --filter @commercevision/web e2e"
   }
 }

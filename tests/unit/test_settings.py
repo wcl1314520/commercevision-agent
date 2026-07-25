@@ -33,7 +33,7 @@ def test_secret_file_source_uses_cv_prefixed_filename(monkeypatch, tmp_path) -> 
 
     settings = Settings()
 
-    assert settings.object_store_secret_key == "from-secret-file"
+    assert settings.object_store_secret_key.get_secret_value() == "from-secret-file"
 
 
 def test_environment_overrides_secret_file(monkeypatch, tmp_path) -> None:
@@ -43,7 +43,7 @@ def test_environment_overrides_secret_file(monkeypatch, tmp_path) -> None:
 
     settings = Settings()
 
-    assert settings.object_store_secret_key == "from-environment"
+    assert settings.object_store_secret_key.get_secret_value() == "from-environment"
 
 
 def test_trusted_principal_rotation_secrets_load_from_secret_files(
@@ -219,9 +219,283 @@ def test_production_requires_explicit_operation_executor_kinds() -> None:
     settings = Settings(
         environment="production",
         worker_required_operation_kinds=[OperationKind.ASSET_VALIDATION],
+        object_store_endpoint="https://minio.internal.example",
+        object_store_presign_endpoint="https://assets.example",
+        object_store_secret_key="production-object-store-secret",
+        object_store_require_encryption=True,
     )
 
     assert settings.worker_required_operation_kinds == [OperationKind.ASSET_VALIDATION]
+
+    workflow_only = Settings(
+        environment="production",
+        worker_queues=["commercevision.workflow"],
+        object_store_endpoint="https://minio.internal.example",
+        object_store_presign_endpoint="https://assets.example",
+        object_store_secret_key="production-object-store-secret",
+        object_store_require_encryption=True,
+    )
+    assert workflow_only.worker_required_operation_kinds == []
+    assert workflow_only.worker_requires_object_storage is False
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://",
+        "https://user:password@assets.example",
+        "https://assets.example/prefix",
+        "https://assets.example?credential=value",
+        "https://assets.example#fragment",
+    ],
+)
+def test_object_store_endpoints_must_be_credential_free_origins(endpoint: str) -> None:
+    with pytest.raises(ValidationError, match="object-store endpoints"):
+        Settings(object_store_endpoint=endpoint)
+
+
+def test_legacy_object_store_bucket_remains_the_task_bucket_fallback() -> None:
+    legacy = Settings(object_store_bucket="legacy-task-assets")
+    overridden = Settings(
+        object_store_bucket="legacy-task-assets",
+        object_store_task_bucket="retained-task-assets",
+    )
+
+    assert legacy.object_store_task_bucket == "legacy-task-assets"
+    assert overridden.object_store_task_bucket == "retained-task-assets"
+
+
+def test_object_store_request_budget_must_fit_inside_finalize_lease() -> None:
+    with pytest.raises(ValidationError, match="request timeout budget"):
+        Settings(
+            object_store_connect_timeout_seconds=5,
+            object_store_read_timeout_seconds=5,
+            upload_finalize_lease_seconds=30,
+        )
+
+    settings = Settings(
+        object_store_connect_timeout_seconds=4,
+        object_store_read_timeout_seconds=5,
+        upload_finalize_lease_seconds=30,
+    )
+
+    assert settings.upload_finalize_lease_seconds == 30
+
+
+def test_upload_cleanup_presign_grace_is_positive_and_bounded() -> None:
+    assert Settings().upload_cleanup_presign_grace_seconds == 30
+    with pytest.raises(ValidationError):
+        Settings(upload_cleanup_presign_grace_seconds=0)
+    with pytest.raises(ValidationError):
+        Settings(upload_cleanup_presign_grace_seconds=301)
+
+
+def test_upload_cleanup_retry_budgets_cover_their_full_windows() -> None:
+    settings = Settings()
+
+    assert settings.upload_cleanup_max_attempts == 600
+    assert settings.upload_cleanup_reconcile_max_attempts == 80
+    with pytest.raises(ValidationError, match="execution attempts do not cover"):
+        Settings(upload_cleanup_max_attempts=5)
+    with pytest.raises(ValidationError, match="reconciliation attempts do not cover"):
+        Settings(upload_cleanup_reconcile_max_attempts=72)
+    with pytest.raises(ValidationError, match="maximum delay must cover"):
+        Settings(operation_reconciliation_max_seconds=60)
+    with pytest.raises(ValidationError, match="elapsed budget must exceed"):
+        Settings(operation_reconciliation_max_elapsed_seconds=259200)
+
+
+def test_production_rejects_disabled_tls_verification_and_default_storage_secret() -> None:
+    production = {
+        "environment": "production",
+        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "object_store_endpoint": "https://minio.internal.example",
+        "object_store_presign_endpoint": "https://assets.example",
+        "object_store_require_encryption": True,
+    }
+    with pytest.raises(ValidationError, match="storage secret"):
+        Settings(**production)
+    with pytest.raises(ValidationError, match="TLS verification"):
+        Settings(
+            **production,
+            object_store_secret_key="production-object-store-secret",
+            object_store_tls_verify=False,
+        )
+
+
+def test_production_requires_distinct_internal_and_browser_storage_origins() -> None:
+    with pytest.raises(ValidationError, match="distinct browser presign origin"):
+        Settings(
+            environment="production",
+            worker_required_operation_kinds=[OperationKind.ASSET_VALIDATION],
+            object_store_endpoint="https://assets.example",
+            object_store_presign_endpoint="https://ASSETS.example",
+            object_store_secret_key="production-object-store-secret",
+            object_store_require_encryption=True,
+        )
+
+
+def test_production_oss_requires_virtual_hosted_addressing() -> None:
+    production_oss = {
+        "environment": "production",
+        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "object_store_backend": "oss",
+        "object_store_credential_mode": "ecs_ram_role",
+        "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        "object_store_presign_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+        "object_store_require_encryption": True,
+    }
+
+    with pytest.raises(ValidationError, match="virtual-hosted"):
+        Settings(**production_oss, object_store_force_path_style=True)
+
+    settings = Settings(**production_oss, object_store_force_path_style=False)
+    assert settings.object_store_force_path_style is False
+
+
+def test_production_oss_requires_renewable_workload_identity() -> None:
+    production_oss = {
+        "environment": "production",
+        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "object_store_backend": "oss",
+        "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        "object_store_presign_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+        "object_store_force_path_style": False,
+        "object_store_require_encryption": True,
+    }
+
+    with pytest.raises(ValidationError, match="renewable workload identity"):
+        Settings(
+            **production_oss,
+            object_store_credential_mode="static",
+            object_store_secret_key="production-object-store-secret",
+        )
+
+    ecs = Settings(
+        **production_oss,
+        object_store_credential_mode="ecs_ram_role",
+    )
+    assert ecs.object_store_credential_mode == "ecs_ram_role"
+
+
+def test_production_object_storage_requires_distinct_retention_buckets() -> None:
+    with pytest.raises(ValidationError, match="distinct physical buckets"):
+        Settings(
+            environment="production",
+            worker_required_operation_kinds=[OperationKind.ASSET_VALIDATION],
+            object_store_backend="oss",
+            object_store_credential_mode="ecs_ram_role",
+            object_store_endpoint="https://oss-cn-hangzhou-internal.aliyuncs.com",
+            object_store_presign_endpoint="https://oss-cn-hangzhou.aliyuncs.com",
+            object_store_force_path_style=False,
+            object_store_require_encryption=True,
+            object_store_task_bucket="shared-retained-assets",
+            object_store_foundation_bucket="shared-retained-assets",
+        )
+
+
+def test_oss_oidc_workload_identity_configuration_is_atomic() -> None:
+    oidc = {
+        "object_store_backend": "oss",
+        "object_store_credential_mode": "oidc_role_arn",
+        "object_store_oidc_role_arn": "acs:ram::1234567890123456:role/commercevision",
+        "object_store_oidc_provider_arn": (
+            "acs:ram::1234567890123456:oidc-provider/commercevision"
+        ),
+        "object_store_oidc_token_file_path": "/var/run/secrets/aliyun/token",
+    }
+
+    settings = Settings(**oidc)
+    assert settings.object_store_role_session_name == "commercevision-object-storage"
+
+    for missing in (
+        "object_store_oidc_role_arn",
+        "object_store_oidc_provider_arn",
+        "object_store_oidc_token_file_path",
+    ):
+        incomplete = {key: value for key, value in oidc.items() if key != missing}
+        with pytest.raises(ValidationError, match="OIDC workload identity"):
+            Settings(**incomplete)
+
+    with pytest.raises(ValidationError, match="absolute"):
+        Settings(
+            **{
+                **oidc,
+                "object_store_oidc_token_file_path": "relative/token",
+            }
+        )
+
+
+def test_production_oidc_requires_an_explicit_sts_endpoint() -> None:
+    production_oidc = {
+        "environment": "production",
+        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "object_store_backend": "oss",
+        "object_store_credential_mode": "oidc_role_arn",
+        "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        "object_store_presign_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+        "object_store_force_path_style": False,
+        "object_store_require_encryption": True,
+        "object_store_oidc_role_arn": "acs:ram::1234567890123456:role/commercevision",
+        "object_store_oidc_provider_arn": (
+            "acs:ram::1234567890123456:oidc-provider/commercevision"
+        ),
+        "object_store_oidc_token_file_path": "/var/run/secrets/aliyun/token",
+    }
+    with pytest.raises(ValidationError, match="STS endpoint"):
+        Settings(**production_oidc)
+
+    settings = Settings(
+        **production_oidc,
+        object_store_sts_endpoint="sts-vpc.cn-hangzhou.aliyuncs.com",
+    )
+    assert settings.object_store_sts_endpoint == "sts-vpc.cn-hangzhou.aliyuncs.com"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://sts-vpc.cn-hangzhou.aliyuncs.com",
+        "user@sts-vpc.cn-hangzhou.aliyuncs.com",
+        "sts-vpc.cn-hangzhou.aliyuncs.com/path",
+        "sts_vpc.cn-hangzhou.aliyuncs.com",
+        "杭州.aliyuncs.com",
+        "127.0.0.1",
+    ],
+)
+def test_oss_sts_endpoint_is_a_credential_free_dns_hostname(endpoint: str) -> None:
+    with pytest.raises(ValidationError, match="STS endpoint"):
+        Settings(
+            object_store_backend="oss",
+            object_store_credential_mode="oidc_role_arn",
+            object_store_oidc_role_arn="acs:ram::1234567890123456:role/commercevision",
+            object_store_oidc_provider_arn=(
+                "acs:ram::1234567890123456:oidc-provider/commercevision"
+            ),
+            object_store_oidc_token_file_path="/var/run/secrets/aliyun/token",
+            object_store_sts_endpoint=endpoint,
+        )
+
+
+def test_sts_endpoint_is_rejected_outside_oidc_mode() -> None:
+    with pytest.raises(ValidationError, match="requires oidc_role_arn"):
+        Settings(
+            object_store_backend="oss",
+            object_store_credential_mode="ecs_ram_role",
+            object_store_sts_endpoint="sts-vpc.cn-hangzhou.aliyuncs.com",
+        )
+
+
+def test_blank_optional_object_storage_environment_is_absent() -> None:
+    settings = Settings(
+        object_store_session_token="",
+        object_store_ram_role_name=" ",
+        object_store_sts_endpoint="",
+    )
+
+    assert settings.object_store_session_token is None
+    assert settings.object_store_ram_role_name is None
+    assert settings.object_store_sts_endpoint is None
 
 
 def test_required_operation_executor_kinds_must_be_unique() -> None:

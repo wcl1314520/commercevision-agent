@@ -93,17 +93,90 @@ audit and renewal; this metadata does not enforce asset-rights usability.
 
 - `id`
 - `workspace_id`
-- `asset_type`
-- `storage_bucket`
-- `storage_key`
-- `sha256`
-- `mime_type`
-- `width`
-- `height`
-- `foundation`
-- `status`
+- `retention_class`: `TASK` / `FOUNDATION`
+- `asset_kind`: Ticket 04 仅允许 `IMAGE`
+- `workflow_id`: TASK 必填，FOUNDATION 必须为空
+- `product_id`
+- `sku_id`
+- `status`: finalize 后初始为 `QUARANTINED`
+- `current_version_id`
+- `retention_deadline`
+- `version`
+- `created_at`
+- `updated_at`
+
+Asset 不保存对象地址或可变文件字段。`workflow_id`、`product_id`、`sku_id`、
+`current_version_id` 都使用 Workspace 前置复合外键和 `RESTRICT` 历史语义。
+
+### `upload_sessions`
+
+Upload Session 是独立聚合，不是 Asset 的临时状态：
+
+- `id`
+- `workspace_id`
+- `actor_id`
+- `reserved_asset_id`
+- `reserved_asset_version_id`
+- `retention_class`
+- `asset_kind`
+- 文件名、声明 MIME、预期字节数和预期 SHA-256
+- 可选 Workflow/Product/SKU 复合归属
+- 上传策略版本和完整性策略版本
+- 内部存储后端、隔离区逻辑位置、Bucket 和服务端生成 Key
+- 按保留类型预留的 Task/Foundation 目标位置、Bucket 和服务端生成 Key
+- `state`: `OPEN` / `FINALIZING` / `FINALIZED` / `EXPIRED` / `ABORTED`
+- finalize Lease Owner、Token、到期时间和尝试次数
+- `finalized_asset_version_id`
+- `validation_operation_id`
+- `cleanup_operation_id`
+- `cleanup_reconcile_until`
 - `expires_at`
-- 唯一键 `(workspace_id, sha256, asset_type)`
+- `version`
+- `created_at`
+- `updated_at`
+
+Lease 字段只允许在 `FINALIZING` 同时存在；finalize 结果字段只允许在 `FINALIZED` 同时
+存在，且结果必须等于预留的 Asset Version ID。`cleanup_operation_id` 只允许挂在
+`FINALIZED`、`EXPIRED` 或 `ABORTED` 终态，并通过 Workspace 前置复合外键指向唯一的
+`ASSET_DELETION` Durable Operation；它必须与 `cleanup_reconcile_until` 同时为空或同时
+存在。`(state, expires_at, id)` 索引服务于无 API 流量时的全局到期扫描。所有时间列使用
+`DATETIME(6)`，确保 Upload 到期、Finalize Lease 与重协调边界不会被秒级舍入改变。
+隔离源与保留目标必须不同。公开 API 不返回内部 Bucket、Key 或后端凭证。
+
+### `asset_versions`
+
+Asset Version 创建后不可更新：
+
+- `id`
+- `workspace_id`
+- `asset_id`
+- `version_number`
+- `upload_session_id`
+- 文件名、SHA-256、字节数、声明/检测 MIME
+- 图片格式、宽、高和帧数
+- 品类、角色和完整性策略版本
+- `created_at`
+
+`UNIQUE(upload_session_id)` 是一个 Upload Session 最多产生一个 Asset Version 的数据库
+保证；`UNIQUE(asset_id, version_number)` 保证版本序号唯一。
+
+### `asset_objects`
+
+对象事实独立于 Asset Version 的业务元数据：
+
+- `id`
+- `workspace_id`
+- `asset_version_id`
+- `role`
+- 内部后端、逻辑位置、Bucket 和 Key
+- Provider Version ID 和不透明 ETag
+- 字节数、验证后的 SHA-256 和对象状态
+- `version`
+- `created_at`
+- `updated_at`
+
+ETag 只用于对象存储条件操作，不能替代 SHA-256。所有 Asset 历史外键均为
+Workspace 前置复合外键和 `RESTRICT`。
 
 ### `asset_rights`
 

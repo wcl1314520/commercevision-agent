@@ -132,6 +132,40 @@ class DeadLetterReplayRecordedPayload(CompatibleEventPayload):
     replay_attempt: int = Field(ge=1)
 
 
+class AssetUploadFinalizedPayload(CompatibleEventPayload):
+    workspace_id: WorkspaceId
+    upload_session_id: str = Field(min_length=1, max_length=36)
+    asset_id: str = Field(min_length=1, max_length=36)
+    asset_version_id: str = Field(min_length=1, max_length=36)
+    object_fact_id: str = Field(min_length=1, max_length=36)
+    validation_operation_id: str = Field(min_length=1, max_length=36)
+
+
+class AssetValidationRequestedPayload(CompatibleEventPayload):
+    operation_id: str = Field(min_length=1, max_length=36)
+    workspace_id: WorkspaceId
+    asset_id: str = Field(min_length=1, max_length=36)
+    asset_version_id: str = Field(min_length=1, max_length=36)
+    object_fact_id: str = Field(min_length=1, max_length=36)
+    integrity_policy_version: str = Field(min_length=1, max_length=64)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class UploadCleanupReason(StrEnum):
+    UPLOAD_EXPIRED = "UPLOAD_EXPIRED"
+    UPLOAD_ABORTED = "UPLOAD_ABORTED"
+    UPLOAD_PROMOTED = "UPLOAD_PROMOTED"
+
+
+class AssetDeleteRequestedPayload(CompatibleEventPayload):
+    operation_id: str = Field(min_length=1, max_length=36)
+    workspace_id: WorkspaceId
+    target_type: Literal["UPLOAD_SESSION"]
+    target_id: str = Field(min_length=1, max_length=36)
+    target_version: int = Field(ge=1)
+    reason: UploadCleanupReason
+
+
 class PendingPhase2Payload(RootModel[dict[str, JsonValue]]):
     """JSON payload boundary for Phase 2 events whose owning ticket defines fields later."""
 
@@ -230,6 +264,27 @@ DEAD_LETTER_REPLAY_RECORDED_V1 = EventContract(
     DeadLetterReplayRecordedPayload,
     EventHandling.OBSERVATION,
 )
+ASSET_UPLOAD_FINALIZED_V1 = EventContract(
+    EventType.ASSET_UPLOAD_FINALIZED,
+    1,
+    EventQueue.ASSET,
+    AssetUploadFinalizedPayload,
+    EventHandling.OBSERVATION,
+)
+ASSET_VALIDATION_REQUESTED_V1 = EventContract(
+    EventType.ASSET_VALIDATION_REQUESTED,
+    1,
+    EventQueue.ASSET,
+    AssetValidationRequestedPayload,
+    EventHandling.COMMAND,
+)
+ASSET_DELETE_REQUESTED_V1 = EventContract(
+    EventType.ASSET_DELETE_REQUESTED,
+    1,
+    EventQueue.MAINTENANCE,
+    AssetDeleteRequestedPayload,
+    EventHandling.COMMAND,
+)
 
 
 def _phase2_contract(
@@ -243,16 +298,8 @@ def _phase2_contract(
 PHASE2_EVENT_CONTRACTS = (
     OPERATION_RECOVERY_REQUESTED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
-    _phase2_contract(
-        EventType.ASSET_UPLOAD_FINALIZED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
-    _phase2_contract(
-        EventType.ASSET_VALIDATION_REQUESTED,
-        EventQueue.ASSET,
-        EventHandling.COMMAND,
-    ),
+    ASSET_UPLOAD_FINALIZED_V1,
+    ASSET_VALIDATION_REQUESTED_V1,
     _phase2_contract(
         EventType.ASSET_VALIDATION_COMPLETED,
         EventQueue.ASSET,
@@ -323,11 +370,7 @@ PHASE2_EVENT_CONTRACTS = (
         EventQueue.INDEX,
         EventHandling.OBSERVATION,
     ),
-    _phase2_contract(
-        EventType.ASSET_DELETE_REQUESTED,
-        EventQueue.MAINTENANCE,
-        EventHandling.COMMAND,
-    ),
+    ASSET_DELETE_REQUESTED_V1,
     _phase2_contract(
         EventType.ASSET_DELETE_COMPLETED,
         EventQueue.MAINTENANCE,

@@ -152,15 +152,21 @@ Browser
 - 公共 Demo 滥用和预算失控。
 - 数据未按期删除。
 
-Scheduler readiness 同时报告 `outbox_dispatch`、`workflow_recovery` 和
-`operation_recovery` 的最近开始、最近成功、最近错误、耗时、最近处理数和累计处理数。
-Scanner 同轮并发启动并受独立超时约束；单个 Scanner 异常或卡住只降低自己的状态，不阻止
-其他 Scanner。状态另外报告 `in_progress`、`timed_out` 和累计超时数。
+Scheduler readiness 同时报告 `outbox_dispatch`、`workflow_recovery`、
+`operation_recovery` 和 `upload_session_expiry` 的最近开始、最近成功、最近错误、耗时、
+最近处理数和累计处理数，并单独累计自动过期的 Upload Session。Scanner 同轮并发启动并受
+独立超时约束；单个 Scanner 异常或卡住只降低自己的状态，不阻止其他 Scanner。状态另外
+报告 `in_progress`、`timed_out` 和累计超时数。Scheduler 只认领 MySQL 到期记录并原子创建
+Cleanup Operation/Outbox，不访问对象存储；对象复核由 Operation Recovery 和 Worker 推进。
 
 Celery Worker 在 `WorkController` 启动阶段验证 `worker_required_operation_kinds` 与
-`commercevision.operation_executors` Entry Point。每个 Worker Process 完成 Runtime 和
-Executor 初始化后写入 `CV_WORKER_READINESS_PATH`；容器健康检查要求该标记存在。缺失
-Executor、Factory 加载失败或 Runtime 初始化失败均发生在接收任务前，不依赖首条消息触发。
+`commercevision.operation_executors` Entry Point，并在 fork 前探测 MySQL 及所选 Queue
+所需依赖。Maintenance Worker 必须探测对象存储；Workflow-only Worker 将其标记为
+`not_required`，不因无关存储故障停止消费。
+Master 只在 Consumer 已就绪后写入 `CV_WORKER_READINESS_PATH`；每个 Prefork 子进程完成
+Runtime/Executor 初始化后写入独立 PID 标记。容器健康检查要求共享标记有效、远端依赖结果
+为 `ok`、当前存活子进程数量达到配置并且 RabbitMQ 可连接。缺失 Executor、Factory 加载
+失败、远端依赖失败或任一 Runtime 初始化失败均发生在消费任务前，不依赖首条消息触发。
 
 ## 成本治理
 

@@ -14,6 +14,9 @@ from sqlalchemy.engine import make_url
 pytestmark = pytest.mark.integration
 
 WORKSPACE_ID_TABLES = {
+    "asset_objects",
+    "asset_versions",
+    "assets",
     "audit_events",
     "catalog_external_identities",
     "dead_letter_messages",
@@ -22,6 +25,7 @@ WORKSPACE_ID_TABLES = {
     "outbox_events",
     "products",
     "skus",
+    "upload_sessions",
     "workflows",
 }
 PARENT_WORKSPACE_ID_TABLES = {
@@ -67,9 +71,11 @@ def _column_collation(engine, *, table_name: str, column_name: str) -> str:
 
 
 def test_operation_migration_preserves_phase1_and_catalog_upgrade_paths(
+    integration_database,
     integration_settings,
     monkeypatch,
 ) -> None:
+    del integration_database
     monkeypatch.setenv("CV_MYSQL_DSN", integration_settings.mysql_dsn)
     config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
     engine = create_engine(integration_settings.mysql_dsn)
@@ -105,6 +111,90 @@ def test_operation_migration_preserves_phase1_and_catalog_upgrade_paths(
         ):
             assert isinstance(operation_columns[column_name], DATETIME)
             assert operation_columns[column_name].fsp == MYSQL_DATETIME_FSP
+        asset_datetime_columns = {
+            "upload_sessions": (
+                "finalize_lease_expires_at",
+                "cleanup_reconcile_until",
+                "expires_at",
+                "created_at",
+                "updated_at",
+            ),
+            "assets": ("retention_deadline", "created_at", "updated_at"),
+            "asset_versions": ("created_at",),
+            "asset_objects": ("created_at", "updated_at"),
+        }
+        for table_name, column_names in asset_datetime_columns.items():
+            columns = {
+                column["name"]: column["type"] for column in inspector.get_columns(table_name)
+            }
+            for column_name in column_names:
+                assert isinstance(columns[column_name], DATETIME)
+                assert columns[column_name].fsp == MYSQL_DATETIME_FSP
+        asset_object_columns = {
+            column["name"]: column for column in inspector.get_columns("asset_objects")
+        }
+        assert asset_object_columns["provider_version_id"]["nullable"] is False
+        asset_object_checks = {
+            constraint["name"]: constraint["sqltext"]
+            for constraint in inspector.get_check_constraints("asset_objects")
+        }
+        assert {
+            "ck_asset_object_provider_version",
+            "ck_asset_object_quarantine_location",
+        } <= set(asset_object_checks)
+        assert "provider_version_id" in asset_object_checks["ck_asset_object_provider_version"]
+        assert "QUARANTINED" in asset_object_checks["ck_asset_object_quarantine_location"]
+        assert {
+            constraint["name"] for constraint in inspector.get_unique_constraints("asset_versions")
+        } >= {
+            "uq_asset_version_upload_session",
+            "uq_asset_version_workspace_id",
+        }
+        upload_foreign_keys = {
+            foreign_key["name"]: foreign_key
+            for foreign_key in inspector.get_foreign_keys("upload_sessions")
+        }
+        upload_columns = {
+            column["name"]: column["type"] for column in inspector.get_columns("upload_sessions")
+        }
+        assert "cleanup_operation_id" in upload_columns
+        assert isinstance(upload_columns["cleanup_reconcile_until"], DATETIME)
+        assert upload_columns["cleanup_reconcile_until"].fsp == MYSQL_DATETIME_FSP
+        upload_indexes = {
+            index["name"]: index["column_names"]
+            for index in inspector.get_indexes("upload_sessions")
+        }
+        assert upload_indexes["ix_upload_session_expiry_scan"] == [
+            "state",
+            "expires_at",
+            "id",
+        ]
+        upload_checks = {
+            constraint["name"]: constraint["sqltext"]
+            for constraint in inspector.get_check_constraints("upload_sessions")
+        }
+        assert "ck_upload_session_cleanup_reconcile_window" in upload_checks
+        assert (
+            "cleanup_reconcile_until" in upload_checks["ck_upload_session_cleanup_reconcile_window"]
+        )
+        assert upload_foreign_keys["fk_upload_session_workspace_workflow"][
+            "constrained_columns"
+        ] == ["workspace_id", "workflow_id"]
+        assert upload_foreign_keys["fk_upload_session_workspace_product"][
+            "constrained_columns"
+        ] == ["workspace_id", "product_id"]
+        assert upload_foreign_keys["fk_upload_session_workspace_sku"]["constrained_columns"] == [
+            "workspace_id",
+            "product_id",
+            "sku_id",
+        ]
+        assert upload_foreign_keys["fk_upload_session_cleanup_operation"][
+            "constrained_columns"
+        ] == ["workspace_id", "cleanup_operation_id"]
+        assert upload_foreign_keys["fk_upload_session_cleanup_operation"]["referred_columns"] == [
+            "workspace_id",
+            "id",
+        ]
         assert {
             "provider_request_id",
             "error_provider_request_id",
@@ -695,6 +785,136 @@ def test_operation_migration_refuses_unsafe_workspace_identity_downgrade(
                 == "b1c8e4f2a703"
             )
             assert "durable_operations" in inspect(connection).get_table_names()
+    finally:
+        engine.dispose()
+        with admin_engine.begin() as connection:
+            connection.execute(text(f"DROP DATABASE IF EXISTS `{database_name}`"))
+        admin_engine.dispose()
+
+
+def test_direct_upload_migration_refuses_data_loss_before_downgrade_ddl(
+    integration_settings,
+    monkeypatch,
+) -> None:
+    source_url = make_url(integration_settings.mysql_dsn)
+    database_name = f"commercevision_ticket04_cleanup_{uuid.uuid4().hex[:8]}"
+    admin_url = source_url.set(database="mysql")
+    test_url = source_url.set(database=database_name)
+    admin_engine = create_engine(admin_url)
+    engine = create_engine(test_url)
+    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
+    monkeypatch.setenv("CV_MYSQL_DSN", test_url.render_as_string(hide_password=False))
+    try:
+        with admin_engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"CREATE DATABASE `{database_name}` "
+                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+                )
+            )
+        command.upgrade(config, "head")
+        now = datetime(2026, 7, 25, 15, 0, 0, 123456, tzinfo=UTC)
+        reconcile_until = now + timedelta(days=3)
+        with engine.begin() as connection:
+            connection.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO upload_sessions (
+                        id, workspace_id, actor_id, reserved_asset_id,
+                        reserved_asset_version_id, retention_class, asset_kind,
+                        filename, declared_mime, expected_byte_length,
+                        expected_sha256, workflow_id, product_id, sku_id,
+                        category, role, upload_policy_version,
+                        integrity_policy_version, storage_backend,
+                        storage_location, storage_bucket, storage_key,
+                        destination_location, destination_bucket, destination_key,
+                        state, finalize_lease_owner, finalize_lease_token,
+                        finalize_lease_expires_at, finalize_attempts, failure_code,
+                        finalized_asset_version_id, validation_operation_id,
+                        cleanup_operation_id, cleanup_reconcile_until,
+                        expires_at, version, created_at, updated_at
+                    ) VALUES (
+                        '019f8a00-0000-7000-8000-000000000041',
+                        'migration-workspace', 'migration-actor',
+                        '019f8a00-0000-7000-8000-000000000042',
+                        '019f8a00-0000-7000-8000-000000000043',
+                        'FOUNDATION', 'IMAGE', 'migration.png', 'image/png',
+                        68, :sha256, NULL, NULL, NULL, 'migration',
+                        'product-primary', 'upload-v1', 'integrity-v1', 'MINIO',
+                        'QUARANTINE', 'quarantine-assets', 'source-key',
+                        'FOUNDATION', 'foundation-assets', 'destination-key',
+                        'FINALIZED', NULL, NULL, NULL, 1, NULL,
+                        '019f8a00-0000-7000-8000-000000000043',
+                        '019f8a00-0000-7000-8000-000000000044',
+                        '019f8a00-0000-7000-8000-000000000045',
+                        :cleanup_reconcile_until, :expires_at, 4,
+                        :created_at, :updated_at
+                    )
+                    """
+                ),
+                {
+                    "sha256": "a" * 64,
+                    "cleanup_reconcile_until": reconcile_until,
+                    "expires_at": now + timedelta(minutes=15),
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            connection.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+
+        with engine.connect() as connection:
+            row = (
+                connection.execute(
+                    text(
+                        "SELECT cleanup_reconcile_until, updated_at "
+                        "FROM upload_sessions "
+                        "WHERE id = '019f8a00-0000-7000-8000-000000000041'"
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            assert row["cleanup_reconcile_until"] == reconcile_until.replace(tzinfo=None)
+            inspector = inspect(connection)
+            cleanup_column = next(
+                column
+                for column in inspector.get_columns("upload_sessions")
+                if column["name"] == "cleanup_reconcile_until"
+            )
+            assert isinstance(cleanup_column["type"], DATETIME)
+            assert cleanup_column["type"].fsp == MYSQL_DATETIME_FSP
+            upload_indexes = {
+                index["name"]: index["column_names"]
+                for index in inspector.get_indexes("upload_sessions")
+            }
+            assert upload_indexes["ix_upload_session_expiry_scan"] == [
+                "state",
+                "expires_at",
+                "id",
+            ]
+
+        with pytest.raises(RuntimeError, match="direct upload storage"):
+            command.downgrade(config, "b1c8e4f2a703")
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+                == "d4e7a1c9b205"
+            )
+            preserved_reconcile_until = connection.execute(
+                text(
+                    "SELECT cleanup_reconcile_until FROM upload_sessions "
+                    "WHERE id = '019f8a00-0000-7000-8000-000000000041'"
+                )
+            ).scalar_one()
+            assert preserved_reconcile_until == reconcile_until.replace(tzinfo=None)
+            cleanup_constraint = next(
+                constraint
+                for constraint in inspect(connection).get_check_constraints("upload_sessions")
+                if constraint["name"] == "ck_upload_session_cleanup_state"
+            )
+            assert "FINALIZED" in cleanup_constraint["sqltext"]
     finally:
         engine.dispose()
         with admin_engine.begin() as connection:

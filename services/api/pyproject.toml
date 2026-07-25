@@ -9,6 +9,7 @@ dependencies = [
   "commercevision-application",
   "commercevision-contracts",
   "commercevision-domain",
+  "commercevision-object-storage",
   "commercevision-observability",
   "commercevision-persistence",
   "fastapi>=0.115,<1",
@@ -25,6 +26,7 @@ commercevision-api = "commercevision_api.main:run"
 commercevision-application = { workspace = true }
 commercevision-contracts = { workspace = true }
 commercevision-domain = { workspace = true }
+commercevision-object-storage = { workspace = true }
 commercevision-observability = { workspace = true }
 commercevision-persistence = { workspace = true }
 

@@ -25,10 +25,13 @@ from commercevision_application import (
     OperationExecutorRegistry,
     OperationReconciliationPolicy,
     OperationRetryPolicy,
+    UploadObjectCleaner,
     build_event_routing_registry,
 )
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
+    ASSET_DELETE_REQUESTED_V1,
+    ASSET_VALIDATION_REQUESTED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
     OPERATION_RECOVERY_REQUESTED_V1,
     WORKFLOW_CANCELLED_V1,
@@ -39,14 +42,19 @@ from commercevision_contracts.events import (
     WORKFLOW_NODE_STARTED_V1,
     WORKFLOW_RESUME_REQUESTED_V1,
     WORKFLOW_RUN_REQUESTED_V1,
+    AssetDeleteRequestedPayload,
+    AssetValidationRequestedPayload,
     EventQueue,
     EventType,
 )
+from commercevision_contracts.object_storage import ObjectStorage
 from commercevision_domain import LeaseConflictError, NotFoundError, OperationKind
 from commercevision_domain.messaging import OutboxEvent
+from commercevision_object_storage import build_object_storage, close_object_storage
 from commercevision_persistence import (
     Database,
     MySQLCheckpointSaver,
+    SqlAlchemyAssetUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyUnitOfWork,
     create_database,
@@ -60,6 +68,9 @@ from commercevision_tool_runtime import (
 )
 from commercevision_tool_runtime.policy import ToolPolicy
 
+from .asset_cleanup import UploadSessionCleanupExecutor
+from .executors import available_builtin_operation_kinds
+
 
 @dataclass(slots=True)
 class WorkerRuntime:
@@ -71,6 +82,7 @@ class WorkerRuntime:
     event_router: EventRoutingRegistry
     operation_worker: DurableOperationWorker
     operation_executors: OperationExecutorRegistry
+    object_storage: ObjectStorage | None
 
     @classmethod
     def build(
@@ -81,12 +93,26 @@ class WorkerRuntime:
     ) -> WorkerRuntime:
         configured_executors = dict(operation_executors or {})
         missing_executors = set(settings.worker_required_operation_kinds).difference(
-            configured_executors
+            set(configured_executors).union(available_builtin_operation_kinds(settings))
         )
         if missing_executors:
             missing = ", ".join(sorted(kind.value for kind in missing_executors))
             raise RuntimeError(f"required operation executors are unavailable: {missing}")
         database = create_database(settings)
+        object_storage = (
+            build_object_storage(settings) if settings.worker_requires_object_storage else None
+        )
+        if object_storage is not None and OperationKind.ASSET_DELETION not in configured_executors:
+            configured_executors[OperationKind.ASSET_DELETION] = UploadSessionCleanupExecutor(
+                uow_factory=lambda: SqlAlchemyAssetUnitOfWork(database.session_factory),
+                cleaner=UploadObjectCleaner(object_storage),
+                reconciliation_interval=timedelta(
+                    seconds=settings.upload_cleanup_reconcile_interval_seconds
+                ),
+                final_cleanup_budget=timedelta(
+                    seconds=settings.operation_retry_max_elapsed_seconds
+                ),
+            )
 
         def uow_factory() -> SqlAlchemyUnitOfWork:
             return SqlAlchemyUnitOfWork(database.session_factory)
@@ -188,6 +214,7 @@ class WorkerRuntime:
             agent=FixtureAgentRuntime(graph, checkpointer),
             operation_worker=operation_worker,
             operation_executors=executor_registry,
+            object_storage=object_storage,
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
@@ -224,6 +251,14 @@ class WorkerRuntime:
         runtime.event_router.register_handler(
             contract=DEAD_LETTER_REPLAY_RECORDED_V1,
             handler=runtime._observe_replay_event,
+        )
+        runtime.event_router.register_handler(
+            contract=ASSET_VALIDATION_REQUESTED_V1,
+            handler=runtime._handle_asset_validation,
+        )
+        runtime.event_router.register_handler(
+            contract=ASSET_DELETE_REQUESTED_V1,
+            handler=runtime._handle_asset_delete,
         )
         return runtime
 
@@ -272,6 +307,8 @@ class WorkerRuntime:
         return "processed"
 
     def close(self) -> None:
+        if self.object_storage is not None:
+            close_object_storage(self.object_storage)
         self.database.dispose()
 
     def _load_initial_state(self, workflow_id: str, *, trace_id: str) -> FixtureAgentState:
@@ -327,6 +364,44 @@ class WorkerRuntime:
 
     def _handle_operation_recovery(self, event: OutboxEvent) -> None:
         self.operation_worker.handle_recovery_event(event)
+
+    def _handle_asset_validation(self, event: OutboxEvent) -> None:
+        payload = ASSET_VALIDATION_REQUESTED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, AssetValidationRequestedPayload):
+            raise TypeError("Asset validation contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Asset validation workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if event.envelope.aggregate_id != payload.operation_id:
+            raise EventRoutingError(
+                "Asset validation operation does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        self.operation_worker.execute(
+            workspace_id=payload.workspace_id,
+            operation_id=payload.operation_id,
+        )
+
+    def _handle_asset_delete(self, event: OutboxEvent) -> None:
+        payload = ASSET_DELETE_REQUESTED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, AssetDeleteRequestedPayload):
+            raise TypeError("Asset deletion contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Asset deletion workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if event.envelope.aggregate_id != payload.operation_id:
+            raise EventRoutingError(
+                "Asset deletion operation does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        self.operation_worker.execute(
+            workspace_id=payload.workspace_id,
+            operation_id=payload.operation_id,
+        )
 
     @staticmethod
     def _observe_replay_event(_event: OutboxEvent) -> None:

@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 import uvicorn
 from commercevision_contracts import HealthResponse, ServiceMetadata, Settings
 from commercevision_contracts.config import load_settings
-from commercevision_domain import new_uuid7
+from commercevision_domain import StorageLocationClass, new_uuid7
 from commercevision_observability import configure_logging, get_logger
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from .asset_routes import asset_router, upload_router
 from .catalog_routes import router as catalog_router
 from .container import ApiContainer
 from .errors import install_error_handlers
@@ -82,7 +83,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def readiness(response: Response) -> HealthResponse:
         checks: dict[str, str] = {"configuration": "ok"}
         if runtime_settings.readiness_probe_external:
-            checks.update(await probe_dependencies(runtime_settings))
+            checks.update(
+                await probe_dependencies(
+                    runtime_settings,
+                    object_storage_probe=lambda: (
+                        api.state.container.object_storage_readiness.assert_ready(
+                            (StorageLocationClass.QUARANTINE,)
+                        )
+                    ),
+                )
+            )
         else:
             checks["external_dependencies"] = "skipped"
 
@@ -105,6 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             phase="phase-1",
         )
 
+    api.include_router(upload_router)
+    api.include_router(asset_router)
     api.include_router(catalog_router)
     api.include_router(operation_router)
     api.include_router(workflow_router)

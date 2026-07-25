@@ -108,9 +108,12 @@ Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件�
 - 死信重放复制原事件契约并创建新 Event ID；原死信不可变，执行人、原因、时间和每次失败链路
   保存在追加历史中。
 - Worker 从 `commercevision.operation_executors` Python Entry Point 发现显式 Executor
-  Factory。Celery `WorkController` 构建时先验证生产配置声明的全部 Kind，每个 Worker
-  Process 再在接收任务前构建自己的 Runtime；缺失或初始化失败会终止启动而不是延迟到首条
-  消息。Runtime 就绪后原子写入 `worker_readiness_path`，容器健康检查读取同一标记。
+  Factory。Celery Master 在 `WorkController` 构建时验证全部 Kind，并在 fork 前用短超时
+  执行真实 MySQL 及所选 Queue 必需的远端探测，随后关闭 SDK/连接池；Maintenance Queue
+  要求对象存储，Workflow-only Worker 不创建或探测对象存储。每个 Prefork 子进程只构建本地
+  Runtime 并写入独立 PID 标记；Consumer 就绪后由 Master 原子写入共享
+  `worker_readiness_path`。容器健康检查同时核对 Master 标记、当前存活子进程标记和
+  RabbitMQ，缺失或初始化失败会在接收任务前阻断就绪。
 
 ## 身份与权限
 
@@ -128,6 +131,11 @@ Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件�
 - 生产 Secret 保存于 KMS/Secret Manager。
 - 数据库只保存 Secret Reference。
 - Pod 使用工作负载身份。
+- 生产 OSS 禁止静态 Access Key；ECS RAM Role 仅使用 IMDSv2，ACK OIDC Token 以只读文件
+  挂载并通过显式 STS VPC Endpoint 交换短期凭据。
+- OSS 凭据 Provider 在进程内复用并限制刷新等待时间；刷新失败、超时和不完整快照统一
+  关闭式拒绝，不回退到长期密钥或 IMDSv1。超时请求保留为单一 In-flight Future 防止
+  STS 风暴，但执行线程必须是守护线程，不能阻止 Pod 退出。
 - 支持双 Key 轮换。
 - Trusted Principal 双 Key 轮换使用显式 Current/Previous Key ID；Secret 可通过
   `CV_SECRETS_DIR` 下的 `CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET` 和

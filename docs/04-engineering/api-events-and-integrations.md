@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-22 |
+| 最后更新 | 2026-07-25 |
 | 适用版本 | API v1 |
 
 ## API 原则
@@ -14,7 +14,7 @@
 - 所有写接口支持 `Idempotency-Key`。
 - 所有响应包含 `request_id` 和 `trace_id`。
 - 列表使用游标分页。
-- 大文件使用 OSS 预签名上传。
+- 文件使用 MinIO/OSS 预签名 PUT 直接上传，字节不经过 Control API 或 Web Proxy。
 
 ## 核心 API
 
@@ -46,12 +46,39 @@ POST /api/v1/workflows/{id}/results:regenerate
 ### Asset
 
 ```text
-POST   /api/v1/assets/uploads
-POST   /api/v1/assets/uploads/{uploadId}:complete
+POST   /api/v1/upload-sessions
+GET    /api/v1/upload-sessions/{uploadSessionId}
+POST   /api/v1/upload-sessions/{uploadSessionId}:abort
+POST   /api/v1/upload-sessions/{uploadSessionId}:finalize
 GET    /api/v1/assets/{assetId}
-DELETE /api/v1/assets/{assetId}
-GET    /api/v1/reference-assets:search
 ```
+
+创建接口返回仅绑定一个服务端 Key 的短期 PUT URL、允许的 Headers、精确最大字节数和
+SHA-256 策略。文件名只保存为元数据；响应不返回凭证、Bucket、对象 Key 或无限制 URL。
+Finalize 使用 `Idempotency-Key`、请求 Hash 和 `expected_version`，返回 `202` 及唯一的
+Quarantined Asset、不可变 Asset Version 和 `ASSET_VALIDATION` Durable Operation。
+Finalize 先在 MySQL 领取带 Token 的短 Lease，再在事务外完成 HEAD、受限流式 SHA-256、
+完整图片解码。证明成功后，Asset、Asset Version、隔离区精确 Provider Version 对象事实、
+Durable Operation、Outbox 和 Session 结果在一个事务中提交。Finalize 不复制、提升或删除
+对象；已登记的隔离对象是后续校验的唯一输入，Ticket 05 在恶意文件、内容安全与政策检查
+通过后才执行到 Task/Foundation 的条件提升。
+
+由于已签发的 Presigned PUT 不能撤销，只有 `ABORTED` 或 `EXPIRED` Session 的隔离对象进入
+耐久清理。清理事件在 URL 到期并经过配置的时钟偏差缓冲后才可发布。首次删除后同一个
+Cleanup Operation 进入 `RECONCILING`，在持久化截止时间前周期性重复精确版本清理；首次
+HEAD 后完成的迟到 PUT 仍由该 Operation 收敛，不创建第二套 Lease、重试或 Outbox 控制面。
+Cleanup Operation 的累计执行预算从事件变为可消费时开始计算，等待 URL 失效不会提前耗尽
+业务重试预算。成功 Finalize 的隔离对象不得被 Upload Session 清理器删除。
+Session 到期阻止新的 `OPEN` finalize claim；到期前已领取的 finalize 由其 Lease 截止时间
+约束。进程中断后仅能在 Lease 到期时 Session 本身仍有效的情况下重新认领；Session 与
+Lease 都已到期时，API 与 Scheduler 使用同一个 `expire_abandoned` 状态转换，谁先取得行锁
+都只能将其转为 `EXPIRED` 并进入清理。
+
+Finalize 分为三个事务边界：MySQL 认领 Lease；事务外 HEAD、受限流式 SHA-256 和图片解码
+证明；最后一次 MySQL 事务原子提交 Asset、Asset Version、对象事实、Operation、Upload
+Session 和 Outbox。存储不可用或条件读取冲突会释放 Lease 并保留同一幂等请求供重试；对象
+长度、Checksum、MIME、格式或解码证明不匹配会稳定终止该 Session，并在 Presigned URL
+失效后进入同一个耐久清理与复核流程。
 
 ### Configuration
 
@@ -82,6 +109,15 @@ GET  /api/v1/operator/legacy-dead-letters/{deadLetterId}
 - `X-Workspace-Id` 只选择工作区，不承担认证。入口网关必须移除调用方同名 Header，并生成
   HMAC-SHA256 签名的短期 `X-Trusted-Principal`，包含 Actor、工作区成员关系、工作区管理员
   授权和系统管理员声明。签名 Secret 缺失、签名无效、过期或授权缺失时 API 关闭式拒绝。
+- Web BFF 是公开 Demo 的受信入口 Adapter：它拒绝
+  `CV_WEB_ALLOWED_WORKSPACE_IDS` 之外的 Workspace，覆盖浏览器传入的 Actor/Principal，
+  并用服务端 Current Key 为每个请求签发短期成员 Principal。企业部署必须由真实会话或
+  上游身份网关计算 Workspace 授权，不能把浏览器 Header 直接转换成成员关系。
+- Upload Session 与 Asset 路由和 Operation 路由使用同一 Trusted Principal 边界。业务
+  `actor_id` 只能来自签名 Claims；浏览器提供的 `X-Actor-Id` 和
+  `X-Trusted-Principal` 会被 BFF 覆盖。BFF 对控制面请求体限制为 1 MiB、响应体限制为
+  2 MiB，并在 `CV_API_PROXY_TIMEOUT_MS` 截止时间内完成上游响应读取；商品图片只通过短期
+  Presigned PUT 直传对象存储，不穿过这些 JSON 限制。
 - Principal Token 格式为 `<key-id>.<base64url-claims>.<hex-signature>`，签名输入包含
   `key-id` 和 Claims。API 同时验证一个 Current Key 和一个 Previous Key，未知 Key ID
   即使签名格式正确也关闭式拒绝；滚动轮换完成后必须删除 Previous Key。`actor_id` 在签名
@@ -184,6 +220,25 @@ Phase 1 已发布的 v1 契约全部路由至 Workflow Queue：
   `workflow.human_input.required`、`workflow.human_input.received`、
   `workflow.failed`、`workflow.cancelled` 是显式注册的通知/审计事件。Worker 通过 Inbox
   记录已观察状态，不重复执行 Graph，也不会将它们误判为未知事件。
+
+Ticket 04 发布 `asset.validation.requested` v1 到 Asset Queue。Payload 包含
+`asset_id`、`asset_version_id`、`object_fact_id` 和 `operation_id`；Worker 先通过
+Inbox 去重并验证 Envelope 的 Workspace/Aggregate，再由 Durable Operation 作为唯一业务
+重试权威执行。重复投递不产生第二次校验执行。
+
+同一个 Finalize 提交还发布 `asset.upload.finalized` v1 Observation，Payload 固定引用
+Upload Session、Asset、Asset Version、对象事实和 Validation Operation。该事件以 Asset
+作为 Aggregate，供审计和进度观察者消费；它不替代 `asset.validation.requested` Command，
+也不创建第二个业务重试权威。
+
+Ticket 04 只创建和传递该 Durable Operation，并完成 finalize 所必需的对象完整性、受限
+流式 SHA-256 与安全图片解码证明。恶意软件扫描、内容安全判定、来源/权利校验以及使 Asset
+进入可用状态属于 Ticket 05 及后续工作；本 Ticket 不把这些检查标记为已完成。
+在 Ticket 05 注册 `ASSET_VALIDATION` Executor 前，本地 Compose Worker 订阅 Workflow 和
+Maintenance Queue。这样 Upload Session 到期和终止后的隔离对象都能耐久收敛；
+Asset Queue 暂不绑定消费者，校验事件保留在 RabbitMQ 和 MySQL Outbox 中，不会因为缺少
+Executor 被错误标记为终态失败。Worker/Event 集成门禁通过显式注入的确定性 Executor 验证
+Inbox 去重与 Durable Operation 重试权威。
 
 未知事件类型、已知事件的不支持版本、未绑定处理器和格式错误的 Payload 都先发布至
 Maintenance Queue，再由 Worker 记录为永久失败并写入 DLQ；不会静默成功。

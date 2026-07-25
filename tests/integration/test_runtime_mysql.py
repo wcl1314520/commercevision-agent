@@ -68,7 +68,7 @@ class FailingCommitUnitOfWork(SqlAlchemyUnitOfWork):
     [
         ("asset.event.never-registered", 1, "unknown_event_type"),
         ("workflow.run.requested", 99, "unsupported_schema_version"),
-        ("asset.validation.requested", 1, "unhandled_event"),
+        ("asset.validation.requested", 1, "malformed_event_payload"),
         ("workflow.run.requested", 1, "malformed_event_payload"),
     ],
 )

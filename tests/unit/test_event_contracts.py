@@ -4,6 +4,9 @@ import pytest
 from commercevision_contracts.events import (
     EVENT_CONTRACTS,
     PHASE1_EVENT_CONTRACTS,
+    AssetDeleteRequestedPayload,
+    AssetUploadFinalizedPayload,
+    AssetValidationRequestedPayload,
     DeadLetterReplayRecordedPayload,
     EventHandling,
     EventQueue,
@@ -144,3 +147,65 @@ def test_dead_letter_replay_contract_carries_source_identity_and_attempt() -> No
     assert isinstance(payload, DeadLetterReplayRecordedPayload)
     assert payload.replay_attempt == 2
     assert contract.handling == EventHandling.OBSERVATION
+
+
+def test_asset_validation_request_is_a_typed_asset_command() -> None:
+    contract = event_contract_for(EventType.ASSET_VALIDATION_REQUESTED, 1)
+
+    payload = contract.validate_payload(
+        {
+            "operation_id": "019asset-operation",
+            "workspace_id": "workspace-a",
+            "asset_id": "019asset",
+            "asset_version_id": "019asset-version",
+            "object_fact_id": "019object-fact",
+            "integrity_policy_version": "image-integrity-v1",
+            "content_sha256": "a" * 64,
+        }
+    )
+
+    assert isinstance(payload, AssetValidationRequestedPayload)
+    assert contract.queue == EventQueue.ASSET
+    assert contract.handling == EventHandling.COMMAND
+
+
+def test_asset_upload_finalized_is_a_typed_asset_observation() -> None:
+    contract = event_contract_for(EventType.ASSET_UPLOAD_FINALIZED, 1)
+
+    payload = contract.validate_payload(
+        {
+            "workspace_id": "workspace-a",
+            "upload_session_id": "019upload-session",
+            "asset_id": "019asset",
+            "asset_version_id": "019asset-version",
+            "object_fact_id": "019object-fact",
+            "validation_operation_id": "019validation-operation",
+        }
+    )
+
+    assert isinstance(payload, AssetUploadFinalizedPayload)
+    assert contract.queue == EventQueue.ASSET
+    assert contract.handling == EventHandling.OBSERVATION
+
+
+@pytest.mark.parametrize("reason", ["UPLOAD_EXPIRED", "UPLOAD_PROMOTED"])
+def test_upload_cleanup_is_a_typed_maintenance_command(reason: str) -> None:
+    contract = event_contract_for(EventType.ASSET_DELETE_REQUESTED, 1)
+
+    payload = contract.validate_payload(
+        {
+            "operation_id": "019cleanup-operation",
+            "workspace_id": "workspace-a",
+            "target_type": "UPLOAD_SESSION",
+            "target_id": "019upload-session",
+            "target_version": 3,
+            "reason": reason,
+        }
+    )
+
+    assert isinstance(payload, AssetDeleteRequestedPayload)
+    assert payload.target_type == "UPLOAD_SESSION"
+    assert "bucket" not in payload.model_dump()
+    assert "key" not in payload.model_dump()
+    assert contract.queue == EventQueue.MAINTENANCE
+    assert contract.handling == EventHandling.COMMAND

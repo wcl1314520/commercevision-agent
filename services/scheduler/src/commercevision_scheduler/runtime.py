@@ -16,13 +16,16 @@ from commercevision_application import (
     OperationRecoveryService,
     OutboxDispatcher,
     RecoveryService,
+    UploadSessionMaintenanceService,
     build_event_routing_registry,
 )
+from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolicy
 from commercevision_contracts import Settings
 from commercevision_contracts.events import EventQueue
 from commercevision_domain.messaging import OutboxEvent
 from commercevision_persistence import (
     Database,
+    SqlAlchemyAssetUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyUnitOfWork,
     create_database,
@@ -205,6 +208,7 @@ class SchedulerState:
     recovered_steps_total: int = 0
     recovered_workflows_total: int = 0
     recovered_operations_total: int = 0
+    expired_uploads_total: int = 0
     scanners: dict[str, ScannerStatus] | None = None
 
     @property
@@ -253,6 +257,23 @@ class SchedulerRuntime:
                 seconds=settings.operation_reconciliation_max_elapsed_seconds
             ),
         )
+        self.upload_maintenance = UploadSessionMaintenanceService(
+            uow_factory=lambda: SqlAlchemyAssetUnitOfWork(self.database.session_factory),
+            batch_size=settings.scheduler_batch_size,
+            cleanup_policy=UploadCleanupPolicy(
+                max_attempts=settings.upload_cleanup_max_attempts,
+                max_reconciliation_attempts=(settings.upload_cleanup_reconcile_max_attempts),
+                execution_max_elapsed=timedelta(
+                    seconds=settings.operation_retry_max_elapsed_seconds
+                ),
+                presign_replay_grace=timedelta(
+                    seconds=settings.upload_cleanup_presign_grace_seconds
+                ),
+                reconciliation_horizon=timedelta(
+                    seconds=settings.upload_cleanup_reconcile_horizon_seconds
+                ),
+            ),
+        )
         self.state = SchedulerState()
         self.orchestrator = IndependentScannerOrchestrator(
             scanners=(
@@ -270,6 +291,11 @@ class SchedulerRuntime:
                     "operation_recovery",
                     settings.scheduler_operation_recovery_interval_seconds,
                     self._recover_operations_once,
+                ),
+                ScannerDefinition(
+                    "upload_session_expiry",
+                    settings.scheduler_recovery_interval_seconds,
+                    self._expire_upload_sessions_once,
                 ),
             ),
             timeout_seconds=settings.scheduler_scanner_timeout_seconds,
@@ -299,6 +325,11 @@ class SchedulerRuntime:
         recovered = self.operation_recovery.recover_once()
         self.state.recovered_operations_total += recovered
         return recovered
+
+    def _expire_upload_sessions_once(self) -> int:
+        expired = self.upload_maintenance.expire_due_once()
+        self.state.expired_uploads_total += expired
+        return expired
 
     def close(self) -> None:
         self.database.dispose()

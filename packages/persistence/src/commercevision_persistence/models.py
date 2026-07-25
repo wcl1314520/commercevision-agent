@@ -67,6 +67,7 @@ class Base(DeclarativeBase):
 class WorkflowModel(Base):
     __tablename__ = "workflows"
     __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_workflows_workspace_id"),
         Index("ix_workflows_workspace_created", "workspace_id", "created_at", "id"),
         Index("ix_workflows_status_updated", "status", "updated_at"),
         Index("ix_workflows_retention_expires", "retention_status", "expires_at"),
@@ -154,6 +155,12 @@ class SKUModel(Base):
             name="fk_skus_workspace_product",
             ondelete="RESTRICT",
         ),
+        UniqueConstraint(
+            "workspace_id",
+            "product_id",
+            "id",
+            name="uq_skus_workspace_product_id",
+        ),
         Index("ix_skus_workspace_product", "workspace_id", "product_id", "created_at", "id"),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
@@ -169,6 +176,321 @@ class SKUModel(Base):
     brand: Mapped[str] = mapped_column(String(128), nullable=False)
     attributes_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class UploadSessionModel(Base):
+    __tablename__ = "upload_sessions"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_upload_session_workspace_id"),
+        UniqueConstraint("reserved_asset_id", name="uq_upload_session_reserved_asset"),
+        UniqueConstraint(
+            "reserved_asset_version_id",
+            name="uq_upload_session_reserved_asset_version",
+        ),
+        UniqueConstraint(
+            "cleanup_operation_id",
+            name="uq_upload_session_cleanup_operation",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "workflow_id"],
+            ["workflows.workspace_id", "workflows.id"],
+            name="fk_upload_session_workspace_workflow",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_id"],
+            ["products.workspace_id", "products.id"],
+            name="fk_upload_session_workspace_product",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_id", "sku_id"],
+            ["skus.workspace_id", "skus.product_id", "skus.id"],
+            name="fk_upload_session_workspace_sku",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "finalized_asset_version_id"],
+            ["asset_versions.workspace_id", "asset_versions.id"],
+            name="fk_upload_session_finalized_version",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "validation_operation_id"],
+            ["durable_operations.workspace_id", "durable_operations.id"],
+            name="fk_upload_session_validation_operation",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "cleanup_operation_id"],
+            ["durable_operations.workspace_id", "durable_operations.id"],
+            name="fk_upload_session_cleanup_operation",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(retention_class = 'TASK' AND workflow_id IS NOT NULL) "
+            "OR (retention_class = 'FOUNDATION' AND workflow_id IS NULL)",
+            name="ck_upload_session_retention_owner",
+        ),
+        CheckConstraint(
+            "sku_id IS NULL OR product_id IS NOT NULL",
+            name="ck_upload_session_sku_product",
+        ),
+        CheckConstraint(
+            "(retention_class = 'TASK' AND destination_location = 'TASK') "
+            "OR (retention_class = 'FOUNDATION' AND destination_location = 'FOUNDATION')",
+            name="ck_upload_session_destination_retention",
+        ),
+        CheckConstraint(
+            "storage_location = 'QUARANTINE'",
+            name="ck_upload_session_source_quarantine",
+        ),
+        CheckConstraint(
+            "storage_bucket <> destination_bucket OR storage_key <> destination_key",
+            name="ck_upload_session_distinct_storage",
+        ),
+        CheckConstraint(
+            "(state = 'FINALIZING' AND finalize_lease_owner IS NOT NULL "
+            "AND finalize_lease_token IS NOT NULL AND finalize_lease_expires_at IS NOT NULL) "
+            "OR (state <> 'FINALIZING' AND finalize_lease_owner IS NULL "
+            "AND finalize_lease_token IS NULL AND finalize_lease_expires_at IS NULL)",
+            name="ck_upload_session_finalize_lease",
+        ),
+        CheckConstraint(
+            "(state = 'FINALIZED' AND finalized_asset_version_id IS NOT NULL "
+            "AND validation_operation_id IS NOT NULL) "
+            "OR (state <> 'FINALIZED' AND finalized_asset_version_id IS NULL "
+            "AND validation_operation_id IS NULL)",
+            name="ck_upload_session_finalize_result",
+        ),
+        CheckConstraint(
+            "finalized_asset_version_id IS NULL "
+            "OR finalized_asset_version_id = reserved_asset_version_id",
+            name="ck_upload_session_reserved_result",
+        ),
+        CheckConstraint(
+            "(state = 'ABORTED' AND failure_code IS NOT NULL) "
+            "OR (state <> 'ABORTED' AND failure_code IS NULL)",
+            name="ck_upload_session_failure_state",
+        ),
+        CheckConstraint(
+            "cleanup_operation_id IS NULL OR state IN ('FINALIZED', 'EXPIRED', 'ABORTED')",
+            name="ck_upload_session_cleanup_state",
+        ),
+        CheckConstraint(
+            "(cleanup_operation_id IS NULL AND cleanup_reconcile_until IS NULL) "
+            "OR (cleanup_operation_id IS NOT NULL "
+            "AND cleanup_reconcile_until IS NOT NULL "
+            "AND state IN ('FINALIZED', 'EXPIRED', 'ABORTED'))",
+            name="ck_upload_session_cleanup_reconcile_window",
+        ),
+        CheckConstraint("expected_byte_length > 0", name="ck_upload_session_byte_length"),
+        CheckConstraint(
+            "version > 0 AND finalize_attempts >= 0",
+            name="ck_upload_session_counters",
+        ),
+        Index("ix_upload_session_workspace_state", "workspace_id", "state", "expires_at"),
+        Index("ix_upload_session_finalize_lease", "state", "finalize_lease_expires_at"),
+        Index("ix_upload_session_expiry_scan", "state", "expires_at", "id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reserved_asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reserved_asset_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    retention_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    asset_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    declared_mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    expected_byte_length: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expected_sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    workflow_id: Mapped[str | None] = mapped_column(String(36))
+    product_id: Mapped[str | None] = mapped_column(String(36))
+    sku_id: Mapped[str | None] = mapped_column(String(36))
+    category: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(64), nullable=False)
+    upload_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    integrity_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_backend: Mapped[str] = mapped_column(String(16), nullable=False)
+    storage_location: Mapped[str] = mapped_column(String(24), nullable=False)
+    storage_bucket: Mapped[str] = mapped_column(exact_string_sql_type(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(exact_string_sql_type(512), nullable=False)
+    destination_location: Mapped[str] = mapped_column(String(24), nullable=False)
+    destination_bucket: Mapped[str] = mapped_column(exact_string_sql_type(255), nullable=False)
+    destination_key: Mapped[str] = mapped_column(exact_string_sql_type(512), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    finalize_lease_owner: Mapped[str | None] = mapped_column(String(128))
+    finalize_lease_token: Mapped[str | None] = mapped_column(String(36))
+    finalize_lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    finalize_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(128))
+    finalized_asset_version_id: Mapped[str | None] = mapped_column(String(36))
+    validation_operation_id: Mapped[str | None] = mapped_column(String(36))
+    cleanup_operation_id: Mapped[str | None] = mapped_column(String(36))
+    cleanup_reconcile_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class AssetModel(Base):
+    __tablename__ = "assets"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_assets_workspace_id"),
+        ForeignKeyConstraint(
+            ["workspace_id", "workflow_id"],
+            ["workflows.workspace_id", "workflows.id"],
+            name="fk_assets_workspace_workflow",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_id"],
+            ["products.workspace_id", "products.id"],
+            name="fk_assets_workspace_product",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_id", "sku_id"],
+            ["skus.workspace_id", "skus.product_id", "skus.id"],
+            name="fk_assets_workspace_sku",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "current_version_id"],
+            ["asset_versions.workspace_id", "asset_versions.id"],
+            name="fk_assets_workspace_current_version",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        CheckConstraint(
+            "(retention_class = 'TASK' AND workflow_id IS NOT NULL) "
+            "OR (retention_class = 'FOUNDATION' AND workflow_id IS NULL)",
+            name="ck_assets_retention_owner",
+        ),
+        CheckConstraint(
+            "(retention_class = 'TASK' AND retention_deadline IS NOT NULL) "
+            "OR (retention_class = 'FOUNDATION' AND retention_deadline IS NULL)",
+            name="ck_assets_retention_deadline",
+        ),
+        CheckConstraint("sku_id IS NULL OR product_id IS NOT NULL", name="ck_assets_sku_product"),
+        Index("ix_assets_workspace_status", "workspace_id", "status", "updated_at", "id"),
+        Index("ix_assets_retention_deadline", "status", "retention_deadline"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    retention_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    asset_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    workflow_id: Mapped[str | None] = mapped_column(String(36))
+    product_id: Mapped[str | None] = mapped_column(String(36))
+    sku_id: Mapped[str | None] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_version_id: Mapped[str | None] = mapped_column(String(36))
+    retention_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class AssetVersionModel(Base):
+    __tablename__ = "asset_versions"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_asset_version_workspace_id"),
+        UniqueConstraint("upload_session_id", name="uq_asset_version_upload_session"),
+        UniqueConstraint(
+            "asset_id",
+            "version_number",
+            name="uq_asset_version_number",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_id"],
+            ["assets.workspace_id", "assets.id"],
+            name="fk_asset_version_workspace_asset",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "upload_session_id"],
+            ["upload_sessions.workspace_id", "upload_sessions.id"],
+            name="fk_asset_version_workspace_upload",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("version_number > 0", name="ck_asset_version_number"),
+        CheckConstraint("byte_size > 0", name="ck_asset_version_byte_size"),
+        Index("ix_asset_version_workspace_sha", "workspace_id", "sha256"),
+        Index("ix_asset_version_asset_created", "asset_id", "created_at", "id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    upload_session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    declared_mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    detected_mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    image_format: Mapped[str] = mapped_column(String(16), nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    frame_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(64), nullable=False)
+    integrity_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class AssetObjectModel(Base):
+    __tablename__ = "asset_objects"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_asset_object_workspace_id"),
+        UniqueConstraint(
+            "asset_version_id",
+            "role",
+            name="uq_asset_object_version_role",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_version_id"],
+            ["asset_versions.workspace_id", "asset_versions.id"],
+            name="fk_asset_object_workspace_version",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("byte_size > 0", name="ck_asset_object_byte_size"),
+        CheckConstraint(
+            "CHAR_LENGTH(TRIM(provider_version_id)) > 0 "
+            "AND LOWER(TRIM(provider_version_id)) <> 'null'",
+            name="ck_asset_object_provider_version",
+        ),
+        CheckConstraint(
+            "state <> 'QUARANTINED' OR location = 'QUARANTINE'",
+            name="ck_asset_object_quarantine_location",
+        ),
+        Index("ix_asset_object_workspace_state", "workspace_id", "state", "updated_at"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    asset_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    backend: Mapped[str] = mapped_column(String(16), nullable=False)
+    location: Mapped[str] = mapped_column(String(24), nullable=False)
+    bucket: Mapped[str] = mapped_column(exact_string_sql_type(255), nullable=False)
+    key: Mapped[str] = mapped_column(exact_string_sql_type(512), nullable=False)
+    provider_version_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    etag: Mapped[str] = mapped_column(exact_string_sql_type(512), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

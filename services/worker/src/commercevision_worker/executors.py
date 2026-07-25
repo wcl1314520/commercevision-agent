@@ -11,6 +11,13 @@ from commercevision_contracts import Settings
 from commercevision_domain import OperationKind
 
 OPERATION_EXECUTOR_ENTRY_POINT_GROUP = "commercevision.operation_executors"
+BUILTIN_OPERATION_KINDS = frozenset({OperationKind.ASSET_DELETION})
+
+
+def available_builtin_operation_kinds(settings: Settings) -> frozenset[OperationKind]:
+    if settings.worker_requires_object_storage:
+        return BUILTIN_OPERATION_KINDS
+    return frozenset()
 
 
 class OperationExecutorFactory(Protocol):

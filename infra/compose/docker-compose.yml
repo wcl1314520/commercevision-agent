@@ -1,5 +1,42 @@
 name: commercevision
 
+x-object-storage-runtime-environment: &object-storage-runtime-environment
+  CV_OBJECT_STORE_BACKEND: ${CV_OBJECT_STORE_BACKEND:-minio}
+  CV_OBJECT_STORE_CREDENTIAL_MODE: ${CV_OBJECT_STORE_CREDENTIAL_MODE:-static}
+  CV_OBJECT_STORE_ENDPOINT: ${CV_OBJECT_STORE_ENDPOINT:-http://minio:9000}
+  CV_OBJECT_STORE_PRESIGN_ENDPOINT: ${CV_OBJECT_STORE_PRESIGN_ENDPOINT:-http://localhost:${CV_MINIO_API_HOST_PORT:-19000}}
+  CV_OBJECT_STORE_ACCESS_KEY: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
+  CV_OBJECT_STORE_SECRET_KEY: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+  CV_OBJECT_STORE_SESSION_TOKEN: ${CV_OBJECT_STORE_SESSION_TOKEN:-}
+  CV_OBJECT_STORE_RAM_ROLE_NAME: ${CV_OBJECT_STORE_RAM_ROLE_NAME:-}
+  CV_OBJECT_STORE_OIDC_ROLE_ARN: ${CV_OBJECT_STORE_OIDC_ROLE_ARN:-}
+  CV_OBJECT_STORE_OIDC_PROVIDER_ARN: ${CV_OBJECT_STORE_OIDC_PROVIDER_ARN:-}
+  CV_OBJECT_STORE_OIDC_TOKEN_FILE_PATH: ${CV_OBJECT_STORE_OIDC_TOKEN_FILE_PATH:-}
+  CV_OBJECT_STORE_STS_ENDPOINT: ${CV_OBJECT_STORE_STS_ENDPOINT:-}
+  CV_OBJECT_STORE_ROLE_SESSION_NAME: ${CV_OBJECT_STORE_ROLE_SESSION_NAME:-commercevision-object-storage}
+  CV_OBJECT_STORE_REGION: ${CV_OBJECT_STORE_REGION:-us-east-1}
+  CV_OBJECT_STORE_FORCE_PATH_STYLE: ${CV_OBJECT_STORE_FORCE_PATH_STYLE:-true}
+  CV_OBJECT_STORE_TLS_VERIFY: ${CV_OBJECT_STORE_TLS_VERIFY:-true}
+  CV_OBJECT_STORE_REQUIRE_ENCRYPTION: ${CV_OBJECT_STORE_REQUIRE_ENCRYPTION:-false}
+  CV_OBJECT_STORE_CONNECT_TIMEOUT_SECONDS: ${CV_OBJECT_STORE_CONNECT_TIMEOUT_SECONDS:-3}
+  CV_OBJECT_STORE_READ_TIMEOUT_SECONDS: ${CV_OBJECT_STORE_READ_TIMEOUT_SECONDS:-30}
+  CV_OBJECT_STORE_READINESS_TIMEOUT_SECONDS: ${CV_OBJECT_STORE_READINESS_TIMEOUT_SECONDS:-1}
+  CV_OBJECT_STORE_CREDENTIAL_REFRESH_TIMEOUT_SECONDS: ${CV_OBJECT_STORE_CREDENTIAL_REFRESH_TIMEOUT_SECONDS:-5}
+  CV_OBJECT_STORE_QUARANTINE_BUCKET: ${CV_OBJECT_STORE_QUARANTINE_BUCKET:-quarantine-assets}
+  CV_OBJECT_STORE_TASK_BUCKET: ${CV_OBJECT_STORE_TASK_BUCKET:-${CV_OBJECT_STORE_BUCKET:-task-assets}}
+  CV_OBJECT_STORE_FOUNDATION_BUCKET: ${CV_OBJECT_STORE_FOUNDATION_BUCKET:-foundation-assets}
+  CV_OBJECT_STORE_PROVIDER_RESULT_BUCKET: ${CV_OBJECT_STORE_PROVIDER_RESULT_BUCKET:-provider-results}
+
+x-upload-cleanup-runtime-environment: &upload-cleanup-runtime-environment
+  CV_UPLOAD_CLEANUP_PRESIGN_GRACE_SECONDS: ${CV_UPLOAD_CLEANUP_PRESIGN_GRACE_SECONDS:-30}
+  CV_UPLOAD_CLEANUP_MAX_ATTEMPTS: ${CV_UPLOAD_CLEANUP_MAX_ATTEMPTS:-600}
+  CV_UPLOAD_CLEANUP_RECONCILE_INTERVAL_SECONDS: ${CV_UPLOAD_CLEANUP_RECONCILE_INTERVAL_SECONDS:-3600}
+  CV_UPLOAD_CLEANUP_RECONCILE_HORIZON_SECONDS: ${CV_UPLOAD_CLEANUP_RECONCILE_HORIZON_SECONDS:-259200}
+  CV_UPLOAD_CLEANUP_RECONCILE_MAX_ATTEMPTS: ${CV_UPLOAD_CLEANUP_RECONCILE_MAX_ATTEMPTS:-80}
+  CV_OPERATION_RETRY_MAX_ELAPSED_SECONDS: ${CV_OPERATION_RETRY_MAX_ELAPSED_SECONDS:-86400}
+  CV_OPERATION_RECONCILIATION_MAX_SECONDS: ${CV_OPERATION_RECONCILIATION_MAX_SECONDS:-3600}
+  CV_OPERATION_RECONCILIATION_MAX_ELAPSED_SECONDS: ${CV_OPERATION_RECONCILIATION_MAX_ELAPSED_SECONDS:-345600}
+
 services:
   mysql:
     image: mysql:8.4
@@ -77,6 +114,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
       MINIO_ROOT_PASSWORD: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${CV_OBJECT_STORE_CORS_ORIGINS:-http://localhost:13000}
     ports:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_MINIO_API_HOST_PORT:-19000}:9000"
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_MINIO_CONSOLE_HOST_PORT:-19001}:9001"
@@ -87,6 +125,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks: [commercevision]
+
+  object-storage-init:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        UV_INDEX_URL: ${CV_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command: ["commercevision-provision-minio"]
+    environment:
+      CV_SERVICE_NAME: object-storage-init
+      CV_ENVIRONMENT: local
+      CV_OBJECT_STORE_BACKEND: minio
+      CV_OBJECT_STORE_ENDPOINT: http://minio:9000
+      CV_OBJECT_STORE_ACCESS_KEY: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
+      CV_OBJECT_STORE_SECRET_KEY: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+      CV_OBJECT_STORE_REGION: ${CV_OBJECT_STORE_REGION:-us-east-1}
+      CV_OBJECT_STORE_FORCE_PATH_STYLE: ${CV_OBJECT_STORE_FORCE_PATH_STYLE:-true}
+      CV_OBJECT_STORE_TLS_VERIFY: ${CV_OBJECT_STORE_TLS_VERIFY:-true}
+      CV_OBJECT_STORE_QUARANTINE_BUCKET: ${CV_OBJECT_STORE_QUARANTINE_BUCKET:-quarantine-assets}
+      CV_OBJECT_STORE_TASK_BUCKET: ${CV_OBJECT_STORE_TASK_BUCKET:-${CV_OBJECT_STORE_BUCKET:-task-assets}}
+      CV_OBJECT_STORE_FOUNDATION_BUCKET: ${CV_OBJECT_STORE_FOUNDATION_BUCKET:-foundation-assets}
+      CV_OBJECT_STORE_PROVIDER_RESULT_BUCKET: ${CV_OBJECT_STORE_PROVIDER_RESULT_BUCKET:-provider-results}
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
     networks: [commercevision]
 
   etcd:
@@ -166,17 +231,28 @@ services:
       - --port
       - "8000"
     environment:
+      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment]
       CV_SERVICE_NAME: control-api
       CV_ENVIRONMENT: local
       CV_READINESS_PROBE_EXTERNAL: "true"
       CV_MYSQL_DSN: mysql+aiomysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_REDIS_URL: redis://redis:6379/0
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
       CV_MILVUS_URI: http://milvus:19530
       CV_MILVUS_HEALTH_URI: http://milvus:9091/healthz
-      CV_OBJECT_STORE_ENDPOINT: http://minio:9000
-      CV_OBJECT_STORE_ACCESS_KEY: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
-      CV_OBJECT_STORE_SECRET_KEY: ${CV_OBJECT_STORE_SECRET_KEY:-commercevision-secret}
+      CV_UPLOAD_SESSION_EXPIRY_SECONDS: ${CV_UPLOAD_SESSION_EXPIRY_SECONDS:-900}
+      CV_UPLOAD_FINALIZE_LEASE_SECONDS: ${CV_UPLOAD_FINALIZE_LEASE_SECONDS:-120}
+      CV_UPLOAD_MAX_BYTES: ${CV_UPLOAD_MAX_BYTES:-10485760}
+      CV_UPLOAD_MAX_IMAGE_DIMENSION: ${CV_UPLOAD_MAX_IMAGE_DIMENSION:-1280}
+      CV_UPLOAD_MAX_IMAGE_PIXELS: ${CV_UPLOAD_MAX_IMAGE_PIXELS:-1638400}
+      CV_UPLOAD_MAX_IMAGE_FRAMES: ${CV_UPLOAD_MAX_IMAGE_FRAMES:-1}
+      CV_UPLOAD_MAX_METADATA_BYTES: ${CV_UPLOAD_MAX_METADATA_BYTES:-262144}
+      CV_UPLOAD_POLICY_VERSION: ${CV_UPLOAD_POLICY_VERSION:-direct-put-v1}
+      CV_UPLOAD_INTEGRITY_POLICY_VERSION: ${CV_UPLOAD_INTEGRITY_POLICY_VERSION:-image-integrity-v1}
+      CV_ASSET_VALIDATION_MAX_ATTEMPTS: ${CV_ASSET_VALIDATION_MAX_ATTEMPTS:-5}
+      CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID: ${CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID:-local-web-gateway}
+      CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET: ${CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET:-local-web-gateway-secret-change-before-production}
     ports:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_API_HOST_PORT:-18000}:8000"
     depends_on:
@@ -188,8 +264,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      object-storage-init:
+        condition: service_completed_successfully
       milvus:
         condition: service_healthy
     restart: unless-stopped
@@ -217,18 +293,25 @@ services:
       - -A
       - commercevision_worker.celery_app:celery_app
       - worker
+      - --pool=prefork
       - --loglevel=INFO
       - --concurrency=${CV_WORKER_CONCURRENCY:-2}
     environment:
+      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment]
       CV_SERVICE_NAME: agent-worker
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
+      CV_WORKER_CONCURRENCY: "${CV_WORKER_CONCURRENCY:-2}"
       CV_WORKER_READINESS_PATH: /tmp/commercevision-worker-ready.json
+      CV_WORKER_QUEUES: '["commercevision.workflow", "commercevision.maintenance"]'
     depends_on:
       rabbitmq:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      object-storage-init:
         condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
@@ -237,7 +320,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import pathlib, socket; assert b'celery' in pathlib.Path('/proc/1/cmdline').read_bytes(); assert pathlib.Path('/tmp/commercevision-worker-ready.json').is_file(); socket.create_connection(('rabbitmq', 5672), 3).close()",
+          "import json, os, pathlib, socket; marker=pathlib.Path('/tmp/commercevision-worker-ready.json'); assert b'celery' in pathlib.Path('/proc/1/cmdline').read_bytes(); data=json.loads(marker.read_text()); assert data.get('ready') is True; assert data.get('consumer_ready') is True; assert data.get('master_pid') == 1; assert data.get('mysql') == 'ok'; assert data.get('object_storage') == 'ok'; assert data.get('missing_kinds') == []; children={int(pid) for pid in pathlib.Path('/proc/1/task/1/children').read_text().split() if pathlib.Path(f'/proc/{pid}').exists()}; child_data=[json.loads(path.read_text()) for path in marker.with_name(marker.name + '.children').glob('*.json')]; ready_children={item.get('child_pid') for item in child_data if item.get('ready') is True and item.get('master_pid') == 1 and item.get('missing_kinds') == []}; assert len(children.intersection(ready_children)) >= int(os.environ['CV_WORKER_CONCURRENCY']); socket.create_connection(('rabbitmq', 5672), 3).close()",
         ]
       interval: 15s
       timeout: 10s
@@ -254,9 +337,11 @@ services:
     command:
       - commercevision-scheduler
     environment:
+      <<: *upload-cleanup-runtime-environment
       CV_SERVICE_NAME: scheduler
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_SCHEDULER_HOST: 0.0.0.0
       CV_SCHEDULER_PORT: "8002"
     ports:
@@ -317,6 +402,11 @@ services:
     environment:
       NODE_ENV: production
       CV_API_PROXY_URL: http://api:8000
+      CV_API_PROXY_TIMEOUT_MS: ${CV_API_PROXY_TIMEOUT_MS:-15000}
+      CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID: ${CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID:-local-web-gateway}
+      CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET: ${CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET:-local-web-gateway-secret-change-before-production}
+      CV_WEB_ALLOWED_WORKSPACE_IDS: ${CV_WEB_ALLOWED_WORKSPACE_IDS:-catalog-demo}
+      CV_WEB_PRINCIPAL_ACTOR_ID: ${CV_WEB_PRINCIPAL_ACTOR_ID:-catalog-workbench}
     ports:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_WEB_HOST_PORT:-13000}:3000"
     depends_on:

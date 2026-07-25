@@ -1,6 +1,7 @@
 {
   "name": "@commercevision/web",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "scripts": {
     "dev": "next dev",
@@ -8,6 +9,8 @@
     "e2e": "playwright test",
     "start": "next start",
     "lint": "eslint .",
+    "test:proxy": "node --experimental-strip-types --test tests/proxy-route.test.mjs",
+    "test:unit": "vitest run --config tests/vitest.config.ts tests/asset-api.test.mjs tests/operation-polling.test.mjs tests/upload-workflow.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +26,7 @@
     "@types/react-dom": "^19.1.0",
     "eslint": "^9.31.0",
     "eslint-config-next": "15.5.21",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "3.2.6"
   }
 }

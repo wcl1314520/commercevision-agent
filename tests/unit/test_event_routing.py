@@ -21,13 +21,26 @@ def _event(
     event_type: str = "asset.validation.requested",
     schema_version: int = 1,
 ) -> OutboxEvent:
+    payload = (
+        {
+            "operation_id": "operation-1",
+            "workspace_id": "workspace-a",
+            "asset_id": "asset-1",
+            "asset_version_id": "asset-version-1",
+            "object_fact_id": "object-fact-1",
+            "integrity_policy_version": "image-integrity-v1",
+            "content_sha256": "a" * 64,
+        }
+        if event_type == EventType.ASSET_VALIDATION_REQUESTED
+        else {}
+    )
     envelope = EventEnvelope.create(
         event_type=event_type,
         aggregate_type="asset",
         aggregate_id="asset-1",
         aggregate_version=1,
         trace_id="trace-1",
-        payload={},
+        payload=payload,
         schema_version=schema_version,
     )
     return OutboxEvent(envelope=envelope, available_at=envelope.occurred_at)

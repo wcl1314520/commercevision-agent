@@ -64,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "recovered_steps_total": runtime.state.recovered_steps_total,
             "recovered_workflows_total": runtime.state.recovered_workflows_total,
             "recovered_operations_total": runtime.state.recovered_operations_total,
+            "expired_uploads_total": runtime.state.expired_uploads_total,
             "scanners": {
                 name: {
                     "last_started_at": scanner.last_started_at,

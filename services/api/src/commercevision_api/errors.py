@@ -17,8 +17,15 @@ from commercevision_domain import (
     InvalidTransitionError,
     LeaseConflictError,
     NotFoundError,
+    ObjectMismatchError,
     ReferenceConstraintError,
+    StorageUnavailableError,
     UniqueConstraintError,
+    UnsupportedAssetKindError,
+    UploadAbortedError,
+    UploadBusyError,
+    UploadExpiredError,
+    UploadObjectMissingError,
     WorkspaceAccessError,
 )
 from commercevision_domain.workflow.errors import (
@@ -99,6 +106,20 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
         return 403, "AUTHORIZATION_DENIED", "authorization", False
     if isinstance(exc, NotFoundError):
         return 404, "NOT_FOUND", "not_found", False
+    if isinstance(exc, UploadExpiredError):
+        return 410, "UPLOAD_EXPIRED", "state", False
+    if isinstance(exc, UploadAbortedError):
+        return 409, "UPLOAD_ABORTED", "state", False
+    if isinstance(exc, UploadBusyError):
+        return 409, "UPLOAD_BUSY", "transient", True
+    if isinstance(exc, UploadObjectMissingError):
+        return 409, "UPLOAD_OBJECT_MISSING", "transient", True
+    if isinstance(exc, ObjectMismatchError):
+        return 422, "OBJECT_MISMATCH", "validation", False
+    if isinstance(exc, UnsupportedAssetKindError):
+        return 422, "UNSUPPORTED_ASSET_KIND", "validation", False
+    if isinstance(exc, StorageUnavailableError):
+        return 503, "STORAGE_UNAVAILABLE", "transient", True
     if isinstance(exc, IdempotencyConflictError):
         return 409, "IDEMPOTENCY_CONFLICT", "conflict", False
     if isinstance(exc, DuplicateExternalIdentifierError):

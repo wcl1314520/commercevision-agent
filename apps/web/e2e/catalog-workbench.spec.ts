@@ -62,6 +62,136 @@ const errorEnvelope = {
   trace_id: "browser-trace",
 };
 
+const uploadSession = {
+  id: "019f8a00-0000-7000-8000-000000000010",
+  workspace_id: "catalog-demo",
+  reserved_asset_id: "019f8a00-0000-7000-8000-000000000011",
+  retention_class: "FOUNDATION",
+  asset_kind: "IMAGE",
+  filename: "pixel.png",
+  declared_mime: "image/png",
+  expected_byte_length: 68,
+  expected_sha256: "e69f0bc5c2cc7d75ef3b102a3208e6b5b8e23f4cb3c6b8f4f53d86f7f6322f84",
+  workflow_id: null,
+  product_id: product.id,
+  sku_id: null,
+  category: product.category_code,
+  role: "product-primary",
+  upload_policy_version: "direct-put-v1",
+  integrity_policy_version: "image-integrity-v1",
+  status: "OPEN",
+  failure_code: null,
+  asset_version_id: null,
+  validation_operation_id: null,
+  expires_at: "2026-07-24T13:00:00Z",
+  version: 1,
+  created_at: "2026-07-24T12:45:00Z",
+  updated_at: "2026-07-24T12:45:00Z",
+};
+
+const assetVersion = {
+  id: "019f8a00-0000-7000-8000-000000000012",
+  workspace_id: "catalog-demo",
+  asset_id: uploadSession.reserved_asset_id,
+  version_number: 1,
+  upload_session_id: uploadSession.id,
+  filename: "pixel.png",
+  sha256: uploadSession.expected_sha256,
+  byte_size: 68,
+  declared_mime: "image/png",
+  detected_mime: "image/png",
+  image_format: "PNG",
+  width: 1,
+  height: 1,
+  frame_count: 1,
+  category: product.category_code,
+  role: "product-primary",
+  integrity_policy_version: "image-integrity-v1",
+  object_state: "QUARANTINED",
+  created_at: "2026-07-24T12:45:02Z",
+};
+
+const quarantinedAsset = {
+  id: uploadSession.reserved_asset_id,
+  workspace_id: "catalog-demo",
+  retention_class: "FOUNDATION",
+  asset_kind: "IMAGE",
+  workflow_id: null,
+  product_id: product.id,
+  sku_id: null,
+  status: "QUARANTINED",
+  current_version_id: assetVersion.id,
+  retention_deadline: null,
+  version: 1,
+  created_at: "2026-07-24T12:45:02Z",
+  updated_at: "2026-07-24T12:45:02Z",
+  current_version: assetVersion,
+};
+
+const finalizeResponse = {
+  upload_session: {
+    ...uploadSession,
+    status: "FINALIZED",
+    asset_version_id: assetVersion.id,
+    validation_operation_id: "019f8a00-0000-7000-8000-000000000013",
+    version: 3,
+    updated_at: "2026-07-24T12:45:02Z",
+  },
+  asset: quarantinedAsset,
+  asset_version: assetVersion,
+  validation_operation: {
+    id: "019f8a00-0000-7000-8000-000000000013",
+    state: "PENDING",
+    target_id: assetVersion.id,
+    target_version: 1,
+    version: 1,
+  },
+};
+
+const durableOperation = {
+  id: finalizeResponse.validation_operation.id,
+  workspace_id: "catalog-demo",
+  kind: "ASSET_VALIDATION",
+  target_type: "ASSET_VERSION",
+  target_id: assetVersion.id,
+  target_version: 1,
+  input_hash: "a".repeat(64),
+  input_ref: null,
+  output_ref: null,
+  provider_request_id: null,
+  state: "PENDING",
+  lease_owner: null,
+  lease_expires_at: null,
+  attempt_count: 0,
+  max_attempts: 3,
+  next_attempt_at: "2026-07-24T12:45:03Z",
+  execution_deadline_at: "2026-07-24T13:45:02Z",
+  reconciliation_attempt_count: 0,
+  max_reconciliation_attempts: 2,
+  next_reconciliation_at: null,
+  reconciliation_started_at: null,
+  reconciliation_deadline_at: null,
+  reconciliation_required: false,
+  reconciliation_outcome: "NOT_REQUIRED",
+  dead_letter_id: null,
+  replay_source_dead_letter_id: null,
+  replay_attempt: 0,
+  recovery_generation: 0,
+  recovery_consumed_generation: 0,
+  error: null,
+  created_at: "2026-07-24T12:45:02Z",
+  updated_at: "2026-07-24T12:45:02Z",
+  last_attempt_at: null,
+  started_at: null,
+  completed_at: null,
+  version: 1,
+};
+
+const pngBytes = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
 async function mockReadyCatalog(page: Page) {
   await page.route("**/api/v1/products**", async (route) => {
     const request = route.request();
@@ -429,4 +559,1032 @@ test("keeps the usable workbench within a mobile viewport", async ({ page }) => 
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+});
+
+test("uploads image bytes only to the constrained object-storage request", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  let createBody: Record<string, unknown> | undefined;
+  let finalizeBody: Record<string, unknown> | undefined;
+  let directBody: Buffer | null = null;
+  let directHeaders: Record<string, string> = {};
+
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    createBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...uploadSession,
+        upload: {
+          method: "PUT",
+          url: "https://object-storage.example/opaque-upload?signature=one-use",
+          required_headers: {
+            "Content-Type": "image/png",
+            "Content-Length": "68",
+            "x-amz-checksum-sha256": "5p8LxcLMfXXvOxAqMgjmtbjiP0yzxrj09T2G9/YyL4Q=",
+            "If-None-Match": "*",
+            "x-amz-meta-upload-session-id": uploadSession.id,
+          },
+          maximum_bytes: 68,
+          checksum_algorithm: "SHA-256",
+          expires_at: uploadSession.expires_at,
+        },
+      }),
+    });
+  });
+  await page.route("https://object-storage.example/**", async (route) => {
+    directBody = route.request().postDataBuffer();
+    directHeaders = route.request().headers();
+    await route.fulfill({ status: 200, body: "" });
+  });
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      finalizeBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "商品素材" })).toBeVisible();
+  await page.getByLabel("商品图片").setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+  await expect(page.getByText("QUARANTINED").last()).toBeVisible();
+  expect(directBody).toEqual(pngBytes);
+  expect(directHeaders["x-amz-meta-upload-session-id"]).toBe(uploadSession.id);
+  expect(createBody).toMatchObject({
+    retention_class: "FOUNDATION",
+    asset_kind: "IMAGE",
+    filename: "pixel.png",
+    declared_mime: "image/png",
+    byte_length: 68,
+    product_id: product.id,
+  });
+  expect(finalizeBody).toEqual({ expected_version: 1 });
+});
+
+test("replays a lost create-session response with its persisted request identity", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  const createAttempts: Array<{
+    body: Record<string, unknown>;
+    idempotencyKey: string | undefined;
+    persisted: string | null;
+  }> = [];
+
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    const request = route.request();
+    createAttempts.push({
+      body: request.postDataJSON() as Record<string, unknown>,
+      idempotencyKey: request.headers()["idempotency-key"],
+      persisted: await page.evaluate(
+        (key) => localStorage.getItem(key),
+        storageKey,
+      ),
+    });
+    if (createAttempts.length === 1) {
+      await route.abort("failed");
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...uploadSession,
+        upload: {
+          method: "PUT",
+          url: "https://object-storage.example/opaque-upload?signature=one-use",
+          required_headers: {
+            "Content-Type": "image/png",
+            "Content-Length": "68",
+          },
+          maximum_bytes: 68,
+          checksum_algorithm: "SHA-256",
+          expires_at: uploadSession.expires_at,
+        },
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("商品图片").setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+  await expect(page.locator(".error-banner")).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".asset-status")).toHaveText("等待上传");
+  const attemptsAfterResponseRecovery = createAttempts.length;
+  await page.reload();
+  await expect(page.locator(".asset-status")).toHaveText("等待上传");
+
+  expect(createAttempts.length).toBeGreaterThan(attemptsAfterResponseRecovery);
+  expect(createAttempts[0].idempotencyKey).toBeTruthy();
+  for (const replay of createAttempts.slice(1)) {
+    expect(replay.idempotencyKey).toBe(createAttempts[0].idempotencyKey);
+    expect(replay.body).toEqual(createAttempts[0].body);
+  }
+  expect(JSON.parse(createAttempts[0].persisted ?? "null")).toMatchObject({
+    stage: "CREATING",
+    createIdempotencyKey: createAttempts[0].idempotencyKey,
+    createRequest: createAttempts[0].body,
+  });
+});
+
+test("manually replays an OPEN create response with its persisted identity", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const createIdempotencyKey = "web-upload-create-open-retry-0001";
+  const createRequest = {
+    retention_class: "FOUNDATION",
+    asset_kind: "IMAGE",
+    filename: "pixel.png",
+    declared_mime: "image/png",
+    byte_length: 68,
+    sha256: "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+    workflow_id: null,
+    product_id: product.id,
+    sku_id: null,
+    category: product.category_code,
+    role: "product-reference",
+  };
+  const createAttempts: Array<{
+    body: Record<string, unknown>;
+    idempotencyKey: string | undefined;
+  }> = [];
+  let responseAvailable = false;
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-open-retry-0001",
+        finalizeExpectedVersion: 1,
+        stage: "OPEN",
+        createIdempotencyKey,
+        createRequest,
+      },
+    },
+  );
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    createAttempts.push({
+      body: route.request().postDataJSON() as Record<string, unknown>,
+      idempotencyKey: route.request().headers()["idempotency-key"],
+    });
+    if (!responseAvailable) {
+      await route.abort("failed");
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...uploadSession,
+        expected_sha256: createRequest.sha256,
+        upload: {
+          method: "PUT",
+          url: "https://object-storage.example/opaque-upload?signature=one-use",
+          required_headers: {
+            "Content-Type": "image/png",
+            "Content-Length": "68",
+          },
+          maximum_bytes: 68,
+          checksum_algorithm: "SHA-256",
+          expires_at: uploadSession.expires_at,
+        },
+      }),
+    });
+  });
+  await page.route("https://object-storage.example/**", async (route) => {
+    await route.fulfill({ status: 200, body: "" });
+  });
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await expect(page.locator(".error-banner")).toBeVisible();
+  await expect(page.getByLabel("素材角色")).toHaveValue("product-reference");
+  await page.getByLabel("商品图片").setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  responseAvailable = true;
+  await page.getByRole("button", { name: "上传并登记" }).click();
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+
+  expect(createAttempts.length).toBeGreaterThanOrEqual(2);
+  for (const attempt of createAttempts) {
+    expect(attempt.idempotencyKey).toBe(createIdempotencyKey);
+    expect(attempt.body).toEqual(createRequest);
+  }
+});
+
+test("creates a new session identity only after explicitly abandoning a lost response", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  const idempotencyKeys: Array<string | undefined> = [];
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+    await route.abort("failed");
+  });
+
+  await page.goto("/");
+  const fileInput = page.getByLabel("商品图片");
+  await fileInput.setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+  await expect(page.locator(".error-banner")).toBeVisible();
+
+  await page.getByRole("button", { name: "放弃本次上传" }).click();
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), storageKey),
+  ).toBeNull();
+
+  await fileInput.setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+  await expect.poll(() => idempotencyKeys.length).toBe(2);
+  expect(idempotencyKeys[1]).not.toBe(idempotencyKeys[0]);
+});
+
+test("recovers persisted finalize identity after a browser refresh", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const finalizeIdempotencyKey = "web-upload-finalize-persisted-0001";
+  let finalizeBody: Record<string, unknown> | undefined;
+  let finalizeHeader: string | undefined;
+
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey,
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZING",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ ...uploadSession, version: 3 }),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      finalizeBody = route.request().postDataJSON() as Record<string, unknown>;
+      finalizeHeader = route.request().headers()["idempotency-key"];
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse),
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+  expect(finalizeBody).toEqual({ expected_version: 1 });
+  expect(finalizeHeader).toBe(finalizeIdempotencyKey);
+  const persisted = await page.evaluate(
+    (key) => localStorage.getItem(key),
+    `commercevision:upload:catalog-demo:${product.id}`,
+  );
+  expect(persisted).not.toContain("signature");
+  expect(persisted).not.toContain("object-storage");
+});
+
+test("drops physical storage fields while recovering persisted upload state", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-sanitized-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZING",
+        upload: {
+          url: "https://object-storage.example/private?signature=must-drop",
+        },
+        objectKey: "quarantine/private-object-key",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(quarantinedAsset),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+  const persisted = await page.evaluate(
+    (key) => localStorage.getItem(key),
+    storageKey,
+  );
+  expect(persisted).not.toContain("signature");
+  expect(persisted).not.toContain("object-storage");
+  expect(persisted).not.toContain("objectKey");
+  expect(persisted).not.toContain("quarantine/");
+});
+
+test("retries finalize with the persisted session version after VERSION_CONFLICT", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  const finalizeIdempotencyKey = "web-upload-finalize-version-retry-0001";
+  const finalizeRequests: Array<{
+    body: Record<string, unknown>;
+    idempotencyKey: string | undefined;
+  }> = [];
+  let conflicted = false;
+
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey,
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZING",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...uploadSession,
+          version: conflicted ? 3 : 1,
+        }),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      finalizeRequests.push({
+        body: route.request().postDataJSON() as Record<string, unknown>,
+        idempotencyKey: route.request().headers()["idempotency-key"],
+      });
+      if (!conflicted) {
+        conflicted = true;
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...errorEnvelope,
+            message: "upload session version is stale",
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await expect(page.locator(".error-banner")).toContainText("上传状态已更新");
+  const reconciled = JSON.parse((await page.evaluate(
+    (key) => localStorage.getItem(key),
+    storageKey,
+  )) ?? "null") as {
+    finalizeAttempt: {
+      idempotencyKey: string;
+      request: { expected_version: number };
+    };
+  };
+  expect(reconciled).toMatchObject({
+    schemaVersion: 1,
+    finalizeAttempt: {
+      request: { expected_version: 3 },
+    },
+    stage: "FINALIZING",
+  });
+  expect(reconciled.finalizeAttempt.idempotencyKey).not.toBe(
+    finalizeIdempotencyKey,
+  );
+
+  await page.getByRole("button", { name: "重试登记" }).click();
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+  expect(finalizeRequests).toEqual([
+    {
+      body: { expected_version: 1 },
+      idempotencyKey: finalizeIdempotencyKey,
+    },
+    {
+      body: { expected_version: 3 },
+      idempotencyKey: reconciled.finalizeAttempt.idempotencyKey,
+    },
+  ]);
+});
+
+test("recovers when refresh interrupts the direct-upload completion boundary", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const finalizeIdempotencyKey = "web-upload-finalize-interrupted-put-0001";
+  let finalizeRequests = 0;
+
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey,
+        finalizeExpectedVersion: 1,
+        stage: "UPLOADING",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(uploadSession),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      finalizeRequests += 1;
+      expect(route.request().headers()["idempotency-key"]).toBe(
+        finalizeIdempotencyKey,
+      );
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse),
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+  expect(finalizeRequests).toBe(1);
+});
+
+test("returns a missing interrupted upload to a resumable OPEN state", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const recoveredSha256 =
+    "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460";
+  const recoveredUploadSession = {
+    ...uploadSession,
+    expected_sha256: recoveredSha256,
+    version: 2,
+  };
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  const createIdempotencyKey = "web-upload-create-missing-put-0001";
+  const finalizeIdempotencyKey = "web-upload-finalize-missing-put-0001";
+  const createRequest = {
+    retention_class: "FOUNDATION",
+    asset_kind: "IMAGE",
+    filename: "pixel.png",
+    declared_mime: "image/png",
+    byte_length: 68,
+    sha256: recoveredSha256,
+    workflow_id: null,
+    product_id: product.id,
+    sku_id: null,
+    category: product.category_code,
+    role: "product-primary",
+  };
+  const finalizeAttempts: Array<{
+    expectedVersion: number;
+    idempotencyKey: string | undefined;
+  }> = [];
+  let createReplays = 0;
+  let directUploads = 0;
+
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        sessionId: uploadSession.id,
+        createIdempotencyKey,
+        createRequest,
+        finalizeIdempotencyKey,
+        finalizeExpectedVersion: 1,
+        stage: "UPLOADING",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(recoveredUploadSession),
+      });
+    },
+  );
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    createReplays += 1;
+    expect(route.request().headers()["idempotency-key"]).toBe(
+      createIdempotencyKey,
+    );
+    expect(route.request().postDataJSON()).toEqual(createRequest);
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...recoveredUploadSession,
+        upload: {
+          method: "PUT",
+          url: "https://object-storage.example/recovered-upload",
+          required_headers: {
+            "Content-Type": "image/png",
+            "Content-Length": "68",
+            "x-amz-checksum-sha256": "QxztaRaiohoVbjhwGv5Vu9f4iWn7v8Vtf+CZ1H8mVGA=",
+            "If-None-Match": "*",
+            "x-amz-meta-upload-session-id": uploadSession.id,
+          },
+          maximum_bytes: 68,
+          checksum_algorithm: "SHA-256",
+          expires_at: uploadSession.expires_at,
+        },
+      }),
+    });
+  });
+  await page.route(
+    "https://object-storage.example/recovered-upload",
+    async (route) => {
+      directUploads += 1;
+      await route.fulfill({ status: 200, body: "" });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      const body = route.request().postDataJSON() as {
+        expected_version: number;
+      };
+      finalizeAttempts.push({
+        expectedVersion: body.expected_version,
+        idempotencyKey: route.request().headers()["idempotency-key"],
+      });
+      if (finalizeAttempts.length === 1) {
+        expect(finalizeAttempts[0].idempotencyKey).toBe(
+          finalizeIdempotencyKey,
+        );
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...errorEnvelope,
+            code: "UPLOAD_OBJECT_MISSING",
+            message: "uploaded object was not found",
+            category: "transient",
+            retryable: true,
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await expect(page.locator(".error-banner")).toContainText(
+    "未找到完整上传文件",
+  );
+  await expect(page.getByRole("button", { name: "放弃本次上传" })).toBeVisible();
+  const reupload = JSON.parse(
+    (await page.evaluate((key) => localStorage.getItem(key), storageKey)) ??
+      "null",
+  ) as {
+    finalizeAttempt: {
+      idempotencyKey: string;
+      request: { expected_version: number };
+    };
+  };
+  expect(reupload).toMatchObject({
+    schemaVersion: 1,
+    finalizeAttempt: {
+      request: { expected_version: 2 },
+    },
+    stage: "OPEN",
+  });
+  expect(reupload.finalizeAttempt.idempotencyKey).not.toBe(
+    finalizeIdempotencyKey,
+  );
+
+  await page.getByLabel("商品图片").setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+  expect(createReplays).toBe(1);
+  expect(directUploads).toBe(1);
+  expect(finalizeAttempts).toEqual([
+    {
+      expectedVersion: 1,
+      idempotencyKey: finalizeIdempotencyKey,
+    },
+    {
+      expectedVersion: 2,
+      idempotencyKey: reupload.finalizeAttempt.idempotencyKey,
+    },
+  ]);
+});
+
+test("durably aborts a known upload session before clearing local recovery state", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  const openSession = { ...uploadSession, version: 2 };
+  let abortRequests = 0;
+  let abortIdempotencyKey: string | undefined;
+
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-abandon-0001",
+        finalizeExpectedVersion: 2,
+        stage: "OPEN",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(openSession),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:abort`,
+    async (route) => {
+      abortRequests += 1;
+      abortIdempotencyKey = route.request().headers()["idempotency-key"];
+      expect(route.request().postDataJSON()).toEqual({ expected_version: 2 });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...openSession,
+          status: "ABORTED",
+          failure_code: "CLIENT_ABORTED",
+          cleanup_operation_id: "019f8a00-0000-7000-8000-000000000099",
+          version: 4,
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "放弃本次上传" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "放弃本次上传" }).click();
+
+  await expect(page.locator(".asset-status")).toHaveText("未开始");
+  expect(abortRequests).toBe(1);
+  expect(abortIdempotencyKey).toMatch(/^web-upload-abort-/);
+  expect(await page.evaluate((key) => localStorage.getItem(key), storageKey)).toBe(
+    null,
+  );
+});
+
+test("keeps recovery state when an in-flight finalize rejects abort", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  const storageKey = `commercevision:upload:catalog-demo:${product.id}`;
+  const finalizingSession = {
+    ...uploadSession,
+    status: "FINALIZING",
+    version: 2,
+  };
+  let abortRequests = 0;
+
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-busy-abort-0001",
+        finalizeExpectedVersion: 2,
+        stage: "OPEN",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizingSession),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:abort`,
+    async (route) => {
+      abortRequests += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...errorEnvelope,
+          code: "UPLOAD_BUSY",
+          message: "upload session is being finalized",
+          category: "conflict",
+          retryable: true,
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "放弃本次上传" }).click();
+
+  await expect(page.locator(".error-banner")).toContainText("登记仍在处理中");
+  expect(abortRequests).toBe(1);
+  expect(
+    JSON.parse(
+      (await page.evaluate((key) => localStorage.getItem(key), storageKey)) ??
+        "null",
+    ),
+  ).toMatchObject({
+    abortIdempotencyKey: expect.stringMatching(/^web-upload-abort-/),
+    sessionId: uploadSession.id,
+    stage: "OPEN",
+  });
+});
+
+test("does not retry a terminal upload session after refresh", async ({ page }) => {
+  await mockReadyCatalog(page);
+  let finalizeRequests = 0;
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-terminal-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZING",
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...uploadSession,
+          status: "ABORTED",
+          failure_code: "OBJECT_MISMATCH",
+          version: 3,
+        }),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      finalizeRequests += 1;
+      await route.fulfill({ status: 409, body: "" });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(page.locator(".asset-status")).toHaveText("已终止");
+  await expect(page.locator(".error-banner")).toContainText("文件校验未通过");
+  await expect(page.getByRole("button", { name: "重试登记" })).toHaveCount(0);
+  expect(finalizeRequests).toBe(0);
+});
+
+test("restores a terminal validation operation from its durable resource", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  let operationRequests = 0;
+  let releaseOperation: (() => void) | undefined;
+  const operationReleased = new Promise<void>((resolve) => {
+    releaseOperation = resolve;
+  });
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-terminal-operation-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(quarantinedAsset),
+    });
+  });
+  await page.route(
+    `**/api/v1/operations/${durableOperation.id}`,
+    async (route) => {
+      operationRequests += 1;
+      await operationReleased;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...durableOperation,
+          state: "SUCCEEDED",
+          completed_at: "2026-07-24T12:45:05Z",
+          version: 2,
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  const operationState = page
+    .locator(".asset-facts > div")
+    .filter({ hasText: "校验任务" })
+    .locator("dd");
+  await expect.poll(() => operationRequests).toBeGreaterThan(0);
+  await expect(operationState).toHaveText("正在读取");
+  releaseOperation?.();
+  await expect(operationState).toHaveText("SUCCEEDED");
+  const requestsAtTerminal = operationRequests;
+  await page.waitForTimeout(1200);
+  expect(operationRequests).toBe(requestsAtTerminal);
+});
+
+test("polls a restored retryable validation operation until it is terminal", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  let operationRequests = 0;
+  let terminal = false;
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-retry-operation-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(quarantinedAsset),
+    });
+  });
+  await page.route(
+    `**/api/v1/operations/${durableOperation.id}`,
+    async (route) => {
+      operationRequests += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(
+          terminal
+            ? {
+                ...durableOperation,
+                state: "SUCCEEDED",
+                completed_at: "2026-07-24T12:45:08Z",
+                version: 4,
+              }
+            : {
+                ...durableOperation,
+                state: "RETRYABLE_FAILED",
+                attempt_count: 1,
+                next_attempt_at: "2026-07-24T12:45:07Z",
+                error: {
+                  code: "PROVIDER_TIMEOUT",
+                  category: "transient",
+                  message: "provider timed out",
+                  retryable: true,
+                  provider_request_id: null,
+                },
+                version: 3,
+              },
+        ),
+      });
+    },
+  );
+
+  await page.goto("/");
+  const operationState = page
+    .locator(".asset-facts > div")
+    .filter({ hasText: "校验任务" })
+    .locator("dd");
+  await expect(operationState).toHaveText("RETRYABLE_FAILED");
+  terminal = true;
+  await expect(operationState).toHaveText("SUCCEEDED", { timeout: 5000 });
+  expect(operationRequests).toBeGreaterThanOrEqual(2);
 });

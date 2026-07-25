@@ -497,6 +497,34 @@ class IdempotencyRepository:
         if result.rowcount != 1:
             raise ConcurrencyError("idempotency claim was not completed")
 
+    def mark_pending(
+        self,
+        *,
+        scope: str,
+        key_hash: str,
+        request_hash: str,
+        resource_type: str,
+        resource_id: str,
+        response_data: dict[str, Any],
+    ) -> None:
+        result = execute_with_integrity_classification(
+            self.session,
+            update(IdempotencyKeyModel)
+            .where(
+                IdempotencyKeyModel.scope == scope,
+                IdempotencyKeyModel.key_hash == key_hash,
+                IdempotencyKeyModel.request_hash == request_hash,
+                IdempotencyKeyModel.status == "PENDING",
+            )
+            .values(
+                resource_type=resource_type,
+                resource_id=resource_id,
+                response_json=response_data,
+            ),
+        )
+        if result.rowcount != 1:
+            raise ConcurrencyError("idempotency claim was not available for progress")
+
 
 class OutboxRepository:
     def __init__(self, session: Session) -> None:

@@ -1,0 +1,450 @@
+"""Alibaba OSS adapter for the typed object-storage seam."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from typing import Any
+
+import oss2
+from commercevision_contracts.object_storage import (
+    BoundedReadRequest,
+    ConditionalCopyRequest,
+    ConditionalDeleteRequest,
+    ObjectReference,
+    ObjectStat,
+    PresignedRequest,
+    PresignPutRequest,
+    TemporaryReadRequest,
+)
+from commercevision_domain import (
+    ObjectMismatchError,
+    StorageBackend,
+    StorageLocationClass,
+    StoragePreconditionError,
+    StorageUnavailableError,
+    UploadObjectMissingError,
+)
+
+from .object_storage_common import (
+    READ_CHUNK_BYTES,
+    metadata_matches,
+    seconds_until,
+    select_storage_locations,
+    validated_response_version,
+)
+from .readiness import ObjectStorageReadinessError
+
+
+def _require_copy_version_id(value: object, *, role: str) -> str:
+    if not isinstance(value, str):
+        raise StoragePreconditionError(f"OSS copy {role} version identifier is missing")
+    version_id = value.strip()
+    if not version_id or version_id.lower() == "null":
+        raise StoragePreconditionError(f"OSS copy {role} version identifier is missing")
+    return version_id
+
+
+def _raise_oss_error(exc: Exception) -> None:
+    if isinstance(exc, oss2.exceptions.NoSuchBucket):
+        raise StorageUnavailableError("object storage bucket is unavailable") from exc
+    if isinstance(exc, oss2.exceptions.NoSuchKey) or (
+        isinstance(exc, oss2.exceptions.OssError) and exc.code in {"NoSuchKey", "NoSuchVersion"}
+    ):
+        raise UploadObjectMissingError("object storage key was not found") from exc
+    if isinstance(
+        exc,
+        (oss2.exceptions.ObjectAlreadyExists, oss2.exceptions.PreconditionFailed),
+    ) or (isinstance(exc, oss2.exceptions.OssError) and exc.code == "FileAlreadyExists"):
+        raise StoragePreconditionError("object storage precondition failed") from exc
+    raise StorageUnavailableError("object storage request failed") from exc
+
+
+class OssObjectStorage:
+    """Alibaba OSS implementation using Signature V4 and bounded range reads."""
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        presign_endpoint: str,
+        access_key: str,
+        secret_key: str,
+        session_token: str | None,
+        region: str,
+        buckets: Mapping[StorageLocationClass, str],
+        force_path_style: bool,
+        require_encryption: bool,
+        connect_timeout: float,
+        read_timeout: float | None = None,
+        readiness_timeout: float = 1.0,
+        credential_provider: oss2.credentials.CredentialsProvider | None = None,
+        clients: Mapping[StorageLocationClass, Any] | None = None,
+        signers: Mapping[StorageLocationClass, Any] | None = None,
+        readiness_clients: Mapping[StorageLocationClass, Any] | None = None,
+    ) -> None:
+        self._bucket_names = dict(buckets)
+        self._require_encryption = require_encryption
+        self._credential_provider = credential_provider
+        request_timeout = (connect_timeout, read_timeout or connect_timeout)
+        readiness_request_timeout = (readiness_timeout, readiness_timeout)
+        if credential_provider is not None:
+            auth = oss2.ProviderAuthV4(credential_provider)
+        elif session_token is None:
+            auth = oss2.AuthV4(access_key, secret_key)
+        else:
+            auth = oss2.StsAuth(access_key, secret_key, session_token, auth_version="v4")
+        self._clients = dict(
+            clients
+            or {
+                location: oss2.Bucket(
+                    auth,
+                    endpoint,
+                    bucket,
+                    connect_timeout=request_timeout,
+                    region=region,
+                    is_path_style=force_path_style,
+                )
+                for location, bucket in self._bucket_names.items()
+            }
+        )
+        self._signers = dict(
+            signers
+            or {
+                location: oss2.Bucket(
+                    auth,
+                    presign_endpoint,
+                    bucket,
+                    connect_timeout=request_timeout,
+                    region=region,
+                    is_path_style=force_path_style,
+                )
+                for location, bucket in self._bucket_names.items()
+            }
+        )
+        self._readiness_clients = dict(
+            readiness_clients
+            or clients
+            or {
+                location: oss2.Bucket(
+                    auth,
+                    endpoint,
+                    bucket,
+                    connect_timeout=readiness_request_timeout,
+                    region=region,
+                    is_path_style=force_path_style,
+                )
+                for location, bucket in self._bucket_names.items()
+            }
+        )
+
+    @property
+    def backend(self) -> StorageBackend:
+        return StorageBackend.OSS
+
+    def assert_ready(
+        self,
+        required_locations: Iterable[StorageLocationClass] | None = None,
+    ) -> None:
+        if not self._bucket_names:
+            raise ObjectStorageReadinessError("object storage bucket mapping is not configured")
+        locations = select_storage_locations(self._bucket_names, required_locations)
+        clients_by_bucket: dict[str, Any] = {}
+        for location in locations:
+            bucket = self._bucket_names[location]
+            clients_by_bucket.setdefault(bucket, self._readiness_clients[location])
+        items = sorted(clients_by_bucket.items())
+        with ThreadPoolExecutor(max_workers=min(4, len(items))) as executor:
+            list(executor.map(lambda item: self._assert_bucket_ready(*item), items))
+
+    def close(self) -> None:
+        seen: set[int] = set()
+        adapters = (
+            *self._clients.values(),
+            *self._signers.values(),
+            *self._readiness_clients.values(),
+            self._credential_provider,
+        )
+        for adapter in adapters:
+            session = getattr(adapter, "session", None)
+            for resource in (adapter, session):
+                if resource is None or id(resource) in seen:
+                    continue
+                seen.add(id(resource))
+                close = getattr(resource, "close", None)
+                if callable(close):
+                    close()
+
+    def presign_put(self, request: PresignPutRequest) -> PresignedRequest:
+        headers = {
+            "Content-Type": request.content_type,
+            "Content-Length": str(request.content_length),
+            "x-oss-forbid-overwrite": "true",
+            "x-oss-meta-upload-session-id": request.upload_session_id,
+            "x-oss-meta-sha256": request.checksum_sha256_base64,
+        }
+        if self._require_encryption:
+            headers["x-oss-server-side-encryption"] = "AES256"
+        try:
+            url = self._signer(request.reference.location).sign_url(
+                "PUT",
+                request.reference.key,
+                seconds_until(request.expires_at),
+                headers=headers,
+                additional_headers=list(headers),
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError, ValueError) as exc:
+            _raise_oss_error(exc)
+        return PresignedRequest(
+            method="PUT",
+            url=url,
+            required_headers=headers,
+            expires_at=request.expires_at,
+        )
+
+    def stat(self, reference: ObjectReference) -> ObjectStat:
+        params = {"versionId": reference.version_id} if reference.version_id else None
+        try:
+            result = self._client(reference.location).head_object(
+                reference.key,
+                params=params,
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            _raise_oss_error(exc)
+        headers = {str(key).lower(): str(value) for key, value in result.headers.items()}
+        version_id = validated_response_version(
+            reference,
+            headers.get("x-oss-version-id"),
+        )
+        metadata = {
+            key.removeprefix("x-oss-meta-"): value
+            for key, value in headers.items()
+            if key.startswith("x-oss-meta-")
+        }
+        return ObjectStat(
+            reference=reference.model_copy(update={"version_id": version_id}),
+            backend=self.backend,
+            bucket=self._bucket_names[reference.location],
+            etag=str(result.etag),
+            content_length=int(result.content_length),
+            content_type=result.content_type,
+            checksum_sha256_base64=metadata.get("sha256"),
+            metadata=metadata,
+            last_modified=(
+                datetime.fromtimestamp(result.last_modified, tz=UTC)
+                if result.last_modified is not None
+                else None
+            ),
+        )
+
+    @contextmanager
+    def open_bounded_read(
+        self,
+        request: BoundedReadRequest,
+    ) -> Iterator[Iterable[bytes]]:
+        current = self.stat(request.reference)
+        if current.content_length > request.maximum_bytes:
+            raise ObjectMismatchError("object exceeds the bounded read limit")
+        headers = {"If-Match": request.expected_etag} if request.expected_etag else None
+        params = (
+            {"versionId": current.reference.version_id} if current.reference.version_id else None
+        )
+        try:
+            result = self._client(request.reference.location).get_object(
+                current.reference.key,
+                byte_range=(0, request.maximum_bytes),
+                headers=headers,
+                params=params,
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            _raise_oss_error(exc)
+        try:
+            yield self._read_oss_chunks(result, request.maximum_bytes)
+        finally:
+            result.close()
+
+    def copy_if_absent(self, request: ConditionalCopyRequest) -> ObjectStat:
+        source_version_id = _require_copy_version_id(
+            request.source.version_id,
+            role="source",
+        )
+        existing = self._stat_if_present(request.destination)
+        if existing is not None:
+            if not metadata_matches(
+                existing,
+                expected_length=request.expected_content_length,
+                expected_sha256=request.expected_sha256,
+                expected_upload_session_id=request.upload_session_id,
+                expected_content_type=request.content_type,
+            ):
+                raise StoragePreconditionError("copy destination already contains another object")
+            _require_copy_version_id(
+                existing.reference.version_id,
+                role="destination",
+            )
+            return existing
+        headers = {
+            "x-oss-copy-source-if-match": request.source_etag,
+            "x-oss-forbid-overwrite": "true",
+            "x-oss-metadata-directive": "REPLACE",
+            "x-oss-meta-sha256": request.expected_sha256,
+            "x-oss-meta-upload-session-id": request.upload_session_id,
+            "Content-Type": request.content_type,
+        }
+        if self._require_encryption:
+            headers["x-oss-server-side-encryption"] = "AES256"
+        params = {"versionId": source_version_id}
+        try:
+            result = self._client(request.destination.location).copy_object(
+                self._bucket_names[request.source.location],
+                request.source.key,
+                request.destination.key,
+                headers=headers,
+                params=params,
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            existing = self._stat_if_present(request.destination)
+            if existing is not None and metadata_matches(
+                existing,
+                expected_length=request.expected_content_length,
+                expected_sha256=request.expected_sha256,
+                expected_upload_session_id=request.upload_session_id,
+                expected_content_type=request.content_type,
+            ):
+                _require_copy_version_id(
+                    existing.reference.version_id,
+                    role="destination",
+                )
+                return existing
+            _raise_oss_error(exc)
+        version_id = _require_copy_version_id(
+            getattr(result, "versionid", None),
+            role="result",
+        )
+        try:
+            copied = self.stat(request.destination.model_copy(update={"version_id": version_id}))
+        except StoragePreconditionError as exc:
+            raise StoragePreconditionError(
+                "OSS copy copied object version did not match the result version"
+            ) from exc
+        copied_version_id = _require_copy_version_id(
+            copied.reference.version_id,
+            role="copied object",
+        )
+        if copied_version_id != version_id:
+            raise StoragePreconditionError(
+                "OSS copy copied object version did not match the result version"
+            )
+        if not metadata_matches(
+            copied,
+            expected_length=request.expected_content_length,
+            expected_sha256=request.expected_sha256,
+            expected_upload_session_id=request.upload_session_id,
+            expected_content_type=request.content_type,
+        ):
+            raise StoragePreconditionError("copied object did not match the expected facts")
+        return copied
+
+    def delete_if_match(self, request: ConditionalDeleteRequest) -> bool:
+        try:
+            current = self.stat(request.reference)
+        except UploadObjectMissingError:
+            return True
+        if current.etag != request.expected_etag:
+            raise StoragePreconditionError("object changed before conditional delete")
+        if current.reference.version_id is None:
+            raise StoragePreconditionError("OSS conditional delete requires bucket versioning")
+        params = {"versionId": current.reference.version_id}
+        try:
+            self._client(request.reference.location).delete_object(
+                request.reference.key,
+                params=params,
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            _raise_oss_error(exc)
+        return True
+
+    def temporary_read(self, request: TemporaryReadRequest) -> PresignedRequest:
+        headers = {"If-Match": request.expected_etag} if request.expected_etag else {}
+        params = (
+            {"versionId": request.reference.version_id} if request.reference.version_id else None
+        )
+        try:
+            url = self._signer(request.reference.location).sign_url(
+                "GET",
+                request.reference.key,
+                seconds_until(request.expires_at),
+                headers=headers,
+                params=params,
+                additional_headers=list(headers),
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError, ValueError) as exc:
+            _raise_oss_error(exc)
+        return PresignedRequest(
+            method="GET",
+            url=url,
+            required_headers=headers,
+            expires_at=request.expires_at,
+        )
+
+    def _stat_if_present(self, reference: ObjectReference) -> ObjectStat | None:
+        try:
+            return self.stat(reference)
+        except UploadObjectMissingError:
+            return None
+
+    def _assert_bucket_ready(self, bucket_name: str, client: Any) -> None:
+        try:
+            versioning = client.get_bucket_versioning()
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            raise ObjectStorageReadinessError(
+                f"object storage bucket {bucket_name} is not accessible"
+            ) from exc
+        if getattr(versioning, "status", None) != "Enabled":
+            raise ObjectStorageReadinessError(
+                f"object storage bucket {bucket_name} versioning is not enabled"
+            )
+        if not self._require_encryption:
+            return
+        try:
+            encryption = client.get_bucket_encryption()
+        except oss2.exceptions.NoSuchServerSideEncryptionRule:
+            encryption = None
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            raise ObjectStorageReadinessError(
+                f"object storage bucket {bucket_name} encryption cannot be inspected"
+            ) from exc
+        algorithm = str(getattr(encryption, "sse_algorithm", ""))
+        if algorithm not in {"AES256", "KMS", "SM4"}:
+            raise ObjectStorageReadinessError(
+                f"object storage bucket {bucket_name} encryption is not configured"
+            )
+
+    def _client(self, location: StorageLocationClass) -> Any:
+        try:
+            return self._clients[location]
+        except KeyError as exc:
+            raise ValueError(f"storage location {location.value} is not configured") from exc
+
+    def _signer(self, location: StorageLocationClass) -> Any:
+        try:
+            return self._signers[location]
+        except KeyError as exc:
+            raise ValueError(f"storage location {location.value} is not configured") from exc
+
+    @staticmethod
+    def _read_oss_chunks(result: Any, maximum_bytes: int) -> Iterator[bytes]:
+        consumed = 0
+        try:
+            while True:
+                chunk = result.read(READ_CHUNK_BYTES)
+                if not chunk:
+                    return
+                consumed += len(chunk)
+                if consumed > maximum_bytes:
+                    raise ObjectMismatchError("object exceeds the bounded read limit")
+                yield chunk
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            _raise_oss_error(exc)

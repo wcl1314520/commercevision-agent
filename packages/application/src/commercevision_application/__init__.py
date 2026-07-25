@@ -1,5 +1,8 @@
 """Application use cases independent of HTTP, Celery, and SQLAlchemy."""
 
+from .asset_cleanup import UploadObjectCleaner
+from .asset_cleanup_dispatch import upload_cleanup_input_hash
+from .assets import AssetRegistryApplicationService
 from .catalog import CatalogApplicationService
 from .dead_letter_identity import canonicalize_dead_letter_id
 from .execution import DurableNodeLifecycle
@@ -15,6 +18,7 @@ from .operations import (
     OperationExecutor,
     OperationExecutorRegistry,
     OperationReconciliationPolicy,
+    OperationReconciliationRequired,
     OperationReconciliationResult,
     OperationRetryPolicy,
     UnknownOperationOutcome,
@@ -33,6 +37,7 @@ from .routing import (
     UnsupportedSchemaVersionError,
     build_event_routing_registry,
 )
+from .upload_maintenance import UploadSessionMaintenanceService
 from .workflows import WorkflowApplicationService
 
 __all__ = [
@@ -41,6 +46,7 @@ __all__ = [
     "DeadLetterDetail",
     "DeadLetterOperatorService",
     "AuthenticatedPrincipal",
+    "AssetRegistryApplicationService",
     "OperatorAccessPolicyPort",
     "CatalogApplicationService",
     "canonicalize_dead_letter_id",
@@ -61,6 +67,7 @@ __all__ = [
     "OperationExecutor",
     "OperationExecutorRegistry",
     "OperationReconciliationPolicy",
+    "OperationReconciliationRequired",
     "OperationReconciliationResult",
     "OperationRecoveryService",
     "OperationRetryPolicy",
@@ -69,5 +76,8 @@ __all__ = [
     "UnknownEventTypeError",
     "UnsupportedSchemaVersionError",
     "UnknownOperationOutcome",
+    "UploadObjectCleaner",
+    "UploadSessionMaintenanceService",
+    "upload_cleanup_input_hash",
     "WorkflowApplicationService",
 ]

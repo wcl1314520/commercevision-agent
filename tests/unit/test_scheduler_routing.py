@@ -37,7 +37,15 @@ def test_scheduler_publishes_to_queue_declared_by_event_contract(monkeypatch) ->
         aggregate_id="asset-1",
         aggregate_version=1,
         trace_id="trace-1",
-        payload={},
+        payload={
+            "operation_id": "operation-1",
+            "workspace_id": "workspace-a",
+            "asset_id": "asset-1",
+            "asset_version_id": "asset-version-1",
+            "object_fact_id": "object-fact-1",
+            "integrity_policy_version": "image-integrity-v1",
+            "content_sha256": "a" * 64,
+        },
     )
 
     publisher.publish_event(OutboxEvent(envelope=envelope, available_at=envelope.occurred_at))

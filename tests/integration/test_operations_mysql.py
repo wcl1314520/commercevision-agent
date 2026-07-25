@@ -506,7 +506,7 @@ def test_worker_runtime_registers_required_operation_executor(
         assert runtime.operation_executor_readiness() == {
             "ready": True,
             "required_kinds": ["ASSET_VALIDATION"],
-            "registered_kinds": ["ASSET_VALIDATION"],
+            "registered_kinds": ["ASSET_DELETION", "ASSET_VALIDATION"],
             "missing_kinds": [],
         }
     finally:
