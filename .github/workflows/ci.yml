@@ -84,7 +84,7 @@ jobs:
       - run: pnpm web:unit-test
       - run: pnpm web:api-types:check
       - run: pnpm web:build
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --filter @commercevision/web exec playwright install --with-deps chromium
       - run: pnpm web:e2e
       - run: pnpm audit --audit-level=moderate
 

@@ -49,7 +49,7 @@ describe("persisted upload workflow", () => {
   it("migrates the pre-schema finalize fields into one atomic attempt", () => {
     const legacy = JSON.stringify({
       sessionId: openUpload.sessionId,
-      finalizeIdempotencyKey: "legacy-finalize-key-0001",
+      finalizeIdempotencyKey: "aaaaaaaaaaaaaaaa",
       finalizeExpectedVersion: 3,
       stage: "FINALIZING",
       createIdempotencyKey: openUpload.createIdempotencyKey,
@@ -59,7 +59,7 @@ describe("persisted upload workflow", () => {
     expect(decodePersistedUpload(legacy)).toEqual({
       ...openUpload,
       finalizeAttempt: {
-        idempotencyKey: "legacy-finalize-key-0001",
+        idempotencyKey: "aaaaaaaaaaaaaaaa",
         request: { expected_version: 3 },
       },
       stage: "FINALIZING",
