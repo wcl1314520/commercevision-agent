@@ -7,16 +7,20 @@ and Worker or API interruption.
 
 **Blocked by:** 02 — Durable Operations and recovery control plane; 03 — Product Catalog workspace.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Upload Session is an independent aggregate with open, finalizing, finalized, expired, and aborted states.
-- [ ] MinIO and OSS Adapters satisfy one typed object-storage interface for presign, stat, bounded read, conditional copy, conditional delete, and temporary read.
-- [ ] Logical quarantine, task, foundation, and provider-result storage locations are configured without exposing credentials.
-- [ ] Presigned PUT responses constrain object key, method, expiry, content metadata, checksum policy, and maximum bytes.
-- [ ] Object keys are server-generated and filenames are metadata only.
-- [ ] Finalize claims a MySQL lease, verifies object metadata and SHA-256 outside the transaction, then atomically persists Asset, Asset Version, object fact, operation, and Outbox event.
-- [ ] ETag is treated as opaque and is never accepted as SHA-256.
-- [ ] One Upload Session can produce at most one Asset Version, including concurrent or repeated finalize calls.
-- [ ] The Web workbench uploads bytes directly to object storage and shows persisted session and quarantine state after refresh.
-- [ ] Real MySQL and MinIO tests cover success, checksum mismatch, length mismatch, expiry, abort, duplicate finalize, concurrent finalize, storage outage, and copy-after-crash recovery.
+- [x] Upload Session is an independent aggregate with open, finalizing, finalized, expired, and aborted states.
+- [x] MinIO and OSS Adapters satisfy one typed object-storage interface for presign, stat, bounded read, conditional copy, conditional delete, and temporary read.
+- [x] Logical quarantine, task, foundation, and provider-result storage locations are configured without exposing credentials.
+- [x] Presigned PUT responses constrain object key, method, expiry, content metadata, checksum policy, and maximum bytes.
+- [x] Object keys are server-generated and filenames are metadata only.
+- [x] Finalize claims a MySQL lease, verifies object metadata and SHA-256 outside the transaction, then atomically persists Asset, Asset Version, object fact, operation, and Outbox event.
+- [x] ETag is treated as opaque and is never accepted as SHA-256.
+- [x] One Upload Session can produce at most one Asset Version, including concurrent or repeated finalize calls.
+- [x] The Web workbench uploads bytes directly to object storage and shows persisted session and quarantine state after refresh.
+- [x] Real MySQL and MinIO tests cover success, checksum mismatch, length mismatch, expiry, abort, duplicate finalize, concurrent finalize, storage outage, and copy-after-crash recovery.
 
+**Implementation:** `ca1b1d5` (`Implement durable direct upload quarantine`)
+
+**CI:** GitHub Actions run `30177137257` passed after the monorepo CI correction in
+`8c15291`.
