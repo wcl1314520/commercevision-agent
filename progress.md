@@ -280,3 +280,125 @@
 - CI 根因修复提交 `8c15291` 使用低熵测试夹具并显式从 `@commercevision/web` workspace 安装 Chromium；本地 19 项 Web unit 与精确 Playwright 安装命令通过。
 - GitHub Actions 运行 `30177137257` 的 Python、Web、容器构建、Gitleaks 和 SBOM 全部通过；Ticket 04 正式完成并解锁 Ticket 05。
 - Ticket 05 将在新的无历史独立 Worker 上下文中启动，范围固定为多类型资产验证、ClamAV、内容安全、来源证据、LoRA/Prompt/模型配置校验、受控 Promotion 与 Web 状态。
+- Ticket 04 验收记录提交 `0436c40` 已推送；GitHub Actions 运行 `30183608967` 的 Python、Web、容器、Gitleaks 和 SBOM 再次全部通过。
+- Ticket 05 已从干净基线 `0436c40` 在全新无历史 Worker `019f9c21-627c-7a71-b09c-b30f7c92a951` 中启动；实现上下文不拥有三份主控计划文件或 Issue 状态。
+- 主控补充核对 ClamAV INSTREAM、SafeTensors 文件格式和 Alibaba Image Moderation 2.0 官方契约，并将 fail-closed、协议限流、Header-only 校验及大陆服务策略版本约束同步给 Ticket 05 Worker。
+- Ticket 05 原执行上下文停滞后已保留共享工作树并切换到恢复 Worker `019f9c8a-a97c-73a3-b9f3-38aaa9a5fdd6`；恢复上下文正在按同一 Ticket 边界继续 TDD、审查和单独提交。
+- 主控审查指出 Validation Executor 必须严格绑定 Operation Kind/Input Ref、Upload Session 的 Operation 所有权、验证策略版本与精确源对象身份。恢复 Worker 已新增独立 Target Binder 和规范输入哈希，`tests/unit/test_asset_validation_target.py` 当前 7 项通过。
+- Validation Target/Evidence/Promotion 的漂移反例扩展后，Target 套件为 25 passed；本地格式、ClamAV、内容安全与 C2PA 聚焦套件合计 119 passed。
+- 主控独立复验 Promotion 两类唯一键竞争、两个 Validation 执行器并发重放、租约过期后的 Worker 接管与迟到 Worker 返回，真实 MySQL/MinIO 聚焦门禁为 4 passed；每个阶段证据和受控对象均收敛为唯一事实。
+- Asset Worker 工厂首轮聚焦回归为 56 passed / 10 failed；失败全部来自旧 production 测试默认订阅全部队列并以 `ASSET_VALIDATION` 代指任意 Operation，因而触发新增的真实 ClamAV/Alibaba/C2PA 失败关闭约束。修复策略是让非资产测试显式选择 workflow/maintenance，让资产 Worker fixture 提供完整验证依赖，不降低生产约束。
+- 旧 production fixtures 已按队列职责修正，资产 Worker 使用完整失败关闭配置，非资产测试不再伪装为 Asset Worker；主控复跑 Worker Transport、Readiness 和 Settings 为 66 passed。
+- Provider 包已声明并锁定 `alibabacloud-green20220302==3.2.4` 与 `c2pa-python==0.36.0`。主控实际导入两套 SDK，C2PA 原生 SDK 报告 0.89.0；Alibaba/C2PA Contract 套件为 45 passed，生产工厂不再依赖未安装的延迟导入。
+- 多类型 Web 上传与 Validation 状态呈现完成后，主控 Web 门禁为 unit 26/26、proxy 10/10、TypeScript 通过。首次 lint 扫描了 Playwright `playwright-report/trace/assets` 生成代码并报告 182 errors；修复方向是显式忽略测试报告目录并清理生成物，不调整源码规则或豁免。
+- ESLint 已显式忽略 Playwright 生成报告目录，源码规则未放宽；复跑 lint 通过。
+- 修正多类型上传的精确表单定位器后，主控 Playwright 全量门禁为 27/27，通过图片、SafeTensors LoRA、Prompt JSON、恢复、验证拒绝、可重试故障和 `PENDING_REVIEW` 人工复核场景。
+- Compose 已启动固定版本 `clamav/clamav:1.5.3_base` 并达到 healthy；真实 ClamAV 集成测试通过 readiness、clean scan 与 EICAR infected detection，结果为 1/1。
+- ClamAV、asset queue、必需 Operation Executor 和 Worker readiness 的配置/部署聚焦门禁为 70/70；`docker compose config --quiet` 通过。
+- Ticket 05 第一次全量 Python 回归为 531 passed、50 failed、21 setup errors、1 skipped；首个根因是可丢弃的 `commercevision_test` 已登记当前中间 revision 但缺少 `asset_validation_results`，Fixture 清理随后级联失败。先重建独立测试库再复跑，不把级联项误判为业务缺陷。
+- 仅删除并由 Fixture 重建独立 `commercevision_test` 后，全量 Python 回归为 602 passed、1 skipped；唯一 skip 是需要真实阿里云临时凭证的 OSS live contract，两项 warning 均为既有上游弃用提示。
+- 主 `commercevision` 库核对时停在 `b1c8e4f2a703` 且尚无资产表；停止 API/Worker/Scheduler/MCP/Web 写入面后，使用正式 migration 向前升级到 `e5f8b2d6c914`。38 个 Workflow、799 个 Outbox、795 个 Inbox、413 个 Checkpoint、2217 个 Pending Write 等既有行数保持不变；`alembic check` 无 drift，新资产表为空。
+- 当前 Web 全门禁通过：Vitest 26/26、Proxy 10/10、Playwright 27/27、ESLint、TypeScript、OpenAPI 生成类型漂移检查和 Next.js 15.5.21 production build。
+- Python 与 pnpm 依赖漏洞审计均返回 0 个已知漏洞；新增 Alibaba SDK 为 Apache-2.0，`c2pa-python` 为 MIT OR Apache-2.0，和公开仓库许可边界兼容。工作树扫描未发现 GitHub/云厂商凭证前缀。
+- 新增真实 Durable Worker 红测试复现 Promotion 外部成功、DB 提交前并发失败、Operation 进入第二 execution attempt 后被误终态为 `VALIDATION_OBJECT_MISSING`；当前红灯为 1 failed，要求通过精确不可变身份检查安全复用上一 attempt 的 PASS/NOT_APPLICABLE evidence 后再转绿。
+- Cross-attempt recovery 已转绿：Evidence Store 只复用同 Operation、同 Asset Version/Object/Policy 且严格身份匹配的旧 `PASS/NOT_APPLICABLE`，不复用 `RETRYABLE_FAILURE`；真实 Worker 第二 attempt 仅新增 PROMOTION evidence 并收敛为 `SUCCEEDED`。
+- 主控随后把 21 项 unit/contract 与该 MySQL 用例组合复验时，恢复 Worker 恰好同时启动全量 pytest 并清理同一 `commercevision_test`，导致 Finalize 404；确认是两个测试进程共享数据库的装置竞争，不是实现回归。等待 Worker 全量结束后再串行复验。
+- 恢复 Worker 的全量 pytest 进程退出后，主控改为单进程串行复验：Evidence/Observability/Malware/Content Safety/Provenance 共 66 项通过；真实 MySQL+MinIO 的跨 attempt PASS evidence 恢复、Validation HTTP 跨 Workspace 404 和篡改 Operation 绑定拒绝共 3 项通过。此前失败正式归因为共享测试库并发清理竞态。
+- Ticket 05 恢复 Worker 最终全量 Python 门禁为 `615 passed, 1 skipped`；唯一跳过项为需真实阿里云临时凭证的 OSS live contract，两项 warning 为既有上游弃用提示。
+- Validation UI 先以 27/28 红灯证明终态基础设施失败被误显示为内容拒绝，再增加独立 `failed` 呈现转绿。最终 Web 门禁为 unit 28/28、Proxy 10/10、Playwright 28/28，ESLint、TypeScript 和 Next.js production build 均通过。
+- Ticket 05 工作树现已冻结，准备针对固定基线 `0436c40` 启动 Standards/Architecture、Spec/Acceptance、Security/Reliability 三路独立只读发布审查。
+- 固定快照静态门禁通过：Ruff 对 191 个 Python 文件的 format/check 全绿，`git diff --check` 无空白错误，`docker compose config --quiet` 通过。
+- Standards/Architecture、Spec/Acceptance、Security/Reliability 三路独立只读发布审查已并行启动；审查期间不修改业务代码。
+- Alembic 首次复验误用了不存在的 `database/alembic.ini` 配置语义；枚举真实配置后改用根目录 `alembic.ini`。主 `commercevision` 与独立 `commercevision_test` 均在 `e5f8b2d6c914 (head)`，两库 `alembic check` 均无 schema drift。
+- 以运行时 FastAPI schema 在内存中对比已提交快照，`docs/api/openapi.json` 无 drift；`pnpm web:api-types:check` 证明生成的 Web API 类型同步。
+- Python 锁文件经 `pip-audit` 检查无已知漏洞；pnpm 以 Moderate 门槛审计同样返回 0 个已知漏洞。
+- 最新源码已成功构建 `migrate/object-storage-init/scheduler/api/mcp-server/otel-collector/web/worker` 八个镜像；完整 Compose 重新部署后 13 个长期服务全部 healthy，Migration 与 Bucket 初始化均以 0 退出。
+- Control API readiness 对 configuration、MySQL、Valkey、RabbitMQ、对象存储和 Milvus 全部返回 `ok`。Worker readiness 为 `ready=true`、`consumer_ready=true`、MySQL/对象存储/ClamAV 均 `ok`，注册与必需 Kind 同为 `ASSET_DELETION`、`ASSET_VALIDATION`。
+- RabbitMQ 运行态确认 Workflow、Maintenance、Asset 三类队列各有 1 个消费者且无积压，Index 队列按后续 Ticket 边界保持 0 个消费者。
+- Worker 启动后消费两条 Ticket 04 时期遗留、目标资产已不存在的 Validation Operation；两者均失败关闭为 `FAILED/VALIDATION_TARGET_NOT_FOUND`，并各自关联 `operation_terminal_failure` Dead Letter，没有被静默 ACK 或无限重试。
+- 最新部署通过 Web BFF 完成真实 Foundation PNG 冒烟：创建 Upload Session、MinIO 直传、Finalize、Asset Queue 消费和 Validation 全链路成功。Operation `019f9d5f-1e56-749f-a83d-3e239411f2a7` 收敛为 `SUCCEEDED`，Asset `019f9d5f-1c81-7297-9bdb-b221dd9f4c00` 到达 `PENDING_RIGHTS`，LOCAL_FORMAT/MALWARE/CONTENT_SAFETY/PROVENANCE/PROMOTION 五阶段均为 `PASS`。
+- 对象层复核确认隔离 `ORIGINAL` 事实为 `DELETED` 且当前源对象物理不可读；`CONTROLLED_ORIGINAL` 为 `FOUNDATION/CONTROLLED`，以 MySQL 持久化的精确 Provider Version ID 可成功 HEAD。
+- 最新真实冒烟后的 API/Worker/Scheduler/MCP/Web/ClamAV 日志无 Traceback、ERROR、CRITICAL 或 panic；边界修正后的仓库凭证前缀扫描无命中。
+- Security/Reliability 独立审查返回 3 个 P1、3 个 P2；Standards/Architecture 独立审查返回 1 个 P1、3 个 P2。两路共同复现 ClamAV prefork child 丢失实际 Scanner Version；其余阻断覆盖 Provider 外发授权、Task retention 竞态、C2PA native parser 隔离、默认 clamd 暴露、ClamAV digest、元数据双计、永久 4xx 重试和 Validation 历史读取。
+- Spec/Acceptance 独立审查返回 3 个 P1：已持久化 retryable evidence 后崩溃会被错误地视为 reconciliation pending 并循环；实际 ClamAV Version 缺失；真实 MySQL/MinIO Worker 未覆盖 Ticket 要求的全失败矩阵和 evidence-commit 后中断点。三路发布审查均未批准当前快照。
+- Ticket 05 审查修复在原独立恢复上下文继续：已观察到 retryable evidence 崩溃恢复、永久 Provider 失败、共享图片元数据计量和历史 Validation 读取的红绿用例；主控尚未把这些局部结果视为发布通过。
+- 主控静态复核发现 Task retention 首次对象清理与 MySQL 锁之间仍存在并发 Promotion 重建目标副本的窗口，已要求同一 Worker 以 I/O 前检查、锁内截止时间检查、复制后补偿清理和真实 MySQL/MinIO 竞态测试证明最终无遗留对象。
+- 审查修复期间父级不并发执行共享 `commercevision_test` 套件；当前等待 Worker 完成外发授权、C2PA 可终止进程隔离、ClamAV digest/默认无宿主端口与完整失败矩阵。
+- 主控在当前 Worker 镜像的 Celery daemonized prefork child 中调用 `KillableC2paReaderBoundary.read()`，确定性复现标准 multiprocessing 无法创建子进程；Ticket 05 仍有生产执行上下文 P1，必须改为受限 subprocess 边界。
+- 最新真实成功上传链路中，Validation Operation 正常 `SUCCEEDED` 且 Asset 到达 `PENDING_RIGHTS`，但同次 Finalize 的 `asset.upload.finalized` 已知 Observation 被 Asset Worker 以 `unhandled_event` 写入 DLQ。事件路由修复与“成功上传不新增 DLQ”的真实传输回归已加入 Ticket 05 发布门禁。
+- Ticket 05 原独立上下文以两条红绿纵向切片修复发布阻断：C2PA 改为 package-owned、framed/bounded、可强制终止的 subprocess child，并在 daemonized billiard prefork child 中证明挂起超时后容量恢复；Asset Worker 显式观察 `asset.upload.finalized`，保持未知/不支持/格式错误/未绑定事件失败关闭。
+- 主控复验 C2PA、Event Routing 与 Worker Transport 为 `37 passed`；真实 MySQL/MinIO Finalize 双事件用例为 `1 passed`，首投均 `processed`、重投均 `duplicate`、Inbox 均 `PROCESSED` 且精确 message IDs 的 DLQ 为 0。
+- 第一组固定差异审查上下文长时间无结论后已关闭；修复后的 staged snapshot 重新启动三路窄范围 Standards/Architecture、Spec/Acceptance 与 Security/Reliability 终审，明确限制为高置信 P0-P2。
+- 后续审查确认跨 execution attempt 复用的 Content Safety 与 Provenance 证据缺少当前 Provider/策略/映射/信任配置身份校验；同一 Ticket 05 实现上下文已按红绿 TDD 增加 side-effect-free typed configured identity，并对旧证据失败关闭。
+- 图片解码字节上限现在按 Pillow mode 的 band 数与 1/8/16/32-bit sample width 保守计量，不物化额外 decoded copy；损坏 EXIF 在统一 metadata validator seam 归一为 `MALFORMED_IMAGE`，ICC 继续执行既定大小上限。
+- 主控独立复验 Provider identity、图片边界、本地校验与 Alibaba/C2PA Contract 共 `100 passed`（启用 `-W error`）；相关 12 个文件 Ruff check/format 全部通过。
+- 同一 Ticket 05 Worker 在终态切片恢复后持续停在运行态且无响应；安全关闭后由主控接管既有独立 Ticket 工作树，没有创建第二套实现或丢弃改动。
+- 终态 TDD 红灯证明 Operation 与 `operation_terminal_failure` Dead Letter 已正确提交，但 Asset 仍停在 `VALIDATING`。新增通用可选 terminal-failure callback 后，非资产 Executor 无需实现新接口，Asset Validation 可在独立事务中原子写入 `FAILED` 与 typed Outbox Observation。
+- Validation replay 现在只允许精确 `FAILED + QUARANTINED` 事实恢复到 `VALIDATING`；Provider 修复后同一 Operation attempt 2 可复用兼容 PASS 证据并完成 Promotion。
+- Operation Retry Policy 在 execution attempt budget 已耗尽时把原始 retryable error 归一为 terminal，避免出现 `state=FAILED` 但 `error.retryable=true` 的矛盾事实。
+- 终态 Contract/Domain/Worker 单元接缝为 `41 passed`；永久失败、预算耗尽和 DLQ replay 真实 Worker 门禁为 `5 passed`；本地、malware、内容安全、provenance 四组真实矩阵为 `13 passed`。
+- 三路阶段终审中的有效阻断已修复：Recovery Scanner 终态现在发布独立 `TERMINAL_FAILURE` Generation，Worker 回调失败时不消费代次并可重投；Claim-before-start 与 Reconciliation 到期均有真实 MySQL 证据。
+- LoRA、Prompt Template、Model Configuration 与 Image 的真实 Worker 成功矩阵已补齐，四类均完成本地校验、malware、适用/NOT_APPLICABLE Provider evidence、Promotion 和 typed completed event。
+- Asset lifecycle 已从主执行器抽成独立协调器，集中管理人工复核、拒绝清理、Operation 终态收敛和 Outbox 原子发布；验证 stage 编排继续留在 Executor。
+- 全量 Asset/Upload/ClamAV 真实集成门禁为 `87 passed`；Operation/Event/Domain 组合为 `148 passed`；当前 Ticket 05 Unit/Contract 聚焦为 `272 passed`。
+- 并发 Promotion 回归现在同时断言 MySQL 只有一个 `CONTROLLED_ORIGINAL`，MinIO 也只保留该 Provider Version；重复同内容版本经精确条件删除收敛，未知差异仍失败关闭。
+- Ticket 05 最新固定差异的两路独立故障注入新增 5 个 P1：普通 DLQ replay 会在目标终态回调前完成生命周期；零次执行的 deadline 终止无法生成终态事件；FAILED 回调在锁等待后可越过 Task retention；Promotion 在实际数据库提交边界仍有 TOCTOU；固定两次清理无法删除 3 个及以上对象版本。当前快照未获批准。
+- 主控将按公开 Worker/Event、真实 MySQL/MinIO、Object Storage Adapter 三个既定接缝逐项建立红灯并修复；完成前不提交 Ticket 05，也不启动 Ticket 06。
+- 普通 Recovery Event 的 Worker 当前仅在 `claim.provider_claimed=true` 时执行 Provider 工作并随后完成 replay；deadline 分支与已终态的 claimed redelivery 没有返回 terminal-convergence work。修复将让 Worker 在该显式工作种类下先执行幂等目标回调，再完成 Replay Lifecycle。
+- 一次 `rg` 调用向 Windows 传入未展开的 `*.py` 路径并返回文件名语法错误；后续改为传目录或由 `rg --glob` 过滤，不重复该命令形式。
+- 已确认现有公开测试接缝可直接扩展：`test_operation_dead_letter_replay_*` 通过真实 MySQL 创建原 Operation Dead Letter、管理员 Replay Event 并由 `DurableOperationWorker.handle_recovery_event` 驱动，能够在不测试私有方法的前提下注入终态回调首次失败和消息重投。
+- 第一条 TDD 红灯已确认：`test_operation_dead_letter_replay_retries_terminal_callback_before_completion` 在首次目标回调提交前抛错后读到 Replay Lifecycle=`COMPLETED`，而契约要求 `CLAIMED`；失败发生在预期断言，Provider 只执行一次。
+- 普通 Replay 终态回调屏障已转绿：Operation 进入 `FAILED` 时不再提前完成 claimed replay；重投返回显式 `TERMINAL_CONVERGENCE` 工作，回调成功后再按持久 claim token 完成。真实 MySQL 用例通过，并证明 Provider 仍只执行一次。
+- 新增 replay deadline 回归时首个批量补丁因 `MutableClock` 后续类名与假定上下文不一致被拒绝，未产生半写入；拆为类与测试两个精确补丁后成功。
+- Replay 终态两条真实 MySQL 门禁均通过：Provider 终态失败后的回调重投，以及认领前跨 execution deadline 的零新增执行回调重投；后者使用独立 Replay claim token，生命周期均在回调成功后才到 `COMPLETED`。
+- 零次尝试 Contract 红灯按预期由 Pydantic `ge=1` 拒绝；仅将 `AssetValidationFailedPayload.attempt_number` 放宽为 `ge=0` 并写明零值语义后，事件 Contract 9/9 通过，负数仍被拒绝。
+- 真实资产接缝将复用现有 Finalize → `asset.validation.requested` → WorkerRuntime 流程，在首次消费前把 Durable Operation execution deadline 置于过去，断言 Operation/Asset/typed Outbox 原子收敛且无任何阶段 Evidence。
+- 零次尝试真实 MySQL/MinIO 门禁通过：首次 Validation Event 在 execution deadline 后消费，Operation=`FAILED`/attempt_count=0、Asset=`FAILED`、源仍为 `QUARANTINED`、阶段 Evidence=0，并原子写入唯一 `asset.validation.failed` Observation（attempt_number=0）。
+- 终态 retention 锁等待测试可直接通过 `_validation_executor(..., uow_factory=..., clock=...)` 注入仓储包装器；既有 Task terminal test 已证明过期清理后的预期事实为 Asset/Object=`DELETED`、物理源 404、无 `asset.validation.failed`。
+- 终态锁等待回归首次运行因测试误用 `AssetObject.version_id` 失败；领域字段实际为 `provider_version_id`，修正测试装置后不重复该错误。
+- 修正装置后的真实红灯准确复现：时钟在 Asset 行锁返回后跨过 retention deadline，当前实现仍提交 Asset=`FAILED`、Object=`QUARANTINED` 和 1 条 failed event，而预期是删除收敛。
+- 终态回调锁内栅栏已转绿：专用 retention 错误先回滚 MySQL 事务，再执行精确对象清理；锁等待跨界与原 delayed terminal 两项真实用例均通过。
+- Promotion commit 修复设计固定为 `asset_ports` 的专用 retention-aware UoW 原语：同一事务 flush 后同时校验提交接缝时钟与 MySQL `UTC_TIMESTAMP(6)`，失败统一 rollback；协调器负责映射错误和存储补偿。
+- 首次把测试时钟推进移到通用 `commit()` 后用例仍为绿，根因是同一包装 UoW 也服务前置阶段 evidence，第一次普通提交就提前推进了时钟，未命中 Promotion 实际提交。下一版用仓储 marker 只标记包含 PROMOTION result 的事务，再在该事务 commit 入口推进。
+- marker 修正后真实红灯命中：Promotion commit 入口跨界时旧代码把 Operation 提交为 `SUCCEEDED`，证明此前最后一次应用时钟检查仍有 TOCTOU。
+- 新增 retention-aware Asset UoW 提交原语：flush 后在提交接缝复验注入时钟，并以 MySQL `UTC_TIMESTAMP(6)` 对锁定 Asset 的持久 deadline 做权威校验；专用过期错误使事务回滚，Promotion 再精确补偿复制对象。commit-entry 用例已转绿。
+- MySQL 权威时钟独立门禁通过：DB deadline 已过而 app clock 仍在 deadline 前时，UoW 拒绝提交并回滚已执行的 Asset 状态更新。
+- 全版本 retention 测试首次假定 Finalize 已在 destination 保留一个版本，实际该 key 初始为空；把前置条件修正为显式创建 3 个 owned versions 后，真实红灯稳定留下 1 个版本，准确证明固定两轮清理不充分。
+- 对象存储 Contract 已增加有界版本页、OBJECT/DELETE_MARKER 条目和 exact delete-marker 请求；MinIO 与 OSS Adapter 已实现 opaque 双 marker 游标、精确 key 过滤和版本 ID 失败关闭。下一步补齐双 Adapter contract fake，再接入 UploadPromoter 的有界稳定扫描。
+- MinIO Contract fake 已支持分页响应、marker 请求断言和 exact marker 删除记录；OSS fake 同样扩展版本页与 marker 删除，现正把分页往返断言加入两套既有 Adapter Contract。
+- MinIO/OSS 分页与 marker 删除 Contract 各通过；`UploadPromoter` 已改为有界分页、逐版本所有权复验、精确删除与两次完整空扫描，Retention Coordinator 不再依赖固定双调用。真实 MinIO 的 3-version 红灯已转绿。
+- 真实 MinIO 进一步证明 bounded retry：删除预算设为 2 时数据库保持 Asset=`DELETING`/Object=`DELETE_PENDING` 并返回可重试错误；下一次默认预算调用删除剩余版本后才写 `DELETED`。
+- 普通 Operation DLQ replay 现在把目标终态回调作为完成屏障；回调首次失败时 Lifecycle 保持 `CLAIMED`，同一事件重投只补偿回调且 Provider 调用次数保持 1。Provider 终态和认领前 deadline 两条真实 MySQL 用例均通过。
+- `asset.validation.failed` 明确接受 `attempt_number=0` 表示首次 Provider claim 前到期，Completed Event 和阶段 Evidence 仍要求正数；真实 Worker 证明 Operation/Asset/typed Outbox 收敛且 Evidence 为 0。
+- FAILED 回调在取得 Asset 行锁后重新采样时钟并执行 retention commit guard；Promotion UoW 在 flush 后同时使用应用 UTC 与 MySQL `UTC_TIMESTAMP(6)` 校验持久 deadline，过期事务回滚并精确补偿已复制版本。
+- 对象存储深模块现提供 provider-bound opaque 分页游标、OBJECT/DELETE_MARKER 类型和 exact marker 删除；MinIO 与 OSS 合约覆盖分页往返、精确 Key 过滤、损坏游标和 marker 删除。
+- 有界 retention 清理枚举 source/destination 的全部精确版本，逐对象复验所有权，并要求连续两次完整空扫描后才提交 `DELETED`。三版本、删除预算耗尽重试和首次扫空后并发 copy 三类真实 MinIO 用例均通过。
+- Ticket 05 最终 Python 门禁为 `712 passed, 1 skipped`；唯一跳过项是需要真实阿里云凭证的 OSS live contract。Ruff 204 文件、依赖审计、OpenAPI/Web 类型与 Alembic drift 均通过。
+- Web 最终门禁为 Proxy 10/10、Vitest 29/29、Playwright 28/28，并通过 ESLint、TypeScript、Next.js production build、生成类型检查和 pnpm Moderate 漏洞审计。
+- CI 要求的 API、Worker、Scheduler、MCP、Web 与 OTel 镜像全部构建成功；默认 Compose 强制重建后全部长期服务 healthy，ClamAV 仅内部暴露 3310/7357，主机端口映射为 null。
+- 最新容器级 Foundation PNG 冒烟完成 API 创建、MinIO 直传、Finalize、RabbitMQ/Celery Worker、真实 ClamAV、Promotion 和状态查询；Operation=`SUCCEEDED`、Asset=`PENDING_RIGHTS`，五阶段全部 PASS。
+- 两路无历史固定差异终审已启动：一条审查 Standards/Spec/Architecture，另一条审查 Security/Reliability；审查期间业务差异保持冻结。
+- 两路固定差异终审未批准当前快照，并新增四项必须修复的问题：Scanner replay 回调屏障、实际 Provider endpoint 授权、Workspace allowlist 精确身份，以及受限 JSON 结构复杂度。
+- 当前保持全部业务文件 staged、规划文件 unstaged，不会在修复、完整回归和独立复审前提交。
+- 已锁定四项 TDD 接缝：真实 MySQL Recovery Scanner + Replay Lifecycle；Validation Transfer Policy/Worker 请求工厂；Settings 启动校验；三类 `AssetLocalValidator.validate()`。
+- Scanner replay 屏障红灯准确复现：最后一次 claimed replay lease 到期后 Operation=`FAILED`，旧代码把 Lifecycle 写成 `COMPLETED`。Scanner 现仅在非终态恢复时完成 expired claim；真实 MySQL 重投证明回调首次失败仍为 `CLAIMED`、第二次成功后才完成，且 Provider 调用数为 0。
+- Validation Transfer Policy 已升级到 v2 snapshot schema并绑定 canonical endpoint-host allowlist；运行时授权直接读取 `ContentSafetyAdapter.configured_identity.endpoint`。真实 MySQL/MinIO 用例证明同 Provider/Region 但 endpoint=`collector.example` 时，在临时 URL 和 Provider 调用前以 `VALIDATION_TRANSFER_ENDPOINT_DENIED` 终止。
+- Settings 现在拒绝非规范 endpoint host、IP、wildcard、scheme/port/path，以及不符合统一 Workspace ID 正则的 allowlist 条目；`Catalog-A` 与 `catalog-a` 保持两个二进制精确身份。
+- `AssetLocalValidator` 统一捕获三类 JSON 的 `RecursionError`，并在解析成功后以迭代遍历执行深度和节点预算。SafeTensors、Prompt Template、Model Configuration 的超深、超深度和超节点 9 个公开接缝用例全部转绿。
+- 四项终审修复聚焦回归通过：受影响 Unit `164 passed`、Operation MySQL `4 passed`、外部 transfer MySQL/MinIO `3 passed`；15 个变更 Python 文件 Ruff check 通过。
+- 首次全量 Python 回归为 `743 passed, 3 skipped, 1 failed`。唯一失败是既有外部临时 URL 时窗测试仍让 fixture Adapter 报告 `endpoint=local`，新 endpoint policy 在请求工厂调用前按设计拒绝；测试装置改为 allowlisted Alibaba host 后单独复验并重跑全量。
+- 修正旧 fixture 后，全量 Python 门禁为 `744 passed, 3 skipped`；Ruff format/check、依赖审计、OpenAPI/Web 类型、Alembic upgrade/check 均通过。三项默认 skip 中的两项真实 ClamAV 用 overlay 单独执行为 `2 passed`，仅阿里云 OSS live contract 因无临时凭证不可执行。
+- Web 全门禁为 Proxy 10/10、Vitest 29/29、Playwright 28/28，并通过 frozen install、ESLint、TypeScript、API 类型检查、Moderate 漏洞审计与 production build。
+- CI 所需 API、Worker、Scheduler、MCP、Web 与 OTel 镜像全部构建成功；完整 Compose 重建后长期服务均 healthy，Worker readiness 注册并要求 `ASSET_DELETION`、`ASSET_VALIDATION`，ClamAV 宿主端口映射保持 null。
+- 修复后真实容器链路再次通过 Web BFF、Control API、MinIO、Scheduler、RabbitMQ/Celery、真实 ClamAV 与 Promotion：Operation 经 `PENDING -> RUNNING -> SUCCEEDED`，Asset 到达 `PENDING_RIGHTS`，五阶段均为 PASS，投影不暴露原始 Provider/Object 完整性载荷。
+- 冒烟后应用与依赖日志无 Traceback、CRITICAL、Unhandled、ERROR、Exception 或 Dead Letter 特征；仓库凭据前缀扫描无命中。第一次 PUT 因宿主 Python 读取环境代理返回 503，改用 `trust_env=False` 后同一健康 MinIO 直传为 200，业务与容器配置未变。
+- Ticket 05 业务实现已提交为 `77e5214` 并推送；远程 CI `30221101083` 的 Web、容器和安全/SBOM 均通过，Python Job 仅在 `alembic upgrade head` 创建不可变结果 Trigger 时因业务账号权限不足失败。
+- CI 根因修复不向业务账号增加 DDL 权限：Alembic 直接消费独立 `CV_MIGRATION_MYSQL_DSN`，API/Worker/Scheduler 继续使用运行时 DSN；Compose 和 CI 在迁移前把运行时账号幂等收敛为 `SELECT/INSERT/UPDATE/DELETE`，并执行真实 `CREATE TABLE` 拒绝探针。
+- 独立复审首轮指出三项遗漏：部署环境判断只读 `os.environ`、显式运行时 DSN 连接失败仍可 skip、`mysqladmin ping` 可在认证失败时报告服务存活。三项均已修复为 validated Settings、CI/显式 DSN 强制失败和认证 TCP `SELECT 1` 健康检查。
+- 最终数据库身份专项测试 `21 passed`；全仓 Ruff format/check 通过；完整 Python 为 `760 passed, 3 skipped`；Alembic upgrade/check、Python 依赖审计和 OpenAPI drift 均通过。
+- 最终源码重建 `migrate` 镜像后，Compose `mysql-permissions` 与 `migrate` 均重新以 0 退出，MySQL 和全部长期服务持续 healthy；真实运行时账号只保留 DML grant 且 DDL 被拒绝。
+- 当前等待原独立审查上下文只复核上述三项整改；通过后提交并推送数据库身份工程修复，再以新的 GitHub Actions 运行作为 Ticket 05 验收门槛。
+- 原独立审查上下文已复核配置源、强制权限门禁和认证 TCP readiness 三项整改，返回 `No P0-P2 findings / VERDICT: APPROVED`。
+- 数据库身份工程修复已提交为 `dbc8161`（`Separate migration and runtime database identities`）并推送到 `origin/main`；GitHub Actions 运行 `30225320445` 已启动，等待全部 Job 结束。
+- GitHub Actions `30225320445` 已完成并全绿：Python checks、Web checks、Container builds、Security and SBOM 均为 `success`；新增授权收敛、独立 Alembic 身份和运行时 DML-only 验证步骤均在真实 MySQL 8.4 服务上通过。
+- Ticket 05 已更新为 `complete`，11 项验收标准全部勾选，并记录业务提交 `77e5214`、CI 修复 `dbc8161` 与远程运行 `30225320445`；下一步提交独立验收记录。

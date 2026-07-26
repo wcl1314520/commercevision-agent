@@ -99,7 +99,7 @@
 - Next.js 15.5.21 安全维护作为独立提交 `083004d` 落地，不混入 Ticket 02 的业务实现。
 - Ticket 04 已完成独立上下文实现、主控 TDD 修复、两路独立终审和全量本地/远程门禁；实现提交为 `ca1b1d5`。
 - Ticket 04 的 monorepo CI 修复作为独立工程提交 `8c15291` 落地，不改动业务行为。
-- 下一步进入已由 Ticket 04 解锁的 Ticket 05，继续保持单 Ticket、单独立上下文、单独提交。
+- Ticket 05 已完成独立实现、对抗审查、迁移/运行时数据库身份修复和全部本地/远程门禁；业务提交为 `77e5214`，工程修复为 `dbc8161`，验收 CI 为 `30225320445`。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending
@@ -201,6 +201,9 @@
 | 2026-07-25 | 首次创建 Ticket 04 恢复 Worker 的 JS items 数组漏写末项对象右花括号 | 调用在解析期失败、未创建 Agent；补齐对象边界后重新提交 |
 | 2026-07-25 | Ticket 04 恢复 Worker 在 focused/full pytest 与两轮 Playwright 通过后静止 13 分钟，强制状态请求仍无响应 | 关闭失联上下文并保留全部修复；改派窄范围无历史 Finisher，仅做固定 diff 审查、必要修复、最终门禁和显式暂存提交 |
 | 2026-07-25 | Ticket 04 窄范围 Finisher 启动后 10 分钟无文件/进程活动，强制状态请求仍无响应 | 关闭失联 Agent；主控接管现有已验证 diff，使用新的只读审查上下文并直接完成修复、门禁和提交 |
+| 2026-07-26 | Ticket 05 原 Worker 在恢复后的终态切片连续无响应，关闭并恢复同一 Agent ID 后仍停滞 | 保留共享工作树并关闭失联上下文；主控基于既有红测试完成窄范围审查修复，不新建第二个 Ticket 05 实现上下文 |
+| 2026-07-26 | 首轮终态回放测试发现 completed event 的 Trace ID 超过 Outbox `VARCHAR(64)`，MySQL 归一为 `InvalidDataError` | 缩短为 `validation:<operation_uuid>:<attempt>`，回放从 FAILED 成功收敛到 PENDING_RIGHTS |
+| 2026-07-26 | 临时数据库探针先后因 PowerShell 引号和错误本地密码失败 | 改用受限 here-string 脚本并读取测试 Fixture 中已定义的宿主机 DSN；不记录或引入新凭证 |
 | 2026-07-25 | 本地主库已执行 Ticket 04 同 revision 的中间迁移，最终模型下 `alembic check` 检出 Upload Session 目标对象列与唯一约束漂移 | 以 drift 为反馈环；先审计 Ticket 04 表数据与 downgrade 契约，只在新表为空时受控重建该 revision并复验 |
 | 2026-07-25 | 审计中间版 `upload_sessions` 时按最终模型查询 `status` 列，MySQL 报 Unknown column | 不重复最终模型假设；先用 Inspector 枚举实际列，再按中间 schema 查询保留记录 |
 | 2026-07-25 | 最初计划从 `asset_objects` 回填 Finalize 目标位置，但现有演示对象仍位于 QUARANTINE 且与源相同 | 放弃不满足最终 CHECK/领域不变量的直接回填；暂停写入面后先复制到 FOUNDATION，再更新对象事实并补列/约束 |
@@ -270,3 +273,23 @@
 | 2026-07-25 | Ticket 04 两路最终复审首次均因 Codex response stream 断开失败 | 关闭失效任务并重新发起只读窄范围复审；替代审查最终均返回 APPROVED |
 | 2026-07-25 | 首次读取 Gitleaks Job 日志时 GitHub API TLS handshake 超时 | 保留失败运行不重试相同行为，增加 `GH_HTTP_TIMEOUT=120` 后成功获取日志并定位误报 |
 | 2026-07-25 | Ticket 04 首次远程 CI 中 Gitleaks 误报测试幂等键，根目录 Playwright 安装找不到 workspace 二进制 | 使用低熵测试夹具并显式在 `@commercevision/web` workspace 执行 Playwright；新运行 `30177137257` 四个 Job 全绿 |
+| 2026-07-26 | Ticket 05 迁移复验误把配置路径写成 `database/alembic.ini`，Alembic 报缺少 `script_location` | 先枚举仓库实际配置，改用根目录 `alembic.ini`；主库与测试库随后均确认在 `e5f8b2d6c914 (head)` 且 `alembic check` 无 drift |
+| 2026-07-26 | 查询启动告警的首个 Python 单行命令被 PowerShell 嵌套引号截断并触发 `SyntaxError` | 改用 PowerShell here-string 通过标准输入执行只读 SQLAlchemy 查询，确认两条遗留事件均以终态 Operation + Dead Letter 收敛 |
+| 2026-07-26 | 部署冒烟的首次对象核验误把 `ORIGINAL` 隔离源行当作 Promotion 目标，按源 Version ID 查询 Foundation 得到 404 | 枚举同一 Asset Version 的对象角色后确认双对象事实；改按 `CONTROLLED_ORIGINAL` 精确 Version 验证目标，并独立验证 `ORIGINAL` 源已删除 |
+| 2026-07-26 | 初次凭证前缀扫描把测试幂等键中的普通子串 `sk-rejected...` 误判为 OpenAI Key 前缀 | 为 `sk-` 增加前置词边界并只输出候选文件；复扫确认无 GitHub、OpenAI、AWS 或阿里云凭证前缀 |
+| 2026-07-26 | Ticket 05 静态审查的一组并行只读命令因单个子命令非零而丢失整组结果 | 不重复失败的 fail-fast 组合；后续使用 `Promise.allSettled` 保留各子命令输出并单独诊断失败项 |
+| 2026-07-26 | 检查对象条件删除语义时假定了不存在的 MinIO 文件名，并把 PowerShell 通配符直接传给 `rg` | 不重复错误路径；先用 `rg --files packages/object-storage` 枚举真实模块，再按实际文件执行只读检索 |
+| 2026-07-26 | 外传策略状态检查再次把可能“无匹配即返回 1”的 `rg` 放入 fail-fast 并行组，重复造成整组输出丢失 | 将本轮后续可空检索强制改为 `Promise.allSettled` 或显式正常化空结果，不再使用 fail-fast `Promise.all` |
+| 2026-07-26 | Ticket 05 安全终审发现 Recovery Scanner 直接耗尽 reconciliation 时只提交 Operation/DLQ，Asset 可永久停在 `VALIDATING` | 新增 `TERMINAL_FAILURE` Recovery Generation；真实 Provider 中断、持续不可用、Scanner 到期路径证明 Worker 幂等收敛 Asset 与 typed terminal event |
+| 2026-07-26 | 全量真实集成发现测试执行器与生产重启的 Content Safety/C2PA configured identity 不一致 | 测试 Executor 统一从同一 Settings 构造 policy/mapping/trust identity，继续对真实配置轮换失败关闭 |
+| 2026-07-26 | MinIO Versioning 并发 conditional copy 可短暂产生两个同内容版本，后到执行器把合法竞态误判为篡改 | MySQL `CONTROLLED_ORIGINAL` 版本作为胜者；事务外复验胜者并按 Version ID + ETag 精确删除重复版本，数据库与存储均只保留一个版本 |
+| 2026-07-27 | Windows 再次把 `*.py` 通配路径直接传给 `rg`，产生文件名语法错误 | 改为传入真实目录并由 `rg` 过滤；本轮后续检索均使用字面目录 |
+| 2026-07-27 | 损坏版本游标红测试首次遗漏必填 `page_size`，先触发 Pydantic 测试装置错误 | 补齐合法请求其余字段后重跑，确认损坏 Base64 在 MinIO/OSS 两端均映射为 `StoragePreconditionError` |
+| 2026-07-27 | 新版分页清理使旧并发测试仍在 `stat` 上等待扫描信号并超时 | 将竞争探针迁到真实 `list_versions` 边界，继续证明首次空扫描后并发 copy 会被后续稳定扫描捕获并删除 |
+| 2026-07-27 | 首次全量 pytest 使用过短工具超时被终止 | 使用相同真实 MySQL DSN 和足够窗口完整重跑，最终 `712 passed, 1 skipped` |
+| 2026-07-27 | 宿主机 `alembic check` 默认解析 Compose 内部主机名 `mysql` 失败 | 显式使用文档化宿主机 DSN `127.0.0.1:13316`，`upgrade head` 与 `alembic check` 均通过 |
+| 2026-07-27 | 最新 Compose 重建后的首个预签名 MinIO PUT 瞬时返回 503 | 确认 MinIO readiness、Bucket 初始化与日志正常；独立 PUT 随后返回 200，并用全新 Session 完成容器级 Validation 冒烟 |
+| 2026-07-27 | endpoint 授权升级后的首次全量 pytest 有 1 个外部 URL 时窗测试仍使用 `endpoint=local` fixture | 业务策略按设计在预签名前拒绝；将该外部 Adapter fixture 绑定 allowlisted Alibaba host，先单测再完整重跑 |
+| 2026-07-27 | 修复后容器冒烟首次 MinIO PUT 返回 503，而 MinIO readiness 与日志均正常 | 宿主 `httpx` 显式禁用环境代理后同一预签名契约 PUT 返回 200，并完成 Scheduler/RabbitMQ/Celery/ClamAV/Promotion 全链路；不把宿主代理行为归因于业务配置 |
+| 2026-07-27 | Ticket 05 远程 CI `30221101083` 在 MySQL 8.4 创建不可变结果 Trigger 时返回 1419，业务账号无 `SUPER`/Trigger 权限 | 不提升运行时账号权限；新增独立迁移 DSN，使用管理员身份执行 Alembic，并在启动/CI 中把 API、Worker、Scheduler 的账号收敛为精确 DML-only 权限 |
+| 2026-07-27 | 最终全仓 Ruff 检查发现迁移身份单测的两个第三方导入顺序不符合规则 | 只调整测试导入顺序；随后 Ruff format/check 与完整 `760 passed, 3 skipped` 全部通过 |
