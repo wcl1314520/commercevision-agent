@@ -24,7 +24,16 @@ def validation_migration_database(integration_settings, monkeypatch):
     test_url = source_url.set(database=database_name)
     engine = create_engine(test_url)
     config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
-    monkeypatch.setenv("CV_MYSQL_DSN", test_url.render_as_string(hide_password=False))
+    monkeypatch.setenv(
+        "CV_MIGRATION_MYSQL_DSN",
+        test_url.render_as_string(hide_password=False),
+    )
+    monkeypatch.setenv(
+        "CV_MYSQL_DSN",
+        source_url.set(database=f"runtime_forbidden_{uuid.uuid4().hex[:8]}").render_as_string(
+            hide_password=False
+        ),
+    )
     try:
         with admin_engine.begin() as connection:
             connection.execute(

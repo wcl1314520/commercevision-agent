@@ -84,6 +84,9 @@
 - 先兼容旧代码，再删除旧字段。
 - 大表迁移评估锁和执行时间。
 - MySQL 类型变更必须验证实际 DDL 算法；需要 `ALGORITHM=COPY` 的迁移只能在上线前执行，或在生产维护窗口通过 `gh-ost`、`pt-online-schema-change` 等受控在线迁移流程执行。
+- 迁移身份与运行时身份必须分离。Alembic 在部署环境中要求一次性 Migration Job 直接注入 `CV_MIGRATION_MYSQL_DSN`；API、Worker 和 Scheduler 的 `CV_MYSQL_DSN` 只能拥有 `SELECT/INSERT/UPDATE/DELETE`，不得拥有 DDL、`TRIGGER` 或 `GRANT OPTION`。
+- 每次部署必须先幂等收敛运行时 Grants，并通过 `SHOW GRANTS` 与真实 DDL 拒绝探针；不能依赖 MySQL 镜像只在空数据卷执行的首次初始化逻辑。
+- 发布前必须验证迁移身份拥有本次 DDL 所需权限。MySQL 8.4 开启 Binary Log 时，`CREATE TRIGGER` 除 `TRIGGER` 外还可能要求管理权限；由 DBA 配置专用迁移身份或托管实例的受控参数，禁止为运行时账号授予 `SUPER`。
 - CI 必须运行 `alembic check` 和 `INFORMATION_SCHEMA` schema contract 测试；自定义类型不能依赖 Alembic 默认比较器推断精度、字符集等方言属性。
 - 迁移前备份和恢复验证。
 - 失败采用前向修复，避免危险降级脚本。

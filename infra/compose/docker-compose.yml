@@ -51,10 +51,31 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      test:
+        [
+          "CMD-SHELL",
+          "MYSQL_PWD=$${MYSQL_ROOT_PASSWORD} mysql --protocol=TCP --host=127.0.0.1 --user=root --database=$${MYSQL_DATABASE} --batch --skip-column-names --execute='SELECT 1' | grep --quiet --line-regexp 1",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
+    networks: [commercevision]
+
+  mysql-permissions:
+    image: mysql:8.4
+    command:
+      - /bin/sh
+      - /opt/commercevision/reconcile-runtime-grants.sh
+    environment:
+      MYSQL_ROOT_PASSWORD: ${CV_MYSQL_ROOT_PASSWORD:-root-change-me}
+      MYSQL_RUNTIME_PASSWORD: ${CV_MYSQL_PASSWORD:-commercevision}
+    volumes:
+      - ../mysql/reconcile-runtime-grants.sql:/opt/commercevision/reconcile-runtime-grants.sql:ro
+      - ../mysql/reconcile-runtime-grants.sh:/opt/commercevision/reconcile-runtime-grants.sh:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
     networks: [commercevision]
 
   migrate:
@@ -67,10 +88,12 @@ services:
     environment:
       CV_SERVICE_NAME: migration
       CV_ENVIRONMENT: local
-      CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_MIGRATION_MYSQL_DSN: ${CV_MIGRATION_MYSQL_DSN:-mysql+pymysql://root:${CV_MYSQL_ROOT_PASSWORD:-root-change-me}@mysql:3306/commercevision}
     depends_on:
       mysql:
         condition: service_healthy
+      mysql-permissions:
+        condition: service_completed_successfully
     restart: "no"
     networks: [commercevision]
 

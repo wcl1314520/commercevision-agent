@@ -5,8 +5,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from commercevision_contracts.config import load_settings
-from commercevision_persistence.database import sync_mysql_url
+from commercevision_persistence.migration_identity import resolve_migration_mysql_url
 from commercevision_persistence.models import Base
 from commercevision_persistence.schema import compare_mysql_datetime_precision
 from sqlalchemy import engine_from_config, pool
@@ -15,10 +14,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-settings = load_settings("migration")
 config.set_main_option(
     "sqlalchemy.url",
-    sync_mysql_url(settings.mysql_dsn).render_as_string(hide_password=False).replace("%", "%%"),
+    resolve_migration_mysql_url().render_as_string(hide_password=False).replace("%", "%%"),
 )
 target_metadata = Base.metadata
 

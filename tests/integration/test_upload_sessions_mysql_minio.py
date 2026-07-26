@@ -4043,9 +4043,7 @@ def test_task_content_reference_never_exceeds_retention_or_short_window(
     deadline = datetime.fromisoformat(body["asset"]["retention_deadline"])
     clock = MutableValidationClock(deadline - timedelta(seconds=remaining_seconds))
     request_factory = RecordingExternalContentSafetyRequestFactory()
-    content_safety = RecordingContentSafetyAdapter(
-        endpoint="green-cip.cn-shanghai.aliyuncs.com"
-    )
+    content_safety = RecordingContentSafetyAdapter(endpoint="green-cip.cn-shanghai.aliyuncs.com")
     operation_id = body["validation_operation"]["id"]
     with SqlAlchemyUnitOfWork(
         integration_database.session_factory  # type: ignore[attr-defined]

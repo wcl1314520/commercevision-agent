@@ -98,13 +98,19 @@ docker compose -f infra\compose\docker-compose.yml logs --tail 200 api worker
 数据库迁移和漂移检查：
 
 ```powershell
-$env:CV_MYSQL_DSN="mysql+pymysql://commercevision:commercevision@127.0.0.1:13316/commercevision"
+$env:CV_MIGRATION_MYSQL_DSN="mysql+pymysql://root:root-change-me@127.0.0.1:13316/commercevision"
 uv run alembic upgrade head
 uv run alembic current
 uv run alembic check
 ```
 
-Compose 启动时 `migrate` 服务会在 API、Worker 和 Scheduler 之前执行 `alembic upgrade head`。MySQL 类型变更可能需要表复制；生产环境必须按 [CI/CD 与发布](ci-cd-and-release.md) 的在线迁移或维护窗口要求执行。
+Compose 启动时 `migrate` 服务会在 API、Worker 和 Scheduler 之前执行 `alembic upgrade head`。
+`mysql-permissions` 一次性服务会先把官方镜像默认授予的数据库级 `ALL` 收敛为
+`SELECT/INSERT/UPDATE/DELETE`，并以真实 `CREATE TABLE` 拒绝探针验证运行时账号。
+`migrate` 读取独立的 `CV_MIGRATION_MYSQL_DSN`；API、Worker 和 Scheduler 继续使用
+`CV_MYSQL_DSN` 对应的 DML-only 账号。默认管理员 DSN 只适用于本地 Compose，生产环境必须
+注入专用迁移身份，不能把 DDL 或 `SUPER` 权限授予运行时账号。MySQL 类型变更可能需要
+表复制；生产环境必须按 [CI/CD 与发布](ci-cd-and-release.md) 的在线迁移或维护窗口要求执行。
 
 ## Direct Upload 对象存储
 

@@ -28,7 +28,10 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h localhost -u root -proot-change-me"
+          --health-cmd="MYSQL_PWD=root-change-me mysql --protocol=TCP
+          --host=127.0.0.1 --user=root --database=commercevision
+          --batch --skip-column-names --execute='SELECT 1'
+          | grep --quiet --line-regexp 1"
           --health-interval=5s
           --health-timeout=5s
           --health-retries=20
@@ -56,8 +59,23 @@ jobs:
             sleep 1
           done
           curl --fail http://127.0.0.1:19000/minio/health/live
-      - run: uv run alembic upgrade head
-      - run: uv run alembic check
+      - name: Reconcile runtime database grants
+        run: >-
+          docker exec --interactive
+          --env MYSQL_PWD=root-change-me
+          ${{ job.services.mysql.id }}
+          mysql --protocol=TCP --host=127.0.0.1 --user=root
+          < infra/mysql/reconcile-runtime-grants.sql
+      - name: Upgrade schema
+        run: uv run alembic upgrade head
+        env:
+          CV_MIGRATION_MYSQL_DSN: mysql+pymysql://root:root-change-me@127.0.0.1:3306/commercevision
+      - name: Check schema drift
+        run: uv run alembic check
+        env:
+          CV_MIGRATION_MYSQL_DSN: mysql+pymysql://root:root-change-me@127.0.0.1:3306/commercevision
+      - name: Verify runtime database grants
+        run: uv run pytest tests/integration/test_mysql_runtime_privileges.py -q
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run pytest
