@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from commercevision_domain import Asset, AssetObject, AssetVersion, UploadSession
+from commercevision_domain import (
+    Asset,
+    AssetObject,
+    AssetValidationResult,
+    AssetVersion,
+    UploadSession,
+    ValidationStage,
+)
 from commercevision_domain.messaging import OutboxEvent
 from commercevision_domain.operations import DurableOperation
 
@@ -24,6 +31,15 @@ class IdempotencyRecordPort(Protocol):
 class WorkflowRetentionFacts:
     created_at: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AssetRetentionCommitExpiredError(Exception):
+    observed_at: datetime
+    retention_deadline: datetime
+
+    def __str__(self) -> str:
+        return "Asset retention expired at the database commit boundary"
 
 
 class UploadSessionRepositoryPort(Protocol):
@@ -61,7 +77,10 @@ class AssetRepositoryPort(Protocol):
         *,
         workspace_id: str,
         asset_id: str,
+        for_update: bool = False,
     ) -> Asset | None: ...
+
+    def save_asset(self, asset: Asset) -> None: ...
 
     def get_version(
         self,
@@ -83,7 +102,34 @@ class AssetRepositoryPort(Protocol):
         workspace_id: str,
         asset_version_id: str,
         role: str = "ORIGINAL",
+        for_update: bool = False,
     ) -> AssetObject | None: ...
+
+    def add_object(self, object_fact: AssetObject) -> None: ...
+
+    def save_object(self, object_fact: AssetObject) -> None: ...
+
+    def add_validation_result(self, result: AssetValidationResult) -> None: ...
+
+    def get_validation_result(
+        self,
+        *,
+        workspace_id: str,
+        asset_version_id: str,
+        operation_id: str,
+        attempt_number: int,
+        stage: ValidationStage,
+        validator_name: str,
+        validator_version: str,
+        policy_version: str,
+    ) -> AssetValidationResult | None: ...
+
+    def list_validation_results(
+        self,
+        *,
+        workspace_id: str,
+        asset_version_id: str,
+    ) -> list[AssetValidationResult]: ...
 
 
 class AssetAssociationPort(Protocol):
@@ -190,6 +236,15 @@ class AssetUnitOfWorkPort(Protocol):
     ) -> None: ...
 
     def commit(self) -> None: ...
+
+    def commit_before_retention_deadline(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        retention_deadline: datetime,
+        clock: Callable[[], datetime],
+    ) -> None: ...
 
 
 AssetUnitOfWorkFactory = Callable[[], AssetUnitOfWorkPort]

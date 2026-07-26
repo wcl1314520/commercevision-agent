@@ -12,6 +12,9 @@ SCHEMAS = (
     "AssetObjectState",
     "AssetResponseV1",
     "AssetState",
+    "AssetValidationOperationResponseV1",
+    "AssetValidationStageResponseV1",
+    "AssetValidationStatusResponseV1",
     "AssetVersionResponseV1",
     "CatalogDeleteRequestV1",
     "ErrorResponse",
@@ -37,6 +40,8 @@ SCHEMAS = (
     "UploadSessionResponseV1",
     "UploadSessionState",
     "ValidationOperationSummaryV1",
+    "ValidationStage",
+    "ValidationVerdict",
 )
 
 

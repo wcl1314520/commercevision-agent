@@ -150,6 +150,7 @@ function apiMethodAllowed(path: string, method: string): boolean {
     return method === "POST";
   }
   if (/^\/assets\/[^/]+$/.test(path)) return method === "GET";
+  if (/^\/assets\/[^/]+\/validation$/.test(path)) return method === "GET";
   if (
     /^\/operations\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       path,

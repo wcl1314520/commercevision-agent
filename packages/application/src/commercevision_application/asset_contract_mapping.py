@@ -28,6 +28,10 @@ def upload_session_response(upload_session: UploadSession) -> UploadSessionRespo
         role=upload_session.role,
         upload_policy_version=upload_session.upload_policy_version,
         integrity_policy_version=upload_session.integrity_policy_version,
+        validation_transfer_policy_version=(upload_session.validation_transfer_policy_version),
+        validation_transfer_policy_snapshot_sha256=(
+            upload_session.validation_transfer_policy_snapshot_sha256
+        ),
         status=upload_session.state,
         failure_code=upload_session.failure_code,
         asset_version_id=upload_session.finalized_asset_version_id,
@@ -62,6 +66,11 @@ def asset_version_response(
         category=asset_version.category,
         role=asset_version.role,
         integrity_policy_version=asset_version.integrity_policy_version,
+        validation_policy_version=asset_version.validation_policy_version,
+        validation_transfer_policy_version=(asset_version.validation_transfer_policy_version),
+        validation_transfer_policy_snapshot_sha256=(
+            asset_version.validation_transfer_policy_snapshot_sha256
+        ),
         object_state=object_fact.state,
         created_at=asset_version.created_at,
     )
@@ -81,6 +90,7 @@ def asset_response(
         product_id=asset.product_id,
         sku_id=asset.sku_id,
         status=asset.status,
+        block_reason=asset.block_reason,
         current_version_id=asset.current_version_id,
         retention_deadline=asset.retention_deadline,
         version=asset.version,

@@ -33,7 +33,12 @@ from commercevision_domain import (
     RetryExhaustedError,
     RetryNotReadyError,
 )
-from commercevision_domain.messaging import EventEnvelope, OutboxEvent
+from commercevision_domain.messaging import (
+    DeadLetterMessage,
+    EventEnvelope,
+    OutboxEvent,
+    ReplayLifecycleState,
+)
 from commercevision_persistence import (
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyOperatorUnitOfWork,
@@ -172,6 +177,68 @@ class RecordingExecutor:
             outcome=ReconciliationOutcome.CONFIRMED_SUCCESS,
             output_ref=f"mysql://operation-results/{request.operation_id}",
         )
+
+
+class RecordingTerminalFailureExecutor(RecordingExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.terminal_failures: list[
+            tuple[OperationExecutionRequest, NormalizedOperationError]
+        ] = []
+
+    def record_terminal_failure(
+        self,
+        request: OperationExecutionRequest,
+        error: NormalizedOperationError,
+    ) -> None:
+        self.transaction_states.append(is_unit_of_work_active())
+        self.terminal_failures.append((request, error))
+
+
+class FailOnceTerminalFailureExecutor(RecordingTerminalFailureExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self._should_fail = True
+
+    def record_terminal_failure(
+        self,
+        request: OperationExecutionRequest,
+        error: NormalizedOperationError,
+    ) -> None:
+        self.transaction_states.append(is_unit_of_work_active())
+        if self._should_fail:
+            self._should_fail = False
+            raise RuntimeError("terminal convergence stopped before target commit")
+        self.terminal_failures.append((request, error))
+
+
+class FailOnceReplayTerminalExecutor(RecordingTerminalFailureExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.execute_calls = 0
+        self._should_fail_callback = True
+
+    def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
+        self.execute_calls += 1
+        raise OperationExecutionFailure(
+            NormalizedOperationError(
+                code="PROVIDER_REJECTED_DURING_REPLAY",
+                category="provider",
+                message="provider rejected the explicit replay attempt",
+                retryable=False,
+            )
+        )
+
+    def record_terminal_failure(
+        self,
+        request: OperationExecutionRequest,
+        error: NormalizedOperationError,
+    ) -> None:
+        self.transaction_states.append(is_unit_of_work_active())
+        if self._should_fail_callback:
+            self._should_fail_callback = False
+            raise RuntimeError("replay terminal callback stopped before target commit")
+        self.terminal_failures.append((request, error))
 
 
 class SuccessfulProviderIdentityExecutor(RecordingExecutor):
@@ -1114,6 +1181,18 @@ class MutableClock:
 
     def __call__(self) -> datetime:
         return self.now
+
+
+class ReplayDeadlineClock:
+    def __init__(self, replayed_at: datetime) -> None:
+        self._replayed_at = replayed_at
+        self._calls = 0
+
+    def __call__(self) -> datetime:
+        self._calls += 1
+        if self._calls == 1:
+            return self._replayed_at
+        return self._replayed_at + timedelta(hours=25)
 
 
 class ExpiringSuccessExecutor:
@@ -2468,6 +2547,202 @@ def test_early_terminal_failure_replay_grants_exactly_one_execution_attempt(
     assert child_dead_letter.source_dead_letter_id == failed.dead_letter_id
 
 
+def test_operation_dead_letter_replay_retries_terminal_callback_before_completion(
+    integration_database,
+) -> None:
+    service = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    operation = service.create(
+        OperationCreateCommand(
+            workspace_id="workspace-operation-replay-terminal-callback",
+            kind=OperationKind.ASSET_VALIDATION,
+            target_type="asset",
+            target_id="asset-replay-terminal-callback",
+            target_version=1,
+            input_hash="e" * 64,
+            input_ref=None,
+            max_attempts=1,
+        )
+    )
+    initial_worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=PermanentFailureExecutor(),
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-replay-terminal-initial",
+        lease_duration=timedelta(seconds=30),
+    )
+    failed = initial_worker.execute(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    assert failed.dead_letter_id is not None
+
+    principal = AuthenticatedPrincipal(
+        actor_id="replay-terminal-admin",
+        workspace_ids=frozenset({operation.workspace_id}),
+        admin_workspace_ids=frozenset({operation.workspace_id}),
+    )
+    dead_letters = DeadLetterOperatorService(
+        uow_factory=lambda: SqlAlchemyOperatorUnitOfWork(integration_database.session_factory),
+        access_policy=AllowWorkspaceAdminPolicy(),
+    )
+    replay = dead_letters.replay(
+        workspace_id=operation.workspace_id,
+        dead_letter_id=failed.dead_letter_id,
+        principal=principal,
+        reason="retry provider once and converge the target durably",
+        idempotency_key="operation-replay-terminal-callback-0001",
+        trace_id="operation-replay-terminal-callback",
+    )
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        replay_event = uow.outbox.get(replay.replay_event_id)
+    assert replay_event is not None
+
+    executor = FailOnceReplayTerminalExecutor()
+    replay_worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-replay-terminal-callback",
+        lease_duration=timedelta(seconds=30),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="replay terminal callback stopped before target commit",
+    ):
+        replay_worker.handle_recovery_event(replay_event)
+
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        lifecycle = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert lifecycle is not None
+    assert lifecycle.state == ReplayLifecycleState.CLAIMED
+    assert executor.execute_calls == 1
+    assert executor.terminal_failures == []
+
+    converged = replay_worker.handle_recovery_event(replay_event)
+
+    assert converged.state == OperationState.FAILED
+    assert executor.execute_calls == 1
+    assert len(executor.terminal_failures) == 1
+    assert executor.terminal_failures[0][0].operation_id == operation.id
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        completed_lifecycle = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert completed_lifecycle is not None
+    assert completed_lifecycle.state == ReplayLifecycleState.COMPLETED
+
+
+def test_operation_dead_letter_replay_deadline_retries_terminal_callback(
+    integration_database,
+) -> None:
+    service = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    operation = service.create(
+        OperationCreateCommand(
+            workspace_id="workspace-operation-replay-deadline-callback",
+            kind=OperationKind.ASSET_VALIDATION,
+            target_type="asset",
+            target_id="asset-replay-deadline-callback",
+            target_version=1,
+            input_hash="f" * 64,
+            input_ref=None,
+            max_attempts=1,
+        )
+    )
+    failed = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=PermanentFailureExecutor(),
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-replay-deadline-initial",
+        lease_duration=timedelta(seconds=30),
+    ).execute(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    assert failed.dead_letter_id is not None
+
+    principal = AuthenticatedPrincipal(
+        actor_id="replay-deadline-admin",
+        workspace_ids=frozenset({operation.workspace_id}),
+        admin_workspace_ids=frozenset({operation.workspace_id}),
+    )
+    dead_letters = DeadLetterOperatorService(
+        uow_factory=lambda: SqlAlchemyOperatorUnitOfWork(integration_database.session_factory),
+        access_policy=AllowWorkspaceAdminPolicy(),
+    )
+    replay = dead_letters.replay(
+        workspace_id=operation.workspace_id,
+        dead_letter_id=failed.dead_letter_id,
+        principal=principal,
+        reason="verify deadline terminal convergence",
+        idempotency_key="operation-replay-deadline-callback-0001",
+        trace_id="operation-replay-deadline-callback",
+    )
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        replay_event = uow.outbox.get(replay.replay_event_id)
+    assert replay_event is not None
+
+    executor = FailOnceTerminalFailureExecutor()
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-replay-deadline-callback",
+        lease_duration=timedelta(seconds=30),
+        clock=ReplayDeadlineClock(datetime.now(UTC) + timedelta(minutes=1)),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="terminal convergence stopped before target commit",
+    ):
+        worker.handle_recovery_event(replay_event)
+
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        pending_lifecycle = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert pending_lifecycle is not None
+    assert pending_lifecycle.state == ReplayLifecycleState.CLAIMED
+    assert executor.terminal_failures == []
+
+    converged = worker.handle_recovery_event(replay_event)
+
+    assert converged.state == OperationState.FAILED
+    assert converged.attempt_count == failed.attempt_count
+    assert len(executor.terminal_failures) == 1
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        completed_lifecycle = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert completed_lifecycle is not None
+    assert completed_lifecycle.state == ReplayLifecycleState.COMPLETED
+
+
 def test_each_reconciliation_replay_grants_exactly_one_additional_query(
     integration_database,
 ) -> None:
@@ -2602,9 +2877,324 @@ def test_expired_claim_at_max_attempts_atomically_creates_dead_letter(
         operation_id=operation.id,
     )
 
-    assert emitted == 0
+    assert emitted == 1
     assert failed.state == OperationState.FAILED
     assert failed.dead_letter_id is not None
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        convergence_event = next(
+            event
+            for event in uow.outbox.list_for_aggregate(operation.id)
+            if event.published_at is None
+            and event.envelope.payload["recovery_reason"] == "TERMINAL_FAILURE"
+        )
+
+    executor = RecordingTerminalFailureExecutor()
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-expired-dlq-convergence",
+        lease_duration=timedelta(seconds=30),
+    )
+
+    converged = worker.handle_recovery_event(convergence_event)
+
+    assert converged.state == OperationState.FAILED
+    assert converged.recovery_generation == converged.recovery_consumed_generation == 1
+    assert executor.transaction_states == [False]
+    assert len(executor.terminal_failures) == 1
+    request, error = executor.terminal_failures[0]
+    assert request.operation_id == operation.id
+    assert error.code == "LEASE_EXPIRED"
+
+
+def test_replay_claim_expiry_waits_for_terminal_callback_before_completion(
+    integration_database,
+) -> None:
+    service = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    operation = service.create(
+        OperationCreateCommand(
+            workspace_id="workspace-replay-claim-expiry",
+            kind=OperationKind.ASSET_VALIDATION,
+            target_type="asset",
+            target_id="asset-replay-claim-expiry",
+            target_version=1,
+            input_hash="7" * 64,
+            input_ref=None,
+            max_attempts=1,
+        )
+    )
+    failed = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=PermanentFailureExecutor(),
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-replay-claim-expiry-initial",
+        lease_duration=timedelta(seconds=30),
+    ).execute(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    assert failed.dead_letter_id is not None
+
+    principal = AuthenticatedPrincipal(
+        actor_id="replay-claim-expiry-admin",
+        workspace_ids=frozenset({operation.workspace_id}),
+        admin_workspace_ids=frozenset({operation.workspace_id}),
+    )
+    replay = DeadLetterOperatorService(
+        uow_factory=lambda: SqlAlchemyOperatorUnitOfWork(integration_database.session_factory),
+        access_policy=AllowWorkspaceAdminPolicy(),
+    ).replay(
+        workspace_id=operation.workspace_id,
+        dead_letter_id=failed.dead_letter_id,
+        principal=principal,
+        reason="retry once after the provider configuration is repaired",
+        idempotency_key="replay-claim-expiry-0001",
+        trace_id="replay-claim-expiry",
+    )
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        replay_event = uow.outbox.get(replay.replay_event_id)
+    assert replay_event is not None
+
+    claimed_at = datetime.now(UTC)
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        claimed_events = uow.outbox.claim_ready(
+            now=claimed_at,
+            owner="publisher-replay-claim-expiry",
+            lease_duration=timedelta(seconds=30),
+            limit=10,
+        )
+        published_event = next(
+            candidate
+            for candidate in claimed_events
+            if candidate.envelope.event_id == replay.replay_event_id
+        )
+        assert published_event.lock_token is not None
+        uow.outbox.mark_published(
+            published_event.envelope.event_id,
+            published_event.lock_token,
+            now=claimed_at,
+        )
+        uow.commit()
+    service.apply_recovery_replay(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        source_dead_letter_id=failed.dead_letter_id,
+        replay_attempt=replay.replay_attempt,
+        replay_event_id=replay.replay_event_id,
+        recovery_generation=0,
+        reconcile_only=False,
+        execution_deadline_at=claimed_at + timedelta(hours=1),
+        reconciliation_deadline_at=claimed_at + timedelta(hours=1),
+        now=claimed_at,
+    )
+    claim_token = service.retry(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        owner="worker-replay-claim-expiry-crashed",
+        lease_duration=timedelta(seconds=1),
+        now=claimed_at,
+    )
+    claimed = service.get(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        uow.dead_letters.mark_replay_claimed(
+            replay_event_id=replay.replay_event_id,
+            operation_id=operation.id,
+            claim_token=claim_token,
+            claimed_operation_version=claimed.version,
+            claimed_at=claimed_at,
+        )
+        uow.commit()
+
+    scan_at = claimed_at + timedelta(seconds=1)
+    assert (
+        OperationRecoveryService(
+            uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory),
+            batch_size=1,
+        ).recover_once(now=scan_at)
+        == 1
+    )
+    scanned = service.get(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    assert scanned.state == OperationState.FAILED
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        lifecycle = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert lifecycle is not None
+    assert lifecycle.state == ReplayLifecycleState.CLAIMED
+
+    executor = FailOnceReplayTerminalExecutor()
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-replay-claim-expiry-convergence",
+        lease_duration=timedelta(seconds=30),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="replay terminal callback stopped before target commit",
+    ):
+        worker.handle_recovery_event(replay_event)
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        after_failed_callback = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert after_failed_callback is not None
+    assert after_failed_callback.state == ReplayLifecycleState.CLAIMED
+    assert executor.execute_calls == 0
+
+    converged = worker.handle_recovery_event(replay_event)
+
+    assert converged.state == OperationState.FAILED
+    assert executor.execute_calls == 0
+    assert len(executor.terminal_failures) == 1
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        completed = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=failed.dead_letter_id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert completed is not None
+    assert completed.state == ReplayLifecycleState.COMPLETED
+
+
+def test_terminal_recovery_dlq_replay_retries_callback_before_consuming_generation(
+    integration_database,
+) -> None:
+    service = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    operation = service.create(
+        OperationCreateCommand(
+            workspace_id="workspace-terminal-recovery-replay",
+            kind=OperationKind.ASSET_DELETION,
+            target_type="asset",
+            target_id="asset-terminal-recovery-replay",
+            target_version=1,
+            input_hash="8" * 64,
+            input_ref=None,
+            max_attempts=1,
+        )
+    )
+    claimed_at = datetime.now(UTC) - timedelta(seconds=1)
+    service.claim(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        owner="worker-terminal-recovery-replay",
+        lease_duration=timedelta(microseconds=1),
+        now=claimed_at,
+    )
+    assert (
+        OperationRecoveryService(
+            uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory),
+            batch_size=1,
+        ).recover_once(now=datetime.now(UTC))
+        == 1
+    )
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        convergence_event = next(
+            event
+            for event in uow.outbox.list_for_aggregate(operation.id)
+            if event.envelope.payload.get("recovery_reason") == "TERMINAL_FAILURE"
+        )
+
+    executor = FailOnceTerminalFailureExecutor()
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-terminal-recovery-callback",
+        lease_duration=timedelta(seconds=30),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="terminal convergence stopped before target commit",
+    ):
+        worker.handle_recovery_event(convergence_event)
+
+    after_failed_callback = service.get(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    assert after_failed_callback.recovery_generation == 1
+    assert after_failed_callback.recovery_consumed_generation == 0
+
+    transport_dead_letter = DeadLetterMessage.create(
+        consumer="terminal-recovery-test",
+        message_id=convergence_event.envelope.event_id,
+        event_type=convergence_event.envelope.event_type,
+        payload=convergence_event.envelope.payload,
+        reason="terminal callback retry budget exhausted",
+        error_class="RuntimeError",
+        error_message="terminal convergence stopped before target commit",
+        attempt_count=1,
+        original_created_at=convergence_event.envelope.occurred_at,
+        workspace_id=operation.workspace_id,
+    )
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        uow.dead_letters.add(transport_dead_letter)
+        uow.commit()
+    principal = AuthenticatedPrincipal(
+        actor_id="terminal-recovery-admin",
+        workspace_ids=frozenset({operation.workspace_id}),
+        admin_workspace_ids=frozenset({operation.workspace_id}),
+    )
+    replay = DeadLetterOperatorService(
+        uow_factory=lambda: SqlAlchemyOperatorUnitOfWork(integration_database.session_factory),
+        access_policy=AllowWorkspaceAdminPolicy(),
+    ).replay(
+        workspace_id=operation.workspace_id,
+        dead_letter_id=transport_dead_letter.id,
+        principal=principal,
+        reason="retry terminal target convergence",
+        idempotency_key="terminal-recovery-replay-0001",
+        trace_id="terminal-recovery-replay-trace",
+    )
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        replay_event = uow.outbox.get(replay.replay_event_id)
+    assert replay_event is not None
+
+    converged = worker.handle_recovery_event(replay_event)
+
+    assert converged.state == OperationState.FAILED
+    assert converged.recovery_generation == converged.recovery_consumed_generation == 1
+    assert len(executor.terminal_failures) == 1
+    assert executor.terminal_failures[0][0].operation_id == operation.id
+    with SqlAlchemyOperatorUnitOfWork(integration_database.session_factory) as uow:
+        lifecycle = uow.dead_letters.get_replay_lifecycle(
+            source_dead_letter_id=transport_dead_letter.id,
+            replay_attempt=replay.replay_attempt,
+            replay_event_id=replay.replay_event_id,
+            workspace_id=operation.workspace_id,
+        )
+    assert lifecycle is not None
+    assert lifecycle.work_kind is not None
+    assert lifecycle.work_kind.value == "TERMINAL_CONVERGENCE"
+    assert lifecycle.state == ReplayLifecycleState.COMPLETED
 
 
 class MismatchedResultExecutor(RecordingExecutor):

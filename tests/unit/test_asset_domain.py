@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,6 +7,9 @@ from commercevision_domain import (
     AssetKind,
     AssetObject,
     AssetObjectState,
+    AssetState,
+    AssetValidationResult,
+    InvalidTransitionError,
     LeaseConflictError,
     RetentionClass,
     StorageBackend,
@@ -14,6 +17,8 @@ from commercevision_domain import (
     UploadExpiredError,
     UploadSession,
     UploadSessionState,
+    ValidationStage,
+    ValidationVerdict,
     new_uuid7,
 )
 
@@ -344,4 +349,199 @@ def test_asset_retention_deadline_matches_its_retention_class() -> None:
             retention_class=RetentionClass.FOUNDATION,
             workflow_id=None,
             retention_deadline=NOW + timedelta(days=3),
+        )
+
+
+def _asset() -> Asset:
+    return Asset.create_quarantined(
+        asset_id=new_uuid7(),
+        workspace_id="asset-domain",
+        retention_class=RetentionClass.FOUNDATION,
+        kind=AssetKind.IMAGE,
+        workflow_id=None,
+        product_id=None,
+        sku_id=None,
+        current_version_id=new_uuid7(),
+        retention_deadline=None,
+        now=NOW,
+    )
+
+
+def test_asset_validation_and_promotion_transitions_are_idempotent() -> None:
+    asset = _asset()
+
+    asset.begin_validation(now=NOW + timedelta(seconds=1))
+    validation_version = asset.version
+    asset.begin_validation(now=NOW + timedelta(seconds=2))
+    asset.mark_pending_rights(now=NOW + timedelta(seconds=3))
+    promoted_version = asset.version
+    asset.mark_pending_rights(now=NOW + timedelta(seconds=4))
+
+    assert asset.status == AssetState.PENDING_RIGHTS
+    assert validation_version == 2
+    assert promoted_version == 3
+    assert asset.version == promoted_version
+    assert asset.block_reason is None
+    with pytest.raises(InvalidTransitionError):
+        asset.begin_validation(now=NOW + timedelta(seconds=5))
+
+
+def test_asset_validation_can_require_review_or_block_without_becoming_usable() -> None:
+    review = _asset()
+    review.begin_validation(now=NOW + timedelta(seconds=1))
+    review.mark_pending_review(now=NOW + timedelta(seconds=2))
+    assert review.status == AssetState.PENDING_REVIEW
+
+    blocked = _asset()
+    blocked.begin_validation(now=NOW + timedelta(seconds=1))
+    blocked.block(
+        reason_code="MALWARE_INFECTED",
+        now=NOW + timedelta(seconds=2),
+    )
+    blocked_version = blocked.version
+    blocked.block(
+        reason_code="MALWARE_INFECTED",
+        now=NOW + timedelta(seconds=3),
+    )
+
+    assert blocked.status == AssetState.BLOCKED
+    assert blocked.block_reason == "MALWARE_INFECTED"
+    assert blocked.version == blocked_version
+    with pytest.raises(InvalidTransitionError):
+        blocked.mark_pending_rights(now=NOW + timedelta(seconds=4))
+
+
+def test_asset_validation_failure_can_resume_only_from_failed() -> None:
+    failed_before_start = _asset()
+    failed_before_start.fail_validation(now=NOW + timedelta(seconds=1))
+    assert failed_before_start.status == AssetState.FAILED
+    failed_before_start.resume_failed_validation(now=NOW + timedelta(seconds=2))
+    assert failed_before_start.status == AssetState.VALIDATING
+
+    asset = _asset()
+    asset.begin_validation(now=NOW + timedelta(seconds=1))
+
+    asset.fail_validation(now=NOW + timedelta(seconds=2))
+    failed_version = asset.version
+    asset.fail_validation(now=NOW + timedelta(seconds=3))
+
+    assert asset.status == AssetState.FAILED
+    assert asset.version == failed_version
+    assert asset.block_reason is None
+
+    asset.resume_failed_validation(now=NOW + timedelta(seconds=4))
+    assert asset.status == AssetState.VALIDATING
+    with pytest.raises(InvalidTransitionError):
+        asset.resume_failed_validation(now=NOW + timedelta(seconds=5))
+
+    quarantined = _asset()
+    with pytest.raises(InvalidTransitionError):
+        quarantined.resume_failed_validation(now=NOW + timedelta(seconds=1))
+
+
+def test_controlled_object_and_quarantine_cleanup_have_explicit_states() -> None:
+    source = _asset_object()
+    controlled = AssetObject.create_controlled(
+        workspace_id=source.workspace_id,
+        asset_version_id=source.asset_version_id,
+        backend=source.backend,
+        location=StorageLocationClass.FOUNDATION,
+        bucket="foundation",
+        key=f"controlled/{new_uuid7()}",
+        provider_version_id="destination-version-1",
+        etag='"destination-etag"',
+        byte_size=source.byte_size,
+        sha256=source.sha256,
+        now=NOW,
+    )
+
+    source.mark_delete_pending(now=NOW + timedelta(seconds=1))
+    pending_version = source.version
+    source.mark_delete_pending(now=NOW + timedelta(seconds=2))
+    source.mark_deleted(now=NOW + timedelta(seconds=3))
+
+    assert controlled.role == "CONTROLLED_ORIGINAL"
+    assert controlled.state == AssetObjectState.CONTROLLED
+    assert controlled.location == StorageLocationClass.FOUNDATION
+    assert pending_version == 2
+    assert source.state == AssetObjectState.DELETED
+    with pytest.raises(ValueError, match="retained"):
+        AssetObject.create_controlled(
+            workspace_id=source.workspace_id,
+            asset_version_id=source.asset_version_id,
+            backend=source.backend,
+            location=StorageLocationClass.QUARANTINE,
+            bucket="quarantine",
+            key=f"controlled/{new_uuid7()}",
+            provider_version_id="destination-version-2",
+            etag='"destination-etag"',
+            byte_size=source.byte_size,
+            sha256=source.sha256,
+            now=NOW,
+        )
+
+
+def test_validation_result_is_versioned_append_only_evidence_for_exact_object() -> None:
+    original_evidence = {
+        "labels": [{"code": "risk-label", "confidence": 98.0}],
+        "mapping_version": "alibaba-image-v1",
+        "request_id": "provider-request-1",
+        "risk_level": "high",
+    }
+    result = AssetValidationResult.create(
+        workspace_id="asset-domain",
+        operation_id=new_uuid7(),
+        asset_version_id=new_uuid7(),
+        asset_object_id=new_uuid7(),
+        attempt_number=2,
+        stage=ValidationStage.CONTENT_SAFETY,
+        validator_name="alibaba-image-moderation",
+        validator_version="green20220302-sdk-3.2.4",
+        policy_version="content-safety-policy-v1",
+        verdict=ValidationVerdict.REVIEW,
+        reason_code="PROVIDER_REVIEW",
+        object_provider_version_id="source-version-1",
+        object_etag='"source-etag"',
+        content_sha256="a" * 64,
+        evidence=original_evidence,
+        retention_deadline=NOW + timedelta(days=3),
+        now=NOW,
+    )
+
+    assert result.stage == ValidationStage.CONTENT_SAFETY
+    assert result.verdict == ValidationVerdict.REVIEW
+    assert result.attempt_number == 2
+    with pytest.raises(FrozenInstanceError):
+        result.reason_code = "changed"  # type: ignore[misc]
+    original_evidence["risk_level"] = "none"
+    original_evidence["labels"][0]["code"] = "changed"  # type: ignore[index]
+    assert result.evidence["risk_level"] == "high"
+    assert result.evidence["labels"][0]["code"] == "risk-label"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.evidence["risk_level"] = "none"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.evidence["labels"][0]["code"] = "changed"  # type: ignore[index]
+    copied_evidence = result.evidence_dict()
+    copied_evidence["risk_level"] = "none"
+    assert result.evidence["risk_level"] == "high"
+
+    with pytest.raises(ValueError, match="raw provider"):
+        AssetValidationResult.create(
+            workspace_id="asset-domain",
+            operation_id=new_uuid7(),
+            asset_version_id=new_uuid7(),
+            asset_object_id=new_uuid7(),
+            attempt_number=1,
+            stage=ValidationStage.CONTENT_SAFETY,
+            validator_name="provider",
+            validator_version="v1",
+            policy_version="policy-v1",
+            verdict=ValidationVerdict.PASS,
+            reason_code=None,
+            object_provider_version_id="source-version-1",
+            object_etag='"source-etag"',
+            content_sha256="a" * 64,
+            evidence={"raw_payload": {"secret": "must-not-persist"}},
+            retention_deadline=None,
+            now=NOW,
         )

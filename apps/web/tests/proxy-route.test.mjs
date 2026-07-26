@@ -165,6 +165,45 @@ test("only the exact operation GET path crosses the HTTP proxy seam", async (con
   assert.equal(upstreamRequests.length, 1);
 });
 
+test("only the exact asset validation GET path crosses the HTTP proxy seam", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const upstreamRequests = [];
+  globalThis.fetch = async (input, init) => {
+    upstreamRequests.push({ method: init.method, url: String(input) });
+    return Response.json({ stages: [] });
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const assetId = "019f8a00-0000-7000-8000-000000000011";
+  const accepted = await GET(
+    new Request(`http://web.local/api/v1/assets/${assetId}/validation`, {
+      headers: { "x-workspace-id": "workspace-1" },
+    }),
+    {
+      params: Promise.resolve({ path: ["assets", assetId, "validation"] }),
+    },
+  );
+  const deniedSuffix = await GET(
+    new Request(`http://web.local/api/v1/assets/${assetId}/validation/raw`),
+    {
+      params: Promise.resolve({
+        path: ["assets", assetId, "validation", "raw"],
+      }),
+    },
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.equal(deniedSuffix.status, 404);
+  assert.deepEqual(upstreamRequests, [
+    {
+      method: "GET",
+      url: `http://api:8000/api/v1/assets/${assetId}/validation`,
+    },
+  ]);
+});
+
 test("does not sign or proxy a workspace outside the configured boundary", async (context) => {
   const originalFetch = globalThis.fetch;
   let upstreamRequests = 0;

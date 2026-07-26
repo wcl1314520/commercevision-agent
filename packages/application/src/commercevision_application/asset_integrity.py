@@ -15,8 +15,14 @@ from commercevision_contracts.object_storage import (
     ObjectStat,
     ObjectStorage,
 )
-from commercevision_domain import ObjectMismatchError, UploadSession
+from commercevision_domain import AssetKind, ObjectMismatchError, UploadSession
 from PIL import Image, UnidentifiedImageError
+
+from .asset_image_metadata import (
+    ImageMetadataLimitExceededError,
+    ImageMetadataPolicy,
+    MalformedImageMetadataError,
+)
 
 _FORMAT_FACTS = {
     "JPEG": ("image/jpeg", frozenset({".jpg", ".jpeg"})),
@@ -30,14 +36,16 @@ class VerifiedUpload:
     stat: ObjectStat
     sha256: str
     byte_size: int
-    detected_mime: str
-    image_format: str
-    width: int
-    height: int
-    frame_count: int
+    detected_mime: str | None
+    image_format: str | None
+    width: int | None
+    height: int | None
+    frame_count: int | None
 
 
-class ImageUploadIntegrityVerifier:
+class UploadIntegrityVerifier:
+    """Prove object identity without making non-image content eligible for use."""
+
     def __init__(
         self,
         *,
@@ -48,14 +56,24 @@ class ImageUploadIntegrityVerifier:
         maximum_pixels: int,
         maximum_frames: int,
         maximum_metadata_bytes: int,
+        maximum_lora_bytes: int = 100 * 1024 * 1024,
+        maximum_prompt_template_bytes: int = 256 * 1024,
+        maximum_model_configuration_bytes: int = 64 * 1024,
     ) -> None:
         self._storage = storage
         self._transaction_active = transaction_active
-        self._maximum_bytes = maximum_bytes
+        self._maximum_bytes_by_kind = {
+            AssetKind.IMAGE: maximum_bytes,
+            AssetKind.LORA: maximum_lora_bytes,
+            AssetKind.PROMPT_TEMPLATE: maximum_prompt_template_bytes,
+            AssetKind.MODEL_CONFIGURATION: maximum_model_configuration_bytes,
+        }
         self._maximum_dimension = maximum_dimension
         self._maximum_pixels = maximum_pixels
         self._maximum_frames = maximum_frames
-        self._maximum_metadata_bytes = maximum_metadata_bytes
+        self._metadata_policy = ImageMetadataPolicy(
+            maximum_bytes=maximum_metadata_bytes,
+        )
 
     def verify(
         self,
@@ -82,7 +100,8 @@ class ImageUploadIntegrityVerifier:
 
         digest = hashlib.sha256()
         byte_size = 0
-        with tempfile.SpooledTemporaryFile(max_size=min(self._maximum_bytes, 1024 * 1024)) as spool:
+        maximum_bytes = self._maximum_bytes_by_kind[upload_session.asset_kind]
+        with tempfile.SpooledTemporaryFile(max_size=min(maximum_bytes, 1024 * 1024)) as spool:
             with self._storage.open_bounded_read(
                 BoundedReadRequest(
                     reference=stat.reference,
@@ -101,12 +120,20 @@ class ImageUploadIntegrityVerifier:
             sha256 = digest.hexdigest()
             if sha256 != upload_session.expected_sha256:
                 raise ObjectMismatchError("uploaded object SHA-256 does not match the declaration")
-            spool.seek(0)
-            image_facts = self._decode_image(spool, upload_session.filename)
-
-        detected_mime, image_format, width, height, frame_count = image_facts
-        if detected_mime != upload_session.declared_mime.lower():
-            raise ObjectMismatchError("declared MIME does not match the uploaded image")
+            if upload_session.asset_kind == AssetKind.IMAGE:
+                spool.seek(0)
+                detected_mime, image_format, width, height, frame_count = self._decode_image(
+                    spool,
+                    upload_session.filename,
+                )
+                if detected_mime != upload_session.declared_mime.lower():
+                    raise ObjectMismatchError("declared MIME does not match the uploaded image")
+            else:
+                detected_mime = None
+                image_format = None
+                width = None
+                height = None
+                frame_count = None
         return VerifiedUpload(
             stat=stat,
             sha256=sha256,
@@ -136,7 +163,7 @@ class ImageUploadIntegrityVerifier:
             )
         if stat.content_length != upload_session.expected_byte_length:
             raise ObjectMismatchError("uploaded object length does not match the declaration")
-        if stat.content_length > self._maximum_bytes:
+        if stat.content_length > self._maximum_bytes_by_kind[upload_session.asset_kind]:
             raise ObjectMismatchError("uploaded object exceeds the configured byte limit")
         if not stat.etag:
             raise ObjectMismatchError("uploaded object has no stable object identity")
@@ -217,15 +244,15 @@ class ImageUploadIntegrityVerifier:
         if width * height * frame_count > self._maximum_pixels:
             raise ObjectMismatchError("uploaded image decoded pixels exceed the configured limit")
 
-        metadata_bytes = 0
-        for value in image.info.values():
-            if isinstance(value, bytes):
-                metadata_bytes += len(value)
-            elif isinstance(value, str):
-                metadata_bytes += len(value.encode("utf-8"))
         try:
-            metadata_bytes += len(image.getexif().tobytes())
-        except (OSError, SyntaxError, ValueError) as exc:
+            self._metadata_policy.validate(image)
+        except MalformedImageMetadataError as exc:
             raise ObjectMismatchError("uploaded image metadata is malformed") from exc
-        if metadata_bytes > self._maximum_metadata_bytes:
-            raise ObjectMismatchError("uploaded image metadata exceeds the configured limit")
+        except ImageMetadataLimitExceededError as exc:
+            raise ObjectMismatchError(
+                "uploaded image metadata exceeds the configured limit"
+            ) from exc
+
+
+# Preserve the Ticket 04 import while callers migrate to the kind-aware interface.
+ImageUploadIntegrityVerifier = UploadIntegrityVerifier

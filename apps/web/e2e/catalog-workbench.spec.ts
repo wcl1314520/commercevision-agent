@@ -107,6 +107,7 @@ const assetVersion = {
   category: product.category_code,
   role: "product-primary",
   integrity_policy_version: "image-integrity-v1",
+  validation_policy_version: "asset-validation-v1",
   object_state: "QUARANTINED",
   created_at: "2026-07-24T12:45:02Z",
 };
@@ -215,6 +216,148 @@ async function mockReadyCatalog(page: Page) {
     }
     await route.fallback();
   });
+}
+
+async function registerFoundationFile(
+  page: Page,
+  {
+    assetKind,
+    bytes,
+    declaredMime,
+    fileLabel,
+    filename,
+    role,
+  }: {
+    assetKind: "LORA" | "PROMPT_TEMPLATE" | "MODEL_CONFIGURATION";
+    bytes: Buffer;
+    declaredMime: string;
+    fileLabel: string;
+    filename: string;
+    role: string;
+  },
+) {
+  await mockReadyCatalog(page);
+  let createBody: Record<string, unknown> | undefined;
+  let directBody: Buffer | null = null;
+  let openSession: Record<string, unknown> | undefined;
+
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    createBody = route.request().postDataJSON() as Record<string, unknown>;
+    openSession = {
+      ...uploadSession,
+      asset_kind: assetKind,
+      filename,
+      declared_mime: declaredMime,
+      expected_byte_length: bytes.length,
+      expected_sha256: createBody.sha256,
+      role,
+      upload: {
+        method: "PUT",
+        url: `https://object-storage.example/${assetKind.toLowerCase()}-upload`,
+        required_headers: {
+          "Content-Type": declaredMime,
+          "Content-Length": String(bytes.length),
+          "x-amz-meta-upload-session-id": uploadSession.id,
+        },
+        maximum_bytes: bytes.length,
+        checksum_algorithm: "SHA-256",
+        expires_at: uploadSession.expires_at,
+      },
+    };
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify(openSession),
+    });
+  });
+  await page.route("https://object-storage.example/**", async (route) => {
+    directBody = route.request().postDataBuffer();
+    await route.fulfill({ status: 200, body: "" });
+  });
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      if (!openSession || !createBody) {
+        throw new Error("upload session must be created before finalize");
+      }
+      const registeredVersion = {
+        ...assetVersion,
+        filename,
+        sha256: createBody.sha256,
+        byte_size: bytes.length,
+        declared_mime: declaredMime,
+        detected_mime: null,
+        image_format: null,
+        width: null,
+        height: null,
+        frame_count: null,
+        role,
+      };
+      const registeredAsset = {
+        ...quarantinedAsset,
+        asset_kind: assetKind,
+        current_version: registeredVersion,
+      };
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          upload_session: {
+            ...openSession,
+            upload: undefined,
+            status: "FINALIZED",
+            asset_version_id: assetVersion.id,
+            validation_operation_id: durableOperation.id,
+            version: 3,
+          },
+          asset: registeredAsset,
+          asset_version: registeredVersion,
+          validation_operation: finalizeResponse.validation_operation,
+        }),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: "PENDING_RIGHTS",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "SUCCEEDED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: null,
+            failure_category: null,
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [],
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByLabel("资产类型").selectOption(assetKind);
+  await page.getByLabel(fileLabel, { exact: true }).setInputFiles({
+    name: filename,
+    mimeType: declaredMime,
+    buffer: bytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+  await expect(page.locator(".asset-status")).toHaveText("隔离区");
+
+  return {
+    createBody: () => createBody,
+    directBody: () => directBody,
+  };
 }
 
 test("shows deterministic loading and empty states", async ({ page }) => {
@@ -613,7 +756,7 @@ test("uploads image bytes only to the constrained object-storage request", async
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "商品素材" })).toBeVisible();
-  await page.getByLabel("商品图片").setInputFiles({
+  await page.getByLabel("商品图片", { exact: true }).setInputFiles({
     name: "pixel.png",
     mimeType: "image/png",
     buffer: pngBytes,
@@ -633,6 +776,80 @@ test("uploads image bytes only to the constrained object-storage request", async
     product_id: product.id,
   });
   expect(finalizeBody).toEqual({ expected_version: 1 });
+});
+
+test("registers a SafeTensors LoRA as a Foundation Asset", async ({ page }) => {
+  const header = Buffer.from(
+    JSON.stringify({
+      weight: {
+        dtype: "F32",
+        shape: [1],
+        data_offsets: [0, 4],
+      },
+    }),
+    "utf8",
+  );
+  const headerLength = Buffer.alloc(8);
+  headerLength.writeBigUInt64LE(BigInt(header.length));
+  const bytes = Buffer.concat([headerLength, header, Buffer.alloc(4)]);
+  const registration = await registerFoundationFile(page, {
+    assetKind: "LORA",
+    bytes,
+    declaredMime: "application/octet-stream",
+    fileLabel: "LoRA SafeTensors",
+    filename: "studio-style.safetensors",
+    role: "generation-lora",
+  });
+
+  expect(registration.directBody()).toEqual(bytes);
+  expect(registration.createBody()).toMatchObject({
+    retention_class: "FOUNDATION",
+    asset_kind: "LORA",
+    filename: "studio-style.safetensors",
+    declared_mime: "application/octet-stream",
+    byte_length: bytes.length,
+    role: "generation-lora",
+  });
+  await expect(page.locator(".asset-preview")).toContainText(
+    "studio-style.safetensors",
+  );
+  await expect(page.locator(".asset-preview img")).toHaveCount(0);
+});
+
+test("registers a prompt JSON template as a Foundation Asset", async ({
+  page,
+}) => {
+  const bytes = Buffer.from(
+    JSON.stringify({
+      schema_version: "commercevision.prompt-template.v1",
+      name: "catalog",
+      template: "Create {{ product_name }}",
+      variables: [{ name: "product_name", required: true }],
+    }),
+    "utf8",
+  );
+  const registration = await registerFoundationFile(page, {
+    assetKind: "PROMPT_TEMPLATE",
+    bytes,
+    declaredMime: "application/json",
+    fileLabel: "提示词模板",
+    filename: "catalog.prompt.json",
+    role: "generation-prompt-template",
+  });
+
+  expect(registration.directBody()).toEqual(bytes);
+  expect(registration.createBody()).toMatchObject({
+    retention_class: "FOUNDATION",
+    asset_kind: "PROMPT_TEMPLATE",
+    filename: "catalog.prompt.json",
+    declared_mime: "application/json",
+    byte_length: bytes.length,
+    role: "generation-prompt-template",
+  });
+  await expect(page.locator(".asset-preview")).toContainText(
+    "catalog.prompt.json",
+  );
+  await expect(page.locator(".asset-preview")).toContainText("提示词模板");
 });
 
 test("replays a lost create-session response with its persisted request identity", async ({
@@ -680,7 +897,7 @@ test("replays a lost create-session response with its persisted request identity
     });
   });
   await page.goto("/");
-  await page.getByLabel("商品图片").setInputFiles({
+  await page.getByLabel("商品图片", { exact: true }).setInputFiles({
     name: "pixel.png",
     mimeType: "image/png",
     buffer: pngBytes,
@@ -789,7 +1006,7 @@ test("manually replays an OPEN create response with its persisted identity", asy
   await page.goto("/");
   await expect(page.locator(".error-banner")).toBeVisible();
   await expect(page.getByLabel("素材角色")).toHaveValue("product-reference");
-  await page.getByLabel("商品图片").setInputFiles({
+  await page.getByLabel("商品图片", { exact: true }).setInputFiles({
     name: "pixel.png",
     mimeType: "image/png",
     buffer: pngBytes,
@@ -817,7 +1034,7 @@ test("creates a new session identity only after explicitly abandoning a lost res
   });
 
   await page.goto("/");
-  const fileInput = page.getByLabel("商品图片");
+  const fileInput = page.getByLabel("商品图片", { exact: true });
   await fileInput.setInputFiles({
     name: "pixel.png",
     mimeType: "image/png",
@@ -932,6 +1149,12 @@ test("drops physical storage fields while recovering persisted upload state", as
       body: JSON.stringify(quarantinedAsset),
     });
   });
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({ status: 404, body: "" });
+    },
+  );
 
   await page.goto("/");
   await expect(page.locator(".asset-status")).toHaveText("隔离区");
@@ -1245,7 +1468,7 @@ test("returns a missing interrupted upload to a resumable OPEN state", async ({
     finalizeIdempotencyKey,
   );
 
-  await page.getByLabel("商品图片").setInputFiles({
+  await page.getByLabel("商品图片", { exact: true }).setInputFiles({
     name: "pixel.png",
     mimeType: "image/png",
     buffer: pngBytes,
@@ -1481,6 +1704,12 @@ test("restores a terminal validation operation from its durable resource", async
     });
   });
   await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({ status: 404, body: "" });
+    },
+  );
+  await page.route(
     `**/api/v1/operations/${durableOperation.id}`,
     async (route) => {
       operationRequests += 1;
@@ -1546,6 +1775,12 @@ test("polls a restored retryable validation operation until it is terminal", asy
     });
   });
   await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({ status: 404, body: "" });
+    },
+  );
+  await page.route(
     `**/api/v1/operations/${durableOperation.id}`,
     async (route) => {
       operationRequests += 1;
@@ -1584,7 +1819,310 @@ test("polls a restored retryable validation operation until it is terminal", asy
     .filter({ hasText: "校验任务" })
     .locator("dd");
   await expect(operationState).toHaveText("RETRYABLE_FAILED");
+  await expect(page.locator(".validation-banner-retryable")).toContainText(
+    "系统将自动重试",
+  );
   terminal = true;
   await expect(operationState).toHaveText("SUCCEEDED", { timeout: 5000 });
   expect(operationRequests).toBeGreaterThanOrEqual(2);
+});
+
+test("renders normalized validation stages and terminal rejection", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-rejected-validation-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...quarantinedAsset, status: "BLOCKED" }),
+    });
+  });
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: "BLOCKED",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "FAILED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: "CONTENT_SAFETY_BLOCKED",
+            failure_category: "policy",
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [
+            {
+              id: "019f8a00-0000-7000-8000-000000000021",
+              attempt_number: 1,
+              stage: "LOCAL_FORMAT",
+              verdict: "PASS",
+              reason_code: null,
+              validator_name: "local-image",
+              validator_version: "1",
+              policy_version: "asset-validation-v1",
+              evidence: {
+                asset_kind: "IMAGE",
+                byte_size: 68,
+                detected_mime: "image/png",
+                facts: { width: 1, height: 1 },
+                format_name: "PNG",
+              },
+              created_at: "2026-07-24T12:45:03Z",
+            },
+            {
+              id: "019f8a00-0000-7000-8000-000000000022",
+              attempt_number: 1,
+              stage: "CONTENT_SAFETY",
+              verdict: "BLOCK",
+              reason_code: "CONTENT_SAFETY_BLOCKED",
+              validator_name: "alibaba-green20220302",
+              validator_version: "3.2.4",
+              policy_version: "asset-validation-v1",
+              evidence: {
+                asset_kind: "IMAGE",
+                outcome: "BLOCK",
+                risk_level: "high",
+                labels: [{ code: "prohibited_content", confidence: 99 }],
+              },
+              created_at: "2026-07-24T12:45:04Z",
+            },
+          ],
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "素材校验" })).toBeVisible();
+  await expect(page.locator(".validation-stages")).toContainText("本地格式");
+  await expect(page.locator(".validation-stages")).toContainText("PNG");
+  await expect(page.locator(".validation-stages")).toContainText("内容安全");
+  await expect(page.locator(".validation-stages")).toContainText(
+    "prohibited_content",
+  );
+  await expect(page.locator(".validation-banner-rejected")).toContainText(
+    "CONTENT_SAFETY_BLOCKED",
+  );
+  await expect(page.locator(".asset-upload-panel")).not.toContainText(
+    "provider_request_id",
+  );
+});
+
+test("renders exhausted validation infrastructure failure separately from rejection", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-system-failure-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...quarantinedAsset, status: "VALIDATING" }),
+    });
+  });
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: "VALIDATING",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "FAILED",
+            attempt_count: 3,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: "MALWARE_SCANNER_UNAVAILABLE",
+            failure_category: "infrastructure",
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [
+            {
+              id: "019f8a00-0000-7000-8000-000000000041",
+              attempt_number: 3,
+              stage: "MALWARE",
+              verdict: "RETRYABLE_FAILURE",
+              reason_code: "MALWARE_SCANNER_UNAVAILABLE",
+              validator_name: "clamav",
+              validator_version: "clamav-unavailable",
+              policy_version: "asset-validation-v1",
+              evidence: {
+                asset_kind: "IMAGE",
+                outcome: "UNAVAILABLE",
+                latency_ms: 15000,
+                scanner_version: null,
+                signature: null,
+              },
+              created_at: "2026-07-24T12:45:04Z",
+            },
+          ],
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(page.locator(".validation-banner-failed")).toContainText(
+    "校验无法完成",
+  );
+  await expect(page.locator(".validation-banner-failed")).toContainText(
+    "MALWARE_SCANNER_UNAVAILABLE",
+  );
+  await expect(page.locator(".validation-banner-rejected")).toHaveCount(0);
+  await expect(page.locator(".validation-banner-retryable")).toHaveCount(0);
+  await expect(page.locator(".asset-upload-panel")).not.toContainText(
+    "素材未通过校验",
+  );
+});
+
+test("renders pending review as a recoverable human gate", async ({ page }) => {
+  await mockReadyCatalog(page);
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-review-validation-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...quarantinedAsset,
+        status: "PENDING_REVIEW",
+      }),
+    });
+  });
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: "PENDING_REVIEW",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "SUCCEEDED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: null,
+            failure_category: null,
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [
+            {
+              id: "019f8a00-0000-7000-8000-000000000031",
+              attempt_number: 1,
+              stage: "CONTENT_SAFETY",
+              verdict: "REVIEW",
+              reason_code: "CONTENT_SAFETY_REVIEW",
+              validator_name: "alibaba-green20220302",
+              validator_version: "3.2.4",
+              policy_version: "asset-validation-v1",
+              evidence: {
+                asset_kind: "IMAGE",
+                outcome: "REVIEW",
+                risk_level: "medium",
+                labels: [{ code: "manual_review", confidence: 71 }],
+              },
+              created_at: "2026-07-24T12:45:04Z",
+            },
+          ],
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(page.locator(".validation-banner-review")).toContainText(
+    "等待人工复核",
+  );
+  await expect(page.locator(".validation-banner-review")).toContainText(
+    "CONTENT_SAFETY_REVIEW",
+  );
+  await expect(page.locator(".validation-stage-REVIEW")).toContainText(
+    "待复核",
+  );
+  await expect(page.locator(".validation-banner-rejected")).toHaveCount(0);
+  await expect(page.locator(".asset-upload-panel")).not.toContainText(
+    "素材未通过校验",
+  );
 });

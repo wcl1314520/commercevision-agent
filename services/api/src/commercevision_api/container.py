@@ -11,10 +11,11 @@ from commercevision_application import (
     CatalogApplicationService,
     DeadLetterOperatorService,
     OperationApplicationService,
+    ValidationDataTransferPolicy,
     WorkflowApplicationService,
 )
 from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolicy
-from commercevision_application.asset_integrity import ImageUploadIntegrityVerifier
+from commercevision_application.asset_integrity import UploadIntegrityVerifier
 from commercevision_application.asset_validation_dispatch import AssetValidationPolicy
 from commercevision_contracts import Settings
 from commercevision_object_storage import (
@@ -83,7 +84,7 @@ class ApiContainer:
             future_skew_seconds=settings.trusted_principal_future_skew_seconds,
         )
         object_storage = build_object_storage(settings)
-        integrity_verifier = ImageUploadIntegrityVerifier(
+        integrity_verifier = UploadIntegrityVerifier(
             storage=object_storage,
             transaction_active=is_unit_of_work_active,
             maximum_bytes=settings.upload_max_bytes,
@@ -91,6 +92,9 @@ class ApiContainer:
             maximum_pixels=settings.upload_max_image_pixels,
             maximum_frames=settings.upload_max_image_frames,
             maximum_metadata_bytes=settings.upload_max_metadata_bytes,
+            maximum_lora_bytes=settings.upload_max_lora_bytes,
+            maximum_prompt_template_bytes=settings.upload_max_prompt_template_bytes,
+            maximum_model_configuration_bytes=(settings.upload_max_model_configuration_bytes),
         )
         return cls(
             database=database,
@@ -106,12 +110,17 @@ class ApiContainer:
                 upload_policy_version=settings.upload_policy_version,
                 integrity_policy_version=settings.upload_integrity_policy_version,
                 maximum_bytes=settings.upload_max_bytes,
+                maximum_lora_bytes=settings.upload_max_lora_bytes,
+                maximum_prompt_template_bytes=(settings.upload_max_prompt_template_bytes),
+                maximum_model_configuration_bytes=(settings.upload_max_model_configuration_bytes),
                 validation_policy=AssetValidationPolicy(
+                    policy_version=settings.asset_validation_policy_version,
                     max_attempts=settings.asset_validation_max_attempts,
                     execution_max_elapsed=timedelta(
                         seconds=settings.operation_retry_max_elapsed_seconds
                     ),
                 ),
+                validation_transfer_policy=ValidationDataTransferPolicy.from_settings(settings),
                 cleanup_policy=UploadCleanupPolicy(
                     max_attempts=settings.upload_cleanup_max_attempts,
                     max_reconciliation_attempts=(settings.upload_cleanup_reconcile_max_attempts),

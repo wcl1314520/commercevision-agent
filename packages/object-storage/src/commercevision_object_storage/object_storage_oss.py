@@ -13,8 +13,12 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    DeleteMarkerRequest,
     ObjectReference,
     ObjectStat,
+    ObjectVersionEntry,
+    ObjectVersionListRequest,
+    ObjectVersionPage,
     PresignedRequest,
     PresignPutRequest,
     TemporaryReadRequest,
@@ -30,6 +34,8 @@ from commercevision_domain import (
 
 from .object_storage_common import (
     READ_CHUNK_BYTES,
+    decode_version_cursor,
+    encode_version_cursor,
     metadata_matches,
     seconds_until,
     select_storage_locations,
@@ -364,6 +370,76 @@ class OssObjectStorage:
             )
         except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
             _raise_oss_error(exc)
+        return True
+
+    def list_versions(self, request: ObjectVersionListRequest) -> ObjectVersionPage:
+        key_marker, version_marker = decode_version_cursor(
+            request.continuation_token,
+            provider="oss",
+        )
+        try:
+            result = self._client(request.reference.location).list_object_versions(
+                prefix=request.reference.key,
+                key_marker=key_marker,
+                max_keys=request.page_size,
+                versionid_marker=version_marker,
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            _raise_oss_error(exc)
+        entries: list[ObjectVersionEntry] = []
+        for items, kind in (
+            (result.versions, "OBJECT"),
+            (result.delete_marker, "DELETE_MARKER"),
+        ):
+            for item in items:
+                if item.key != request.reference.key:
+                    continue
+                version_id = item.versionid
+                if (
+                    not isinstance(version_id, str)
+                    or not version_id
+                    or version_id.lower() == "null"
+                ):
+                    raise StoragePreconditionError(
+                        "object version listing returned an inexact provider version"
+                    )
+                entries.append(
+                    ObjectVersionEntry(
+                        reference=request.reference.model_copy(update={"version_id": version_id}),
+                        kind=kind,
+                    )
+                )
+        continuation_token = None
+        if result.is_truncated:
+            if not isinstance(result.next_key_marker, str) or not isinstance(
+                result.next_versionid_marker,
+                str,
+            ):
+                raise StoragePreconditionError(
+                    "object version listing omitted its continuation markers"
+                )
+            continuation_token = encode_version_cursor(
+                provider="oss",
+                key_marker=result.next_key_marker,
+                version_marker=result.next_versionid_marker,
+            )
+        return ObjectVersionPage(
+            entries=tuple(entries),
+            continuation_token=continuation_token,
+        )
+
+    def delete_marker(self, request: DeleteMarkerRequest) -> bool:
+        assert request.reference.version_id is not None
+        try:
+            self._client(request.reference.location).delete_object(
+                request.reference.key,
+                params={"versionId": request.reference.version_id},
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            try:
+                _raise_oss_error(exc)
+            except UploadObjectMissingError:
+                return True
         return True
 
     def temporary_read(self, request: TemporaryReadRequest) -> PresignedRequest:

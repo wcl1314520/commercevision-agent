@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from types import TracebackType
 
-from commercevision_application.asset_ports import WorkflowRetentionFacts
+from commercevision_application.asset_ports import (
+    AssetRetentionCommitExpiredError,
+    WorkflowRetentionFacts,
+)
 from commercevision_domain import (
     Asset,
     AssetKind,
     AssetObject,
     AssetObjectState,
     AssetState,
+    AssetValidationResult,
     AssetVersion,
     ConcurrencyError,
     RetentionClass,
@@ -19,8 +24,10 @@ from commercevision_domain import (
     StorageLocationClass,
     UploadSession,
     UploadSessionState,
+    ValidationStage,
+    ValidationVerdict,
 )
-from sqlalchemy import and_, exists, or_, select, update
+from sqlalchemy import and_, exists, literal_column, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -33,6 +40,7 @@ from .integrity import (
 from .models import (
     AssetModel,
     AssetObjectModel,
+    AssetValidationResultModel,
     AssetVersionModel,
     ProductModel,
     SKUModel,
@@ -63,6 +71,10 @@ def _upload_session_from_model(model: UploadSessionModel) -> UploadSession:
         role=model.role,
         upload_policy_version=model.upload_policy_version,
         integrity_policy_version=model.integrity_policy_version,
+        validation_transfer_policy_version=model.validation_transfer_policy_version,
+        validation_transfer_policy_snapshot_sha256=(
+            model.validation_transfer_policy_snapshot_sha256
+        ),
         storage_backend=StorageBackend(model.storage_backend),
         storage_location=StorageLocationClass(model.storage_location),
         storage_bucket=model.storage_bucket,
@@ -107,6 +119,10 @@ def _upload_session_to_model(upload_session: UploadSession) -> UploadSessionMode
         role=upload_session.role,
         upload_policy_version=upload_session.upload_policy_version,
         integrity_policy_version=upload_session.integrity_policy_version,
+        validation_transfer_policy_version=(upload_session.validation_transfer_policy_version),
+        validation_transfer_policy_snapshot_sha256=(
+            upload_session.validation_transfer_policy_snapshot_sha256
+        ),
         storage_backend=upload_session.storage_backend.value,
         storage_location=upload_session.storage_location.value,
         storage_bucket=upload_session.storage_bucket,
@@ -143,6 +159,7 @@ def _asset_from_model(model: AssetModel) -> Asset:
         product_id=model.product_id,
         sku_id=model.sku_id,
         status=AssetState(model.status),
+        block_reason=model.block_reason,
         current_version_id=model.current_version_id,
         retention_deadline=model.retention_deadline,
         version=model.version,
@@ -170,6 +187,11 @@ def _asset_version_from_model(model: AssetVersionModel) -> AssetVersion:
         category=model.category,
         role=model.role,
         integrity_policy_version=model.integrity_policy_version,
+        validation_policy_version=model.validation_policy_version,
+        validation_transfer_policy_version=(model.validation_transfer_policy_version),
+        validation_transfer_policy_snapshot_sha256=(
+            model.validation_transfer_policy_snapshot_sha256
+        ),
         created_at=model.created_at,
     )
 
@@ -192,6 +214,56 @@ def _asset_object_from_model(model: AssetObjectModel) -> AssetObject:
         version=model.version,
         created_at=model.created_at,
         updated_at=model.updated_at,
+    )
+
+
+def _validation_result_from_model(
+    model: AssetValidationResultModel,
+) -> AssetValidationResult:
+    return AssetValidationResult(
+        id=model.id,
+        workspace_id=model.workspace_id,
+        operation_id=model.operation_id,
+        asset_version_id=model.asset_version_id,
+        asset_object_id=model.asset_object_id,
+        attempt_number=model.attempt_number,
+        stage=ValidationStage(model.stage),
+        validator_name=model.validator_name,
+        validator_version=model.validator_version,
+        policy_version=model.policy_version,
+        verdict=ValidationVerdict(model.verdict),
+        reason_code=model.reason_code,
+        object_provider_version_id=model.object_provider_version_id,
+        object_etag=model.object_etag,
+        content_sha256=model.content_sha256,
+        evidence=model.evidence_json,
+        retention_deadline=model.retention_deadline,
+        created_at=model.created_at,
+    )
+
+
+def _validation_result_to_model(
+    result: AssetValidationResult,
+) -> AssetValidationResultModel:
+    return AssetValidationResultModel(
+        id=result.id,
+        workspace_id=result.workspace_id,
+        operation_id=result.operation_id,
+        asset_version_id=result.asset_version_id,
+        asset_object_id=result.asset_object_id,
+        attempt_number=result.attempt_number,
+        stage=result.stage.value,
+        validator_name=result.validator_name,
+        validator_version=result.validator_version,
+        policy_version=result.policy_version,
+        verdict=result.verdict.value,
+        reason_code=result.reason_code,
+        object_provider_version_id=result.object_provider_version_id,
+        object_etag=result.object_etag,
+        content_sha256=result.content_sha256,
+        evidence_json=result.evidence_dict(),
+        retention_deadline=result.retention_deadline,
+        created_at=result.created_at,
     )
 
 
@@ -293,6 +365,8 @@ class UploadSessionRepository:
 class AssetRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+        self._loaded_asset_versions: dict[str, int] = {}
+        self._loaded_object_versions: dict[str, int] = {}
 
     def add_quarantined(
         self,
@@ -318,6 +392,7 @@ class AssetRepository:
                 product_id=asset.product_id,
                 sku_id=asset.sku_id,
                 status=asset.status.value,
+                block_reason=asset.block_reason,
                 current_version_id=None,
                 retention_deadline=asset.retention_deadline,
                 version=asset.version,
@@ -345,6 +420,13 @@ class AssetRepository:
                 category=asset_version.category,
                 role=asset_version.role,
                 integrity_policy_version=asset_version.integrity_policy_version,
+                validation_policy_version=asset_version.validation_policy_version,
+                validation_transfer_policy_version=(
+                    asset_version.validation_transfer_policy_version
+                ),
+                validation_transfer_policy_snapshot_sha256=(
+                    asset_version.validation_transfer_policy_snapshot_sha256
+                ),
                 created_at=asset_version.created_at,
             )
         )
@@ -381,15 +463,52 @@ class AssetRepository:
                 updated_at=object_fact.updated_at,
             )
         )
+        self._loaded_asset_versions[asset.id] = asset.version
+        self._loaded_object_versions[object_fact.id] = object_fact.version
 
-    def get(self, *, workspace_id: str, asset_id: str) -> Asset | None:
-        model = self._session.scalar(
-            select(AssetModel).where(
-                AssetModel.workspace_id == workspace_id,
-                AssetModel.id == asset_id,
-            )
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        for_update: bool = False,
+    ) -> Asset | None:
+        statement = select(AssetModel).where(
+            AssetModel.workspace_id == workspace_id,
+            AssetModel.id == asset_id,
         )
-        return _asset_from_model(model) if model is not None else None
+        if for_update:
+            statement = statement.with_for_update()
+        model = self._session.scalar(statement)
+        if model is None:
+            return None
+        self._loaded_asset_versions[model.id] = model.version
+        return _asset_from_model(model)
+
+    def save_asset(self, asset: Asset) -> None:
+        original_version = self._loaded_asset_versions.get(asset.id)
+        if original_version is None:
+            raise ConcurrencyError(f"Asset {asset.id} was not loaded by this transaction")
+        result = execute_with_integrity_classification(
+            self._session,
+            update(AssetModel)
+            .where(
+                AssetModel.workspace_id == asset.workspace_id,
+                AssetModel.id == asset.id,
+                AssetModel.version == original_version,
+            )
+            .values(
+                status=asset.status.value,
+                block_reason=asset.block_reason,
+                current_version_id=asset.current_version_id,
+                retention_deadline=asset.retention_deadline,
+                version=asset.version,
+                updated_at=asset.updated_at,
+            ),
+        )
+        if result.rowcount != 1:
+            raise ConcurrencyError(f"Asset {asset.id} was concurrently modified")
+        self._loaded_asset_versions[asset.id] = asset.version
 
     def get_version(
         self,
@@ -425,15 +544,115 @@ class AssetRepository:
         workspace_id: str,
         asset_version_id: str,
         role: str = "ORIGINAL",
+        for_update: bool = False,
     ) -> AssetObject | None:
-        model = self._session.scalar(
-            select(AssetObjectModel).where(
-                AssetObjectModel.workspace_id == workspace_id,
-                AssetObjectModel.asset_version_id == asset_version_id,
-                AssetObjectModel.role == role,
+        statement = select(AssetObjectModel).where(
+            AssetObjectModel.workspace_id == workspace_id,
+            AssetObjectModel.asset_version_id == asset_version_id,
+            AssetObjectModel.role == role,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        model = self._session.scalar(statement)
+        if model is None:
+            return None
+        self._loaded_object_versions[model.id] = model.version
+        return _asset_object_from_model(model)
+
+    def add_object(self, object_fact: AssetObject) -> None:
+        self._session.add(
+            AssetObjectModel(
+                id=object_fact.id,
+                workspace_id=object_fact.workspace_id,
+                asset_version_id=object_fact.asset_version_id,
+                role=object_fact.role,
+                backend=object_fact.backend.value,
+                location=object_fact.location.value,
+                bucket=object_fact.bucket,
+                key=object_fact.key,
+                provider_version_id=object_fact.provider_version_id,
+                etag=object_fact.etag,
+                byte_size=object_fact.byte_size,
+                sha256=object_fact.sha256,
+                state=object_fact.state.value,
+                version=object_fact.version,
+                created_at=object_fact.created_at,
+                updated_at=object_fact.updated_at,
             )
         )
-        return _asset_object_from_model(model) if model is not None else None
+        self._loaded_object_versions[object_fact.id] = object_fact.version
+
+    def save_object(self, object_fact: AssetObject) -> None:
+        original_version = self._loaded_object_versions.get(object_fact.id)
+        if original_version is None:
+            raise ConcurrencyError(
+                f"Asset object {object_fact.id} was not loaded by this transaction"
+            )
+        result = execute_with_integrity_classification(
+            self._session,
+            update(AssetObjectModel)
+            .where(
+                AssetObjectModel.workspace_id == object_fact.workspace_id,
+                AssetObjectModel.id == object_fact.id,
+                AssetObjectModel.version == original_version,
+            )
+            .values(
+                state=object_fact.state.value,
+                version=object_fact.version,
+                updated_at=object_fact.updated_at,
+            ),
+        )
+        if result.rowcount != 1:
+            raise ConcurrencyError(f"Asset object {object_fact.id} was concurrently modified")
+        self._loaded_object_versions[object_fact.id] = object_fact.version
+
+    def add_validation_result(self, result: AssetValidationResult) -> None:
+        self._session.add(_validation_result_to_model(result))
+
+    def get_validation_result(
+        self,
+        *,
+        workspace_id: str,
+        asset_version_id: str,
+        operation_id: str,
+        attempt_number: int,
+        stage: ValidationStage,
+        validator_name: str,
+        validator_version: str,
+        policy_version: str,
+    ) -> AssetValidationResult | None:
+        model = self._session.scalar(
+            select(AssetValidationResultModel).where(
+                AssetValidationResultModel.workspace_id == workspace_id,
+                AssetValidationResultModel.asset_version_id == asset_version_id,
+                AssetValidationResultModel.operation_id == operation_id,
+                AssetValidationResultModel.attempt_number == attempt_number,
+                AssetValidationResultModel.stage == stage.value,
+                AssetValidationResultModel.validator_name == validator_name,
+                AssetValidationResultModel.validator_version == validator_version,
+                AssetValidationResultModel.policy_version == policy_version,
+            )
+        )
+        return _validation_result_from_model(model) if model is not None else None
+
+    def list_validation_results(
+        self,
+        *,
+        workspace_id: str,
+        asset_version_id: str,
+    ) -> list[AssetValidationResult]:
+        models = self._session.scalars(
+            select(AssetValidationResultModel)
+            .where(
+                AssetValidationResultModel.workspace_id == workspace_id,
+                AssetValidationResultModel.asset_version_id == asset_version_id,
+            )
+            .order_by(
+                AssetValidationResultModel.created_at,
+                AssetValidationResultModel.id,
+            )
+        )
+        return [_validation_result_from_model(model) for model in models]
 
 
 class AssetAssociationRepository:
@@ -519,6 +738,57 @@ class SqlAlchemyAssetUnitOfWork:
                 raise
             raise classified from exc
         self._committed = True
+
+    def commit_before_retention_deadline(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        retention_deadline: datetime,
+        clock: Callable[[], datetime],
+    ) -> None:
+        if self._session is None:
+            raise RuntimeError("Asset Registry unit of work is not active")
+        if retention_deadline.tzinfo is None or retention_deadline.utcoffset() != timedelta(0):
+            raise ValueError("retention deadline must be timezone-aware UTC")
+        observed_at = clock()
+        if observed_at.tzinfo is None or observed_at.utcoffset() != timedelta(0):
+            raise ValueError("retention commit clock must return timezone-aware UTC")
+        flush_with_integrity_classification(self._session)
+        row = execute_with_integrity_classification(
+            self._session,
+            select(
+                AssetModel.retention_deadline,
+                literal_column("UTC_TIMESTAMP(6)").label("database_now"),
+            )
+            .where(
+                AssetModel.workspace_id == workspace_id,
+                AssetModel.id == asset_id,
+            )
+            .with_for_update(),
+        ).one_or_none()
+        if row is None:
+            self._session.rollback()
+            raise ConcurrencyError(f"Asset {asset_id} disappeared before commit")
+        persisted_deadline = row.retention_deadline
+        database_now = row.database_now
+        if persisted_deadline is None:
+            self._session.rollback()
+            raise ConcurrencyError(f"Task Asset {asset_id} lost its retention deadline")
+        if persisted_deadline.tzinfo is None:
+            persisted_deadline = persisted_deadline.replace(tzinfo=UTC)
+        if database_now.tzinfo is None:
+            database_now = database_now.replace(tzinfo=UTC)
+        if persisted_deadline != retention_deadline:
+            self._session.rollback()
+            raise ConcurrencyError(f"Task Asset {asset_id} retention deadline changed")
+        if observed_at >= retention_deadline or database_now >= retention_deadline:
+            self._session.rollback()
+            raise AssetRetentionCommitExpiredError(
+                observed_at=max(observed_at, database_now),
+                retention_deadline=retention_deadline,
+            )
+        self.commit()
 
     def __exit__(
         self,

@@ -472,6 +472,132 @@ textarea {
   font-size: 13px;
 }
 
+.asset-validation {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 18px;
+}
+
+.asset-validation-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.asset-validation-heading h3 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.asset-validation-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.validation-stages {
+  display: grid;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.validation-stage {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 5px;
+  padding: 12px 0;
+}
+
+.validation-stage:first-child {
+  border-top: 0;
+}
+
+.validation-stage > div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.validation-stage strong,
+.validation-stage span,
+.validation-stage p {
+  font-size: 13px;
+}
+
+.validation-stage span,
+.validation-stage p {
+  color: var(--muted);
+}
+
+.validation-stage p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.validation-stage-PASS span {
+  color: var(--success);
+}
+
+.validation-stage-NOT_APPLICABLE span {
+  color: var(--muted);
+}
+
+.validation-stage-REVIEW span,
+.validation-stage-RETRYABLE_FAILURE span,
+.validation-stage-TERMINAL_FAILURE span {
+  color: #8a5a00;
+}
+
+.validation-stage-BLOCK span {
+  color: var(--danger);
+}
+
+.validation-banner {
+  align-items: center;
+  border: 1px solid;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px 16px;
+}
+
+.validation-banner span {
+  flex: 1 1 220px;
+}
+
+.validation-banner-retryable {
+  background: #fff7df;
+  border-color: #e8ce89;
+  color: #6f4800;
+}
+
+.validation-banner-review {
+  background: var(--accent-soft);
+  border-color: #b5cee7;
+  color: #174f88;
+}
+
+.validation-banner-rejected {
+  background: var(--danger-soft);
+  border-color: #e6bbb6;
+  color: var(--danger);
+}
+
+.validation-banner-failed {
+  background: #f1f3f4;
+  border-color: #aeb8bf;
+  color: #35434b;
+}
+
+.validation-banner-control {
+  background: var(--surface-muted);
+  border-color: #b8c4cd;
+  color: var(--ink);
+}
+
 .form-actions {
   align-items: center;
   display: flex;

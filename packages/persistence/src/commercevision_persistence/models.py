@@ -293,6 +293,14 @@ class UploadSessionModel(Base):
             "version > 0 AND finalize_attempts >= 0",
             name="ck_upload_session_counters",
         ),
+        CheckConstraint(
+            "CHAR_LENGTH(TRIM(validation_transfer_policy_version)) > 0",
+            name="ck_upload_session_transfer_policy_version",
+        ),
+        CheckConstraint(
+            "validation_transfer_policy_snapshot_sha256 REGEXP '^[0-9a-f]{64}$'",
+            name="ck_upload_session_transfer_policy_snapshot",
+        ),
         Index("ix_upload_session_workspace_state", "workspace_id", "state", "expires_at"),
         Index("ix_upload_session_finalize_lease", "state", "finalize_lease_expires_at"),
         Index("ix_upload_session_expiry_scan", "state", "expires_at", "id"),
@@ -317,6 +325,14 @@ class UploadSessionModel(Base):
     role: Mapped[str] = mapped_column(String(64), nullable=False)
     upload_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     integrity_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    validation_transfer_policy_version: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    validation_transfer_policy_snapshot_sha256: Mapped[str] = mapped_column(
+        exact_string_sql_type(64),
+        nullable=False,
+    )
     storage_backend: Mapped[str] = mapped_column(String(16), nullable=False)
     storage_location: Mapped[str] = mapped_column(String(24), nullable=False)
     storage_bucket: Mapped[str] = mapped_column(exact_string_sql_type(255), nullable=False)
@@ -380,6 +396,11 @@ class AssetModel(Base):
             name="ck_assets_retention_deadline",
         ),
         CheckConstraint("sku_id IS NULL OR product_id IS NOT NULL", name="ck_assets_sku_product"),
+        CheckConstraint(
+            "(status = 'BLOCKED' AND block_reason IS NOT NULL) "
+            "OR (status <> 'BLOCKED' AND block_reason IS NULL)",
+            name="ck_assets_block_reason",
+        ),
         Index("ix_assets_workspace_status", "workspace_id", "status", "updated_at", "id"),
         Index("ix_assets_retention_deadline", "status", "retention_deadline"),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
@@ -393,6 +414,7 @@ class AssetModel(Base):
     product_id: Mapped[str | None] = mapped_column(String(36))
     sku_id: Mapped[str | None] = mapped_column(String(36))
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    block_reason: Mapped[str | None] = mapped_column(String(64))
     current_version_id: Mapped[str | None] = mapped_column(String(36))
     retention_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())
     version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -424,6 +446,21 @@ class AssetVersionModel(Base):
         ),
         CheckConstraint("version_number > 0", name="ck_asset_version_number"),
         CheckConstraint("byte_size > 0", name="ck_asset_version_byte_size"),
+        CheckConstraint(
+            "(detected_mime IS NULL AND image_format IS NULL "
+            "AND width IS NULL AND height IS NULL AND frame_count IS NULL) OR "
+            "(detected_mime IS NOT NULL AND image_format IS NOT NULL "
+            "AND width > 0 AND height > 0 AND frame_count > 0)",
+            name="ck_asset_version_image_facts",
+        ),
+        CheckConstraint(
+            "CHAR_LENGTH(TRIM(validation_transfer_policy_version)) > 0",
+            name="ck_asset_version_transfer_policy_version",
+        ),
+        CheckConstraint(
+            "validation_transfer_policy_snapshot_sha256 REGEXP '^[0-9a-f]{64}$'",
+            name="ck_asset_version_transfer_policy_snapshot",
+        ),
         Index("ix_asset_version_workspace_sha", "workspace_id", "sha256"),
         Index("ix_asset_version_asset_created", "asset_id", "created_at", "id"),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
@@ -438,14 +475,23 @@ class AssetVersionModel(Base):
     sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     declared_mime: Mapped[str] = mapped_column(String(128), nullable=False)
-    detected_mime: Mapped[str] = mapped_column(String(128), nullable=False)
-    image_format: Mapped[str] = mapped_column(String(16), nullable=False)
-    width: Mapped[int] = mapped_column(Integer, nullable=False)
-    height: Mapped[int] = mapped_column(Integer, nullable=False)
-    frame_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    detected_mime: Mapped[str | None] = mapped_column(String(128))
+    image_format: Mapped[str | None] = mapped_column(String(16))
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    frame_count: Mapped[int | None] = mapped_column(Integer)
     category: Mapped[str] = mapped_column(String(128), nullable=False)
     role: Mapped[str] = mapped_column(String(64), nullable=False)
     integrity_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    validation_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    validation_transfer_policy_version: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    validation_transfer_policy_snapshot_sha256: Mapped[str] = mapped_column(
+        exact_string_sql_type(64),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
@@ -457,6 +503,12 @@ class AssetObjectModel(Base):
             "asset_version_id",
             "role",
             name="uq_asset_object_version_role",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            "asset_version_id",
+            name="uq_asset_object_workspace_id_version",
         ),
         ForeignKeyConstraint(
             ["workspace_id", "asset_version_id"],
@@ -486,7 +538,10 @@ class AssetObjectModel(Base):
     location: Mapped[str] = mapped_column(String(24), nullable=False)
     bucket: Mapped[str] = mapped_column(exact_string_sql_type(255), nullable=False)
     key: Mapped[str] = mapped_column(exact_string_sql_type(512), nullable=False)
-    provider_version_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    provider_version_id: Mapped[str] = mapped_column(
+        exact_string_sql_type(256),
+        nullable=False,
+    )
     etag: Mapped[str] = mapped_column(exact_string_sql_type(512), nullable=False)
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
@@ -494,6 +549,137 @@ class AssetObjectModel(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class AssetValidationResultModel(Base):
+    __tablename__ = "asset_validation_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_asset_validation_workspace_id",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "asset_version_id",
+            "attempt_number",
+            "stage",
+            "validator_name",
+            "validator_version",
+            "policy_version",
+            name="uq_asset_validation_stage_attempt",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "operation_id"],
+            ["durable_operations.workspace_id", "durable_operations.id"],
+            name="fk_asset_validation_workspace_operation",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_version_id"],
+            ["asset_versions.workspace_id", "asset_versions.id"],
+            name="fk_asset_validation_workspace_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_object_id", "asset_version_id"],
+            [
+                "asset_objects.workspace_id",
+                "asset_objects.id",
+                "asset_objects.asset_version_id",
+            ],
+            name="fk_asset_validation_workspace_object_version",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("attempt_number > 0", name="ck_asset_validation_attempt"),
+        CheckConstraint(
+            "stage IN ('LOCAL_FORMAT', 'MALWARE', 'CONTENT_SAFETY', 'PROVENANCE', 'PROMOTION')",
+            name="ck_asset_validation_stage",
+        ),
+        CheckConstraint(
+            "CHAR_LENGTH(TRIM(validator_name)) BETWEEN 1 AND 64 "
+            "AND CHAR_LENGTH(TRIM(validator_version)) BETWEEN 1 AND 128 "
+            "AND CHAR_LENGTH(TRIM(policy_version)) BETWEEN 1 AND 64",
+            name="ck_asset_validation_validator_identity",
+        ),
+        CheckConstraint(
+            "(verdict IN ('PASS', 'NOT_APPLICABLE') AND reason_code IS NULL) "
+            "OR (verdict IN ('REVIEW', 'BLOCK', 'RETRYABLE_FAILURE', "
+            "'TERMINAL_FAILURE') "
+            "AND reason_code IS NOT NULL)",
+            name="ck_asset_validation_verdict_reason",
+        ),
+        CheckConstraint(
+            "CHAR_LENGTH(TRIM(object_provider_version_id)) > 0 "
+            "AND LOWER(TRIM(object_provider_version_id)) <> 'null'",
+            name="ck_asset_validation_provider_version",
+        ),
+        CheckConstraint(
+            "CHAR_LENGTH(TRIM(object_etag)) > 0",
+            name="ck_asset_validation_object_identity",
+        ),
+        CheckConstraint(
+            "content_sha256 REGEXP '^[0-9a-f]{64}$'",
+            name="ck_asset_validation_content_sha256",
+        ),
+        CheckConstraint(
+            "retention_deadline IS NULL OR retention_deadline > created_at",
+            name="ck_asset_validation_retention",
+        ),
+        CheckConstraint(
+            "JSON_TYPE(evidence_json) = 'OBJECT'",
+            name="ck_asset_validation_evidence_object",
+        ),
+        Index(
+            "ix_asset_validation_version_stage",
+            "workspace_id",
+            "asset_version_id",
+            "stage",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_asset_validation_operation_attempt",
+            "workspace_id",
+            "operation_id",
+            "attempt_number",
+            "created_at",
+        ),
+        Index(
+            "ix_asset_validation_retention",
+            "retention_deadline",
+            "id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    operation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    validator_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    validator_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    object_provider_version_id: Mapped[str] = mapped_column(
+        exact_string_sql_type(256),
+        nullable=False,
+    )
+    object_etag: Mapped[str] = mapped_column(
+        exact_string_sql_type(512),
+        nullable=False,
+    )
+    content_sha256: Mapped[str] = mapped_column(
+        exact_string_sql_type(64),
+        nullable=False,
+    )
+    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    retention_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
 class WorkflowStepModel(Base):

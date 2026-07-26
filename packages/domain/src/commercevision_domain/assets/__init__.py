@@ -1,14 +1,23 @@
 """Asset Registry domain model."""
 
-from .entities import Asset, AssetObject, AssetVersion, UploadSession
+from .entities import (
+    Asset,
+    AssetObject,
+    AssetValidationResult,
+    AssetVersion,
+    UploadSession,
+)
 from .enums import (
     AssetKind,
     AssetObjectState,
     AssetState,
+    ProvenanceStatus,
     RetentionClass,
     StorageBackend,
     StorageLocationClass,
     UploadSessionState,
+    ValidationStage,
+    ValidationVerdict,
 )
 from .errors import (
     ObjectMismatchError,
@@ -27,8 +36,10 @@ __all__ = [
     "AssetObject",
     "AssetObjectState",
     "AssetState",
+    "AssetValidationResult",
     "AssetVersion",
     "ObjectMismatchError",
+    "ProvenanceStatus",
     "RetentionClass",
     "StorageBackend",
     "StorageLocationClass",
@@ -41,4 +52,6 @@ __all__ = [
     "UploadObjectMissingError",
     "UploadSession",
     "UploadSessionState",
+    "ValidationStage",
+    "ValidationVerdict",
 ]

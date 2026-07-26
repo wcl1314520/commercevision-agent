@@ -12,6 +12,7 @@ dependencies = [
   "commercevision-observability",
   "commercevision-object-storage",
   "commercevision-persistence",
+  "commercevision-providers",
   "commercevision-tool-runtime",
   "kombu>=5.6,<6",
 ]
@@ -24,6 +25,7 @@ commercevision-domain = { workspace = true }
 commercevision-observability = { workspace = true }
 commercevision-object-storage = { workspace = true }
 commercevision-persistence = { workspace = true }
+commercevision-providers = { workspace = true }
 commercevision-tool-runtime = { workspace = true }
 
 [build-system]

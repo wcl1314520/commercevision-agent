@@ -15,8 +15,12 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    DeleteMarkerRequest,
     ObjectReference,
     ObjectStat,
+    ObjectVersionEntry,
+    ObjectVersionListRequest,
+    ObjectVersionPage,
     PresignedRequest,
     PresignPutRequest,
     TemporaryReadRequest,
@@ -33,6 +37,8 @@ from commercevision_domain import (
 from .credentials import create_oss_credentials_provider
 from .object_storage_common import (
     READ_CHUNK_BYTES,
+    decode_version_cursor,
+    encode_version_cursor,
     metadata_matches,
     seconds_until,
     select_storage_locations,
@@ -50,7 +56,9 @@ def _raise_s3_error(exc: Exception) -> None:
         status = int(response.get("ResponseMetadata", {}).get("HTTPStatusCode", 0))
         if code == "NoSuchBucket":
             raise StorageUnavailableError("object storage bucket is unavailable") from exc
-        if code in {"NoSuchKey", "NotFound", "404"} or (status == 404 and not code):
+        if code in {"NoSuchKey", "NoSuchVersion", "NotFound", "404"} or (
+            status == 404 and not code
+        ):
             raise UploadObjectMissingError("object storage key was not found") from exc
         if code in {"PreconditionFailed", "412", "ConditionalRequestConflict"} or status in {
             409,
@@ -287,7 +295,7 @@ class MinioObjectStorage:
         if self._require_encryption:
             params["ServerSideEncryption"] = "AES256"
         try:
-            self._client.copy_object(**params)
+            response = self._client.copy_object(**params)
         except (BotoCoreError, ClientError) as exc:
             try:
                 _raise_s3_error(exc)
@@ -302,7 +310,15 @@ class MinioObjectStorage:
                 ):
                     return existing
                 raise conflict
-        copied = self.stat(request.destination)
+        version_id = validated_response_version(
+            request.destination,
+            response.get("VersionId"),
+        )
+        if version_id is None:
+            raise StoragePreconditionError(
+                "versioned copy did not return an exact provider version"
+            )
+        copied = self.stat(request.destination.model_copy(update={"version_id": version_id}))
         if not metadata_matches(
             copied,
             expected_length=request.expected_content_length,
@@ -331,6 +347,83 @@ class MinioObjectStorage:
             self._client.delete_object(**params)
         except (BotoCoreError, ClientError) as exc:
             _raise_s3_error(exc)
+        return True
+
+    def list_versions(self, request: ObjectVersionListRequest) -> ObjectVersionPage:
+        key_marker, version_marker = decode_version_cursor(
+            request.continuation_token,
+            provider="s3",
+        )
+        params: dict[str, object] = {
+            "Bucket": self._bucket(request.reference.location),
+            "Prefix": request.reference.key,
+            "MaxKeys": request.page_size,
+        }
+        if key_marker:
+            params["KeyMarker"] = key_marker
+        if version_marker:
+            params["VersionIdMarker"] = version_marker
+        try:
+            response = self._client.list_object_versions(**params)
+        except (BotoCoreError, ClientError) as exc:
+            _raise_s3_error(exc)
+        entries: list[ObjectVersionEntry] = []
+        for field, kind in (
+            ("Versions", "OBJECT"),
+            ("DeleteMarkers", "DELETE_MARKER"),
+        ):
+            for item in response.get(field, []):
+                if item.get("Key") != request.reference.key:
+                    continue
+                version_id = item.get("VersionId")
+                if (
+                    not isinstance(version_id, str)
+                    or not version_id
+                    or version_id.lower() == "null"
+                ):
+                    raise StoragePreconditionError(
+                        "object version listing returned an inexact provider version"
+                    )
+                entries.append(
+                    ObjectVersionEntry(
+                        reference=request.reference.model_copy(update={"version_id": version_id}),
+                        kind=kind,
+                    )
+                )
+        continuation_token = None
+        if response.get("IsTruncated") is True:
+            next_key_marker = response.get("NextKeyMarker")
+            next_version_marker = response.get("NextVersionIdMarker")
+            if not isinstance(next_key_marker, str) or not isinstance(
+                next_version_marker,
+                str,
+            ):
+                raise StoragePreconditionError(
+                    "object version listing omitted its continuation markers"
+                )
+            continuation_token = encode_version_cursor(
+                provider="s3",
+                key_marker=next_key_marker,
+                version_marker=next_version_marker,
+            )
+        return ObjectVersionPage(
+            entries=tuple(entries),
+            continuation_token=continuation_token,
+        )
+
+    def delete_marker(self, request: DeleteMarkerRequest) -> bool:
+        assert request.reference.version_id is not None
+        try:
+            self._client.delete_object(
+                Bucket=self._bucket(request.reference.location),
+                Key=request.reference.key,
+                VersionId=request.reference.version_id,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            try:
+                _raise_s3_error(exc)
+            except UploadObjectMissingError:
+                return True
         return True
 
     def temporary_read(self, request: TemporaryReadRequest) -> PresignedRequest:

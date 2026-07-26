@@ -861,6 +861,147 @@
         }
       }
     },
+    "/api/v1/assets/{asset_id}/validation": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Get Asset Validation",
+        "operationId": "get_asset_validation_api_v1_assets__asset_id__validation_get",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Asset Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetValidationStatusResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid upload argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Upload or Asset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Upload conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uploaded object rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/products": {
       "post": {
         "tags": [
@@ -3640,6 +3781,17 @@
           "status": {
             "$ref": "#/components/schemas/AssetState"
           },
+          "block_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Reason"
+          },
           "current_version_id": {
             "type": "string",
             "title": "Current Version Id"
@@ -3691,6 +3843,7 @@
           "product_id",
           "sku_id",
           "status",
+          "block_reason",
           "current_version_id",
           "retention_deadline",
           "version",
@@ -3714,6 +3867,200 @@
           "FAILED"
         ],
         "title": "AssetState"
+      },
+      "AssetValidationOperationResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Attempt Count"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Attempts"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Category"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "attempt_count",
+          "max_attempts",
+          "next_attempt_at",
+          "retryable",
+          "failure_code",
+          "failure_category",
+          "completed_at"
+        ],
+        "title": "AssetValidationOperationResponseV1"
+      },
+      "AssetValidationStageResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "attempt_number": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Attempt Number"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/ValidationStage"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ValidationVerdict"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "validator_name": {
+            "type": "string",
+            "title": "Validator Name"
+          },
+          "validator_version": {
+            "type": "string",
+            "title": "Validator Version"
+          },
+          "policy_version": {
+            "type": "string",
+            "title": "Policy Version"
+          },
+          "evidence": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Evidence"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "attempt_number",
+          "stage",
+          "verdict",
+          "reason_code",
+          "validator_name",
+          "validator_version",
+          "policy_version",
+          "evidence",
+          "created_at"
+        ],
+        "title": "AssetValidationStageResponseV1"
+      },
+      "AssetValidationStatusResponseV1": {
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "title": "Asset Id"
+          },
+          "asset_version_id": {
+            "type": "string",
+            "title": "Asset Version Id"
+          },
+          "asset_status": {
+            "$ref": "#/components/schemas/AssetState"
+          },
+          "validation_policy_version": {
+            "type": "string",
+            "title": "Validation Policy Version"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/AssetValidationOperationResponseV1"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/AssetValidationStageResponseV1"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "asset_id",
+          "asset_version_id",
+          "asset_status",
+          "validation_policy_version",
+          "operation",
+          "stages"
+        ],
+        "title": "AssetValidationStatusResponseV1"
       },
       "AssetVersionResponseV1": {
         "properties": {
@@ -3757,23 +4104,58 @@
             "title": "Declared Mime"
           },
           "detected_mime": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Detected Mime"
           },
           "image_format": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Image Format"
           },
           "width": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Width"
           },
           "height": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Height"
           },
           "frame_count": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Frame Count"
           },
           "category": {
@@ -3787,6 +4169,18 @@
           "integrity_policy_version": {
             "type": "string",
             "title": "Integrity Policy Version"
+          },
+          "validation_policy_version": {
+            "type": "string",
+            "title": "Validation Policy Version"
+          },
+          "validation_transfer_policy_version": {
+            "type": "string",
+            "title": "Validation Transfer Policy Version"
+          },
+          "validation_transfer_policy_snapshot_sha256": {
+            "type": "string",
+            "title": "Validation Transfer Policy Snapshot Sha256"
           },
           "object_state": {
             "$ref": "#/components/schemas/AssetObjectState"
@@ -3816,6 +4210,9 @@
           "category",
           "role",
           "integrity_policy_version",
+          "validation_policy_version",
+          "validation_transfer_policy_version",
+          "validation_transfer_policy_snapshot_sha256",
           "object_state",
           "created_at"
         ],
@@ -5416,7 +5813,7 @@
           },
           "byte_length": {
             "type": "integer",
-            "maximum": 10485760.0,
+            "maximum": 104857600.0,
             "minimum": 1.0,
             "title": "Byte Length"
           },
@@ -5575,6 +5972,14 @@
             "type": "string",
             "title": "Integrity Policy Version"
           },
+          "validation_transfer_policy_version": {
+            "type": "string",
+            "title": "Validation Transfer Policy Version"
+          },
+          "validation_transfer_policy_snapshot_sha256": {
+            "type": "string",
+            "title": "Validation Transfer Policy Snapshot Sha256"
+          },
           "status": {
             "$ref": "#/components/schemas/UploadSessionState"
           },
@@ -5663,6 +6068,8 @@
           "role",
           "upload_policy_version",
           "integrity_policy_version",
+          "validation_transfer_policy_version",
+          "validation_transfer_policy_snapshot_sha256",
           "status",
           "failure_code",
           "asset_version_id",
@@ -5779,6 +6186,14 @@
             "type": "string",
             "title": "Integrity Policy Version"
           },
+          "validation_transfer_policy_version": {
+            "type": "string",
+            "title": "Validation Transfer Policy Version"
+          },
+          "validation_transfer_policy_snapshot_sha256": {
+            "type": "string",
+            "title": "Validation Transfer Policy Snapshot Sha256"
+          },
           "status": {
             "$ref": "#/components/schemas/UploadSessionState"
           },
@@ -5864,6 +6279,8 @@
           "role",
           "upload_policy_version",
           "integrity_policy_version",
+          "validation_transfer_policy_version",
+          "validation_transfer_policy_snapshot_sha256",
           "status",
           "failure_code",
           "asset_version_id",
@@ -5958,6 +6375,29 @@
           "version"
         ],
         "title": "ValidationOperationSummaryV1"
+      },
+      "ValidationStage": {
+        "type": "string",
+        "enum": [
+          "LOCAL_FORMAT",
+          "MALWARE",
+          "CONTENT_SAFETY",
+          "PROVENANCE",
+          "PROMOTION"
+        ],
+        "title": "ValidationStage"
+      },
+      "ValidationVerdict": {
+        "type": "string",
+        "enum": [
+          "PASS",
+          "REVIEW",
+          "BLOCK",
+          "RETRYABLE_FAILURE",
+          "TERMINAL_FAILURE",
+          "NOT_APPLICABLE"
+        ],
+        "title": "ValidationVerdict"
       },
       "WorkflowAttemptResponse": {
         "properties": {

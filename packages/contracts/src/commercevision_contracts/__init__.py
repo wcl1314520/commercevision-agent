@@ -2,6 +2,9 @@
 
 from .assets import (
     AssetResponseV1,
+    AssetValidationOperationResponseV1,
+    AssetValidationStageResponseV1,
+    AssetValidationStatusResponseV1,
     AssetVersionResponseV1,
     PresignedUploadV1,
     UploadFinalizeResponseV1,
@@ -23,6 +26,7 @@ from .catalog import (
     SKUUpdateRequestV1,
 )
 from .config import Settings
+from .endpoint_identity import validate_canonical_endpoint_host
 from .errors import ErrorResponse
 from .events import EventContract, EventHandling, EventQueue, EventType
 from .health import HealthResponse, ServiceMetadata
@@ -57,6 +61,9 @@ __all__ = [
     "ApprovalRequest",
     "ApprovalResponse",
     "AssetResponseV1",
+    "AssetValidationOperationResponseV1",
+    "AssetValidationStageResponseV1",
+    "AssetValidationStatusResponseV1",
     "AssetVersionResponseV1",
     "CatalogDeleteRequestV1",
     "DeadLetterDetailResponseV1",
@@ -100,4 +107,5 @@ __all__ = [
     "WorkspaceId",
     "is_valid_workspace_id",
     "validate_workspace_id",
+    "validate_canonical_endpoint_host",
 ]

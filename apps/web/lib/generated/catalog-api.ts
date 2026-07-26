@@ -13,6 +13,7 @@ export interface AssetResponseV1 {
   product_id: string | null;
   sku_id: string | null;
   status: AssetState;
+  block_reason: string | null;
   current_version_id: string;
   retention_deadline: string | null;
   version: number;
@@ -22,6 +23,40 @@ export interface AssetResponseV1 {
 }
 
 export type AssetState = "QUARANTINED" | "VALIDATING" | "PENDING_RIGHTS" | "PENDING_REVIEW" | "AVAILABLE" | "BLOCKED" | "RIGHTS_EXPIRED" | "DELETING" | "DELETED" | "FAILED";
+
+export interface AssetValidationOperationResponseV1 {
+  id: string;
+  state: OperationState;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
+  retryable: boolean;
+  failure_code: string | null;
+  failure_category: string | null;
+  completed_at: string | null;
+}
+
+export interface AssetValidationStageResponseV1 {
+  id: string;
+  attempt_number: number;
+  stage: ValidationStage;
+  verdict: ValidationVerdict;
+  reason_code: string | null;
+  validator_name: string;
+  validator_version: string;
+  policy_version: string;
+  evidence: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AssetValidationStatusResponseV1 {
+  asset_id: string;
+  asset_version_id: string;
+  asset_status: AssetState;
+  validation_policy_version: string;
+  operation: AssetValidationOperationResponseV1;
+  stages: Array<AssetValidationStageResponseV1>;
+}
 
 export interface AssetVersionResponseV1 {
   id: string;
@@ -33,14 +68,17 @@ export interface AssetVersionResponseV1 {
   sha256: string;
   byte_size: number;
   declared_mime: string;
-  detected_mime: string;
-  image_format: string;
-  width: number;
-  height: number;
-  frame_count: number;
+  detected_mime: string | null;
+  image_format: string | null;
+  width: number | null;
+  height: number | null;
+  frame_count: number | null;
   category: string;
   role: string;
   integrity_policy_version: string;
+  validation_policy_version: string;
+  validation_transfer_policy_version: string;
+  validation_transfer_policy_snapshot_sha256: string;
   object_state: AssetObjectState;
   created_at: string;
 }
@@ -258,6 +296,8 @@ export interface UploadSessionCreateResponseV1 {
   role: string;
   upload_policy_version: string;
   integrity_policy_version: string;
+  validation_transfer_policy_version: string;
+  validation_transfer_policy_snapshot_sha256: string;
   status: UploadSessionState;
   failure_code: string | null;
   asset_version_id: string | null;
@@ -291,6 +331,8 @@ export interface UploadSessionResponseV1 {
   role: string;
   upload_policy_version: string;
   integrity_policy_version: string;
+  validation_transfer_policy_version: string;
+  validation_transfer_policy_snapshot_sha256: string;
   status: UploadSessionState;
   failure_code: string | null;
   asset_version_id: string | null;
@@ -311,3 +353,7 @@ export interface ValidationOperationSummaryV1 {
   target_version: number;
   version: number;
 }
+
+export type ValidationStage = "LOCAL_FORMAT" | "MALWARE" | "CONTENT_SAFETY" | "PROVENANCE" | "PROMOTION";
+
+export type ValidationVerdict = "PASS" | "REVIEW" | "BLOCK" | "RETRYABLE_FAILURE" | "TERMINAL_FAILURE" | "NOT_APPLICABLE";

@@ -92,6 +92,19 @@ Browser
 - 成本。
 - 未知结果数量。
 
+### Asset Validation
+
+- `commercevision.asset_validation.operations`：execute/reconcile 与 retryable/terminal 分类。
+- `commercevision.asset_validation.completions`：`PENDING_REVIEW` 和 `PENDING_RIGHTS`。
+- `commercevision.asset_validation.stage_runs` 与 `stage_results`：stage、复用、verdict、reason。
+- `commercevision.asset_validation.operation.duration` 与 `stage.duration`。
+- `commercevision.asset_validation.quarantine.age`。
+
+Spans 使用 `commercevision.asset.validation` 和按 stage 命名的 child span。结构化日志只记录
+Operation/Asset IDs、attempt、stage、verdict、reason、validator identity 和 retry 分类；
+不记录 evidence dict、对象身份、签名 URL、文件字节或原始异常消息。告警和处置见
+[Asset Validation Runbook](../runbooks/asset-validation.md)。
+
 ### Evaluation
 
 - 各 Evaluator 通过率。

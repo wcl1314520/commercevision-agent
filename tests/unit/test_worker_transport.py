@@ -2,14 +2,34 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
 
 import pytest
 from celery.worker.worker import WorkController
+from commercevision_application import (
+    EventRoutingError,
+    MalformedEventPayloadError,
+    UnhandledEventError,
+    UnknownEventTypeError,
+    UnsupportedSchemaVersionError,
+)
 from commercevision_contracts import Settings
+from commercevision_contracts.events import (
+    ASSET_UPLOAD_FINALIZED_V1,
+    ASSET_VALIDATION_COMPLETED_V1,
+    ASSET_VALIDATION_FAILED_V1,
+    AssetUploadFinalizedPayload,
+    AssetValidationCompletedPayload,
+    AssetValidationFailedPayload,
+    EventType,
+)
 from commercevision_domain import OperationKind
+from commercevision_domain.messaging import EventEnvelope, OutboxEvent
+from commercevision_worker.executors import available_builtin_operation_kinds
 from commercevision_worker.runtime import WorkerRuntime
+from pydantic import ValidationError
 
 worker_module = import_module("commercevision_worker.celery_app")
 executor_module = import_module("commercevision_worker.executors")
@@ -53,22 +73,73 @@ class FakeExecutorEntryPoint:
         return lambda _settings: self._executor
 
 
-def _production_worker_settings(readiness_path: Path) -> Settings:
+def _production_worker_settings(
+    readiness_path: Path,
+    *,
+    queue: str = "commercevision.asset",
+    required_kind: OperationKind = OperationKind.ASSET_VALIDATION,
+) -> Settings:
     return Settings(
         environment="production",
         object_store_endpoint="https://object-storage.internal.example",
         object_store_presign_endpoint="https://uploads.example",
         object_store_secret_key="production-worker-object-store-secret",
         object_store_require_encryption=True,
-        worker_required_operation_kinds=[OperationKind.ASSET_VALIDATION],
+        worker_queues=[queue],
+        worker_required_operation_kinds=[required_kind],
         worker_readiness_path=str(readiness_path),
+        asset_malware_adapter="clamav",
+        asset_content_safety_adapter="alibaba",
+        alibaba_content_safety_access_key_id="test-access-key-id",
+        alibaba_content_safety_access_key_secret="test-access-key-secret",
+        alibaba_content_safety_allowed_url_origins=["https://uploads.example"],
+        validation_data_transfer_enabled=True,
+        validation_data_transfer_policy_version="enterprise-validation-transfer-v1",
+        validation_data_transfer_allowed_workspace_ids=["production-workspace"],
+        validation_data_transfer_allowed_asset_kinds=["IMAGE"],
+        validation_data_transfer_allowed_retention_classes=["TASK", "FOUNDATION"],
+        validation_data_transfer_allowed_providers=["alibaba-green"],
+        validation_data_transfer_allowed_endpoint_regions=["cn-shanghai"],
+        validation_data_transfer_allowed_endpoint_hosts=["green-cip.cn-shanghai.aliyuncs.com"],
+        asset_provenance_adapter="c2pa",
+        c2pa_trust_anchors_pem="test-trust-anchor",
+        c2pa_trust_eku_policy="test-eku-policy",
     )
+
+
+def test_production_alibaba_requires_explicit_validation_transfer_policy(
+    tmp_path: Path,
+) -> None:
+    valid = _production_worker_settings(tmp_path / "ready")
+    values = valid.model_dump()
+    values["validation_data_transfer_enabled"] = False
+
+    with pytest.raises(
+        ValidationError,
+        match="explicit enabled validation data transfer policy",
+    ):
+        Settings(**values)
+
+
+def test_production_alibaba_endpoint_must_match_transfer_allowlist(
+    tmp_path: Path,
+) -> None:
+    valid = _production_worker_settings(tmp_path / "ready")
+    values = valid.model_dump()
+    values["alibaba_content_safety_endpoint"] = "collector.example"
+
+    with pytest.raises(
+        ValidationError,
+        match="explicit enabled validation data transfer policy",
+    ):
+        Settings(**values)
 
 
 def _dependencies_ready(_settings: Settings) -> dict[str, str]:
     return {
         "mysql": "ok",
         "object_storage": "ok",
+        "malware_scanner": "ok",
     }
 
 
@@ -84,14 +155,15 @@ def test_celery_task_delegates_without_business_retry(monkeypatch) -> None:
     )
 
 
-def test_worker_fails_before_startup_when_required_executor_is_missing() -> None:
+def test_asset_queue_has_a_builtin_validation_executor_and_requires_storage() -> None:
     settings = Settings(
         environment="ci",
+        worker_queues=["commercevision.asset"],
         worker_required_operation_kinds=[OperationKind.ASSET_VALIDATION],
     )
 
-    with pytest.raises(RuntimeError, match="ASSET_VALIDATION"):
-        WorkerRuntime.build(settings)
+    assert available_builtin_operation_kinds(settings) == {OperationKind.ASSET_VALIDATION}
+    assert settings.worker_requires_object_storage is True
 
 
 def test_workflow_only_runtime_does_not_construct_object_storage(monkeypatch) -> None:
@@ -117,15 +189,158 @@ def test_workflow_only_runtime_does_not_construct_object_storage(monkeypatch) ->
         runtime.close()
 
 
+def test_worker_binds_known_upload_observation_without_weakening_event_routing() -> None:
+    runtime = WorkerRuntime.build(
+        Settings(
+            environment="ci",
+            worker_queues=["commercevision.workflow"],
+        )
+    )
+    payload = AssetUploadFinalizedPayload(
+        workspace_id="catalog-workspace",
+        upload_session_id="upload-session-1",
+        asset_id="asset-1",
+        asset_version_id="asset-version-1",
+        object_fact_id="object-fact-1",
+        validation_operation_id="operation-1",
+    )
+    envelope = EventEnvelope.create(
+        event_type=ASSET_UPLOAD_FINALIZED_V1.event_type.value,
+        aggregate_type="Asset",
+        aggregate_id=payload.asset_id,
+        aggregate_version=1,
+        trace_id="trace-upload-finalized",
+        payload=payload.model_dump(mode="json"),
+    )
+    event = OutboxEvent(
+        envelope=envelope,
+        available_at=envelope.occurred_at,
+        workspace_id=payload.workspace_id,
+    )
+    try:
+        handler = runtime.event_router.resolve(event.envelope)
+        handler(event)
+
+        with pytest.raises(UnknownEventTypeError):
+            runtime.event_router.resolve(
+                replace(event.envelope, event_type="asset.event.never-registered")
+            )
+        with pytest.raises(UnsupportedSchemaVersionError):
+            runtime.event_router.resolve(replace(event.envelope, schema_version=2))
+        with pytest.raises(MalformedEventPayloadError):
+            runtime.event_router.resolve(replace(event.envelope, payload={}))
+        with pytest.raises(UnhandledEventError):
+            runtime.event_router.resolve(
+                replace(
+                    event.envelope,
+                    event_type=EventType.ASSET_RIGHTS_CHANGED.value,
+                )
+            )
+        with pytest.raises(EventRoutingError, match="workspace"):
+            handler(replace(event, workspace_id="other-workspace"))
+        with pytest.raises(EventRoutingError, match="aggregate"):
+            handler(
+                replace(
+                    event,
+                    envelope=replace(event.envelope, aggregate_id="other-asset"),
+                )
+            )
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize(
+    ("contract", "payload"),
+    [
+        (
+            ASSET_VALIDATION_COMPLETED_V1,
+            AssetValidationCompletedPayload(
+                workspace_id="catalog-workspace",
+                asset_id="asset-1",
+                asset_version_id="asset-version-1",
+                operation_id="operation-1",
+                attempt_number=1,
+                outcome="PENDING_RIGHTS",
+                reason_code=None,
+            ),
+        ),
+        (
+            ASSET_VALIDATION_FAILED_V1,
+            AssetValidationFailedPayload(
+                workspace_id="catalog-workspace",
+                asset_id="asset-1",
+                asset_version_id="asset-version-1",
+                operation_id="operation-1",
+                attempt_number=2,
+                outcome="FAILED",
+                reason_code="PROVIDER_HTTP_403",
+            ),
+        ),
+    ],
+)
+def test_worker_observes_known_asset_validation_terminal_events(
+    contract: object,
+    payload: object,
+) -> None:
+    runtime = WorkerRuntime.build(
+        Settings(
+            environment="ci",
+            worker_queues=["commercevision.workflow"],
+        )
+    )
+    envelope = EventEnvelope.create(
+        event_type=contract.event_type.value,  # type: ignore[attr-defined]
+        aggregate_type="Asset",
+        aggregate_id=payload.asset_id,  # type: ignore[attr-defined]
+        aggregate_version=3,
+        trace_id="trace-validation-terminal",
+        payload=payload.model_dump(mode="json"),  # type: ignore[attr-defined]
+    )
+    event = OutboxEvent(
+        envelope=envelope,
+        available_at=envelope.occurred_at,
+        workspace_id=payload.workspace_id,  # type: ignore[attr-defined]
+    )
+    try:
+        handler = runtime.event_router.resolve(envelope)
+        handler(event)
+
+        with pytest.raises(EventRoutingError, match="workspace"):
+            handler(replace(event, workspace_id="other-workspace"))
+        with pytest.raises(EventRoutingError, match="aggregate"):
+            handler(
+                replace(
+                    event,
+                    envelope=replace(envelope, aggregate_id="other-asset"),
+                )
+            )
+        with pytest.raises(MalformedEventPayloadError):
+            runtime.event_router.resolve(
+                replace(
+                    envelope,
+                    payload={
+                        **envelope.payload,
+                        "raw_provider_payload": {"secret": "must-not-pass"},
+                    },
+                )
+            )
+    finally:
+        runtime.close()
+
+
 def test_celery_worker_fails_fast_before_consumer_when_executor_is_missing(
     monkeypatch,
     tmp_path,
 ) -> None:
-    settings = _production_worker_settings(tmp_path / "worker-ready.json")
+    settings = _production_worker_settings(
+        tmp_path / "worker-ready.json",
+        queue="commercevision.index",
+        required_kind=OperationKind.ASSET_INDEXING,
+    )
     monkeypatch.setattr(worker_module, "settings", settings)
     monkeypatch.setattr(executor_module, "entry_points", lambda **_kwargs: ())
 
-    with pytest.raises(SystemExit, match="ASSET_VALIDATION"):
+    with pytest.raises(SystemExit, match="ASSET_INDEXING"):
         WorkController(
             app=worker_module.celery_app,
             pool="solo",
@@ -231,12 +446,12 @@ def test_worker_process_eagerly_builds_runtime_with_discovered_executors(
         "master_pid": os.getpid(),
         "required_kinds": [OperationKind.ASSET_VALIDATION.value],
         "registered_kinds": [
-            OperationKind.ASSET_DELETION.value,
             OperationKind.ASSET_VALIDATION.value,
         ],
         "missing_kinds": [],
         "mysql": "ok",
         "object_storage": "ok",
+        "malware_scanner": "ok",
         "error": None,
     }
     assert readiness_path.is_file()

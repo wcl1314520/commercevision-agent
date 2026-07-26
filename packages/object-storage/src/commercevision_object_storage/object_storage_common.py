@@ -1,5 +1,7 @@
 """Provider-neutral implementation helpers for object-storage adapters."""
 
+import base64
+import json
 import math
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -8,6 +10,47 @@ from commercevision_contracts.object_storage import ObjectReference, ObjectStat
 from commercevision_domain import StorageLocationClass, StoragePreconditionError
 
 READ_CHUNK_BYTES = 64 * 1024
+
+
+def encode_version_cursor(
+    *,
+    provider: str,
+    key_marker: str,
+    version_marker: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "provider": provider,
+            "key_marker": key_marker,
+            "version_marker": version_marker,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def decode_version_cursor(
+    token: str | None,
+    *,
+    provider: str,
+) -> tuple[str, str]:
+    if token is None:
+        return "", ""
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StoragePreconditionError("object version continuation token is invalid") from exc
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"provider", "key_marker", "version_marker"}
+        or payload.get("provider") != provider
+        or not isinstance(payload.get("key_marker"), str)
+        or not isinstance(payload.get("version_marker"), str)
+    ):
+        raise StoragePreconditionError("object version continuation token is invalid")
+    return payload["key_marker"], payload["version_marker"]
 
 
 def validated_response_version(

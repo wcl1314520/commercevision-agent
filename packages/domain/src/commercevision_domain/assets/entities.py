@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import json
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 
 from commercevision_domain.ids import new_uuid7
-from commercevision_domain.workflow.errors import ConcurrencyError, LeaseConflictError
+from commercevision_domain.workflow.errors import (
+    ConcurrencyError,
+    InvalidTransitionError,
+    LeaseConflictError,
+)
 from commercevision_domain.workspace_identity import validate_workspace_id
 
 from .enums import (
@@ -17,6 +25,8 @@ from .enums import (
     StorageBackend,
     StorageLocationClass,
     UploadSessionState,
+    ValidationStage,
+    ValidationVerdict,
 )
 from .errors import UploadAbortedError, UploadBusyError, UploadExpiredError
 
@@ -24,6 +34,199 @@ from .errors import UploadAbortedError, UploadBusyError, UploadExpiredError
 def _require_utc(value: datetime, field: str) -> None:
     if value.tzinfo is None or value.utcoffset() != timedelta(0):
         raise ValueError(f"{field} must be timezone-aware UTC")
+
+
+def _validate_transfer_policy_identity(version: str, snapshot_sha256: str) -> None:
+    if not version or len(version) > 64 or version != version.strip():
+        raise ValueError("validation data transfer policy version is invalid")
+    if len(snapshot_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in snapshot_sha256
+    ):
+        raise ValueError("validation data transfer policy snapshot must be a lowercase SHA-256")
+
+
+_FORBIDDEN_EVIDENCE_KEYS = frozenset(
+    {
+        "access_key",
+        "authorization",
+        "description",
+        "provider_payload",
+        "raw",
+        "raw_payload",
+        "response_body",
+        "secret",
+        "service_parameters",
+    }
+)
+_LOCAL_FACT_KEYS = frozenset(
+    {
+        "character_count",
+        "data_bytes",
+        "decoded_bytes",
+        "frame_count",
+        "height",
+        "metadata_bytes",
+        "metadata_entries",
+        "model_id",
+        "parameter_count",
+        "provider",
+        "schema_version",
+        "tensor_count",
+        "variable_count",
+        "width",
+    }
+)
+_EVIDENCE_KEYS_BY_STAGE = {
+    ValidationStage.LOCAL_FORMAT: frozenset(
+        {"asset_kind", "byte_size", "detected_mime", "facts", "format_name"}
+    ),
+    ValidationStage.MALWARE: frozenset(
+        {"asset_kind", "latency_ms", "outcome", "scanner_version", "signature"}
+    ),
+    ValidationStage.CONTENT_SAFETY: frozenset(
+        {
+            "asset_kind",
+            "endpoint",
+            "failure_code",
+            "labels",
+            "latency_ms",
+            "mapping_version",
+            "outcome",
+            "policy_version",
+            "provider",
+            "request_id",
+            "retry_after_seconds",
+            "risk_level",
+            "sdk_version",
+            "service",
+            "transfer_authorized",
+            "transfer_endpoint_host",
+            "transfer_endpoint_region",
+            "transfer_external",
+            "transfer_policy_snapshot_sha256",
+            "transfer_policy_version",
+            "transfer_provider",
+            "transfer_purpose",
+        }
+    ),
+    ValidationStage.PROVENANCE: frozenset(
+        {
+            "asset_kind",
+            "failure_code",
+            "failure_codes",
+            "latency_ms",
+            "manifest_count",
+            "outcome",
+            "remote_manifest_fetch",
+            "sdk_version",
+            "status",
+            "trust_config_sha256",
+            "trust_config_version",
+            "validation_state",
+            "validator",
+        }
+    ),
+    ValidationStage.PROMOTION: frozenset(
+        {
+            "backend",
+            "byte_size",
+            "destination_location",
+            "destination_verified",
+            "source_deleted",
+        }
+    ),
+}
+
+
+def _validate_normalized_evidence(evidence: dict[str, object]) -> None:
+    entry_count = 0
+
+    def walk(value: object, *, depth: int) -> None:
+        nonlocal entry_count
+        if depth > 6:
+            raise ValueError("validation evidence exceeds the nesting bound")
+        if value is None or isinstance(value, (str, bool, int)):
+            return
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("validation evidence numbers must be finite")
+            return
+        if isinstance(value, list):
+            if len(value) > 256:
+                raise ValueError("validation evidence list exceeds the entry bound")
+            for item in value:
+                walk(item, depth=depth + 1)
+            return
+        if isinstance(value, dict):
+            if len(value) > 256:
+                raise ValueError("validation evidence object exceeds the entry bound")
+            for key, item in value.items():
+                entry_count += 1
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or len(key) > 128
+                    or key.lower() in _FORBIDDEN_EVIDENCE_KEYS
+                ):
+                    raise ValueError("raw provider payload fields must not be persisted")
+                walk(item, depth=depth + 1)
+            return
+        raise ValueError("validation evidence must be normalized JSON data")
+
+    walk(evidence, depth=0)
+    if entry_count > 1024:
+        raise ValueError("validation evidence exceeds the total entry bound")
+    encoded = json.dumps(
+        evidence,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) > 64 * 1024:
+        raise ValueError("validation evidence exceeds the byte bound")
+
+
+def _validate_stage_evidence(
+    stage: ValidationStage,
+    evidence: dict[str, object],
+) -> None:
+    allowed = _EVIDENCE_KEYS_BY_STAGE[stage]
+    unexpected = set(evidence).difference(allowed)
+    if unexpected:
+        raise ValueError(f"{stage.value} validation evidence contains non-allowlisted fields")
+    if stage == ValidationStage.LOCAL_FORMAT:
+        facts = evidence.get("facts")
+        if facts is not None and (
+            not isinstance(facts, dict) or set(facts).difference(_LOCAL_FACT_KEYS)
+        ):
+            raise ValueError("LOCAL_FORMAT facts contain non-allowlisted fields")
+    if stage == ValidationStage.CONTENT_SAFETY:
+        labels = evidence.get("labels")
+        if labels is not None:
+            if not isinstance(labels, list):
+                raise ValueError("CONTENT_SAFETY labels must be a normalized list")
+            for label in labels:
+                if not isinstance(label, dict) or set(label) != {"code", "confidence"}:
+                    raise ValueError(
+                        "CONTENT_SAFETY label evidence contains non-allowlisted fields"
+                    )
+
+
+def _freeze_json(value: object) -> object:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
 
 
 @dataclass(slots=True)
@@ -67,6 +270,8 @@ class UploadSession:
     version: int
     created_at: datetime
     updated_at: datetime
+    validation_transfer_policy_version: str = "legacy-validation-transfer-deny-v1"
+    validation_transfer_policy_snapshot_sha256: str = "0" * 64
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
@@ -89,6 +294,10 @@ class UploadSession:
             character not in "0123456789abcdef" for character in self.expected_sha256
         ):
             raise ValueError("expected SHA-256 must be a lowercase hexadecimal digest")
+        _validate_transfer_policy_identity(
+            self.validation_transfer_policy_version,
+            self.validation_transfer_policy_snapshot_sha256,
+        )
         if self.storage_location != StorageLocationClass.QUARANTINE:
             raise ValueError("upload sessions must target quarantine storage")
         if not all(
@@ -183,6 +392,8 @@ class UploadSession:
         role: str,
         upload_policy_version: str,
         integrity_policy_version: str,
+        validation_transfer_policy_version: str = ("legacy-validation-transfer-deny-v1"),
+        validation_transfer_policy_snapshot_sha256: str = "0" * 64,
         storage_backend: StorageBackend,
         storage_bucket: str,
         storage_key: str,
@@ -222,6 +433,8 @@ class UploadSession:
             role=role,
             upload_policy_version=upload_policy_version,
             integrity_policy_version=integrity_policy_version,
+            validation_transfer_policy_version=validation_transfer_policy_version,
+            validation_transfer_policy_snapshot_sha256=(validation_transfer_policy_snapshot_sha256),
             storage_backend=storage_backend,
             storage_location=StorageLocationClass.QUARANTINE,
             storage_bucket=storage_bucket,
@@ -435,6 +648,7 @@ class Asset:
     product_id: str | None
     sku_id: str | None
     status: AssetState
+    block_reason: str | None
     current_version_id: str
     retention_deadline: datetime | None
     version: int
@@ -462,6 +676,11 @@ class Asset:
             raise ValueError("an Asset SKU requires a Product")
         if not self.current_version_id:
             raise ValueError("an Asset must have a current version")
+        if self.status == AssetState.BLOCKED:
+            if not self.block_reason:
+                raise ValueError("BLOCKED Assets require a block reason")
+        elif self.block_reason is not None:
+            raise ValueError("only BLOCKED Assets may hold a block reason")
 
     @classmethod
     def create_quarantined(
@@ -487,12 +706,144 @@ class Asset:
             product_id=product_id,
             sku_id=sku_id,
             status=AssetState.QUARANTINED,
+            block_reason=None,
             current_version_id=current_version_id,
             retention_deadline=retention_deadline,
             version=1,
             created_at=now,
             updated_at=now,
         )
+
+    def begin_validation(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.status == AssetState.VALIDATING:
+            return
+        if self.status != AssetState.QUARANTINED:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot begin validation from {self.status.value}"
+            )
+        self.status = AssetState.VALIDATING
+        self._touch(now)
+
+    def mark_pending_review(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.status == AssetState.PENDING_REVIEW:
+            return
+        if self.status != AssetState.VALIDATING:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot require review from {self.status.value}"
+            )
+        self.status = AssetState.PENDING_REVIEW
+        self._touch(now)
+
+    def mark_pending_rights(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.status == AssetState.PENDING_RIGHTS:
+            return
+        if self.status != AssetState.VALIDATING:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot enter pending rights from {self.status.value}"
+            )
+        self.status = AssetState.PENDING_RIGHTS
+        self._touch(now)
+
+    def fail_validation(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.status == AssetState.FAILED:
+            return
+        if self.status not in {
+            AssetState.QUARANTINED,
+            AssetState.VALIDATING,
+        }:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot fail validation from {self.status.value}"
+            )
+        self.status = AssetState.FAILED
+        self._touch(now)
+
+    def resume_failed_validation(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.status != AssetState.FAILED:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot resume validation from {self.status.value}"
+            )
+        self.status = AssetState.VALIDATING
+        self._touch(now)
+
+    def block(self, *, reason_code: str, now: datetime) -> None:
+        _require_utc(now, "now")
+        if not reason_code or len(reason_code) > 64:
+            raise ValueError("Asset block reason must contain 1-64 characters")
+        if self.status == AssetState.BLOCKED:
+            if self.block_reason != reason_code:
+                raise InvalidTransitionError(
+                    f"Asset {self.id} is already blocked for another reason"
+                )
+            return
+        if self.status not in {
+            AssetState.VALIDATING,
+            AssetState.PENDING_REVIEW,
+            AssetState.PENDING_RIGHTS,
+        }:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot be blocked from {self.status.value}"
+            )
+        self.status = AssetState.BLOCKED
+        self.block_reason = reason_code
+        self._touch(now)
+
+    def begin_retention_cleanup(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.retention_deadline is None:
+            raise InvalidTransitionError(f"Foundation Asset {self.id} has no retention deadline")
+        if now < self.retention_deadline:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot expire before its retention deadline"
+            )
+        if self.status in {AssetState.DELETING, AssetState.DELETED}:
+            return
+        if self.status not in {
+            AssetState.QUARANTINED,
+            AssetState.VALIDATING,
+            AssetState.PENDING_REVIEW,
+            AssetState.PENDING_RIGHTS,
+            AssetState.BLOCKED,
+            AssetState.FAILED,
+        }:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot begin retention cleanup from {self.status.value}"
+            )
+        self.status = AssetState.DELETING
+        self.block_reason = None
+        self._touch(now)
+
+    def expire_retention(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.retention_deadline is None:
+            raise InvalidTransitionError(f"Foundation Asset {self.id} has no retention deadline")
+        if now < self.retention_deadline:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot expire before its retention deadline"
+            )
+        if self.status == AssetState.DELETED:
+            return
+        if self.status not in {
+            AssetState.QUARANTINED,
+            AssetState.VALIDATING,
+            AssetState.PENDING_REVIEW,
+            AssetState.PENDING_RIGHTS,
+            AssetState.BLOCKED,
+            AssetState.FAILED,
+            AssetState.DELETING,
+        }:
+            raise InvalidTransitionError(f"Asset {self.id} cannot expire from {self.status.value}")
+        self.status = AssetState.DELETED
+        self.block_reason = None
+        self._touch(now)
+
+    def _touch(self, now: datetime) -> None:
+        self.version += 1
+        self.updated_at = now
 
 
 @dataclass(frozen=True, slots=True)
@@ -506,15 +857,18 @@ class AssetVersion:
     sha256: str
     byte_size: int
     declared_mime: str
-    detected_mime: str
-    image_format: str
-    width: int
-    height: int
-    frame_count: int
+    detected_mime: str | None
+    image_format: str | None
+    width: int | None
+    height: int | None
+    frame_count: int | None
     category: str
     role: str
     integrity_policy_version: str
+    validation_policy_version: str
     created_at: datetime
+    validation_transfer_policy_version: str = "legacy-validation-transfer-deny-v1"
+    validation_transfer_policy_snapshot_sha256: str = "0" * 64
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
@@ -523,8 +877,42 @@ class AssetVersion:
             raise ValueError("Asset Version number must be positive")
         if self.byte_size < 1:
             raise ValueError("Asset Version byte size must be positive")
-        if self.width < 1 or self.height < 1 or self.frame_count < 1:
+        image_facts = (
+            self.image_format,
+            self.width,
+            self.height,
+            self.frame_count,
+        )
+        if all(value is None for value in image_facts):
+            if self.detected_mime is not None:
+                raise ValueError(
+                    "non-image Asset Versions keep detected MIME in validation evidence"
+                )
+        elif any(value is None for value in image_facts):
+            raise ValueError("Asset Version image facts must be complete")
+        elif (
+            not self.image_format
+            or self.width is None
+            or self.height is None
+            or self.frame_count is None
+            or self.width < 1
+            or self.height < 1
+            or self.frame_count < 1
+        ):
             raise ValueError("Asset Version image facts must be positive")
+        if self.image_format is not None and self.detected_mime is None:
+            raise ValueError("image Asset Versions require a detected MIME")
+        if (
+            not self.integrity_policy_version
+            or len(self.integrity_policy_version) > 64
+            or not self.validation_policy_version
+            or len(self.validation_policy_version) > 64
+        ):
+            raise ValueError("Asset Version policy identities are invalid")
+        _validate_transfer_policy_identity(
+            self.validation_transfer_policy_version,
+            self.validation_transfer_policy_snapshot_sha256,
+        )
         if len(self.sha256) != 64 or any(
             character not in "0123456789abcdef" for character in self.sha256
         ):
@@ -542,14 +930,17 @@ class AssetVersion:
         sha256: str,
         byte_size: int,
         declared_mime: str,
-        detected_mime: str,
-        image_format: str,
-        width: int,
-        height: int,
-        frame_count: int,
+        detected_mime: str | None,
+        image_format: str | None,
+        width: int | None,
+        height: int | None,
+        frame_count: int | None,
         category: str,
         role: str,
         integrity_policy_version: str,
+        validation_policy_version: str,
+        validation_transfer_policy_version: str = ("legacy-validation-transfer-deny-v1"),
+        validation_transfer_policy_snapshot_sha256: str = "0" * 64,
         now: datetime,
     ) -> AssetVersion:
         return cls(
@@ -570,6 +961,9 @@ class AssetVersion:
             category=category,
             role=role,
             integrity_policy_version=integrity_policy_version,
+            validation_policy_version=validation_policy_version,
+            validation_transfer_policy_version=validation_transfer_policy_version,
+            validation_transfer_policy_snapshot_sha256=(validation_transfer_policy_snapshot_sha256),
             created_at=now,
         )
 
@@ -616,6 +1010,11 @@ class AssetObject:
             and self.location != StorageLocationClass.QUARANTINE
         ):
             raise ValueError("quarantined Asset objects must remain in quarantine storage")
+        if self.state == AssetObjectState.CONTROLLED and self.location not in {
+            StorageLocationClass.TASK,
+            StorageLocationClass.FOUNDATION,
+        }:
+            raise ValueError("controlled Asset objects must use retained storage")
 
     @classmethod
     def create_quarantined(
@@ -650,4 +1049,189 @@ class AssetObject:
             version=1,
             created_at=now,
             updated_at=now,
+        )
+
+    @classmethod
+    def create_controlled(
+        cls,
+        *,
+        workspace_id: str,
+        asset_version_id: str,
+        backend: StorageBackend,
+        location: StorageLocationClass,
+        bucket: str,
+        key: str,
+        provider_version_id: str | None,
+        etag: str,
+        byte_size: int,
+        sha256: str,
+        now: datetime,
+    ) -> AssetObject:
+        if location not in {
+            StorageLocationClass.TASK,
+            StorageLocationClass.FOUNDATION,
+        }:
+            raise ValueError("controlled Asset objects require retained storage")
+        return cls(
+            id=new_uuid7(),
+            workspace_id=workspace_id,
+            asset_version_id=asset_version_id,
+            role="CONTROLLED_ORIGINAL",
+            backend=backend,
+            location=location,
+            bucket=bucket,
+            key=key,
+            provider_version_id=provider_version_id,
+            etag=etag,
+            byte_size=byte_size,
+            sha256=sha256,
+            state=AssetObjectState.CONTROLLED,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def mark_delete_pending(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.state == AssetObjectState.DELETE_PENDING:
+            return
+        if self.state == AssetObjectState.DELETED:
+            return
+        if self.state not in {
+            AssetObjectState.QUARANTINED,
+            AssetObjectState.CONTROLLED,
+        }:
+            raise InvalidTransitionError(
+                f"Asset object {self.id} cannot schedule deletion from {self.state.value}"
+            )
+        self.state = AssetObjectState.DELETE_PENDING
+        self._touch(now)
+
+    def mark_deleted(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.state == AssetObjectState.DELETED:
+            return
+        if self.state != AssetObjectState.DELETE_PENDING:
+            raise InvalidTransitionError(
+                f"Asset object {self.id} cannot be deleted from {self.state.value}"
+            )
+        self.state = AssetObjectState.DELETED
+        self._touch(now)
+
+    def _touch(self, now: datetime) -> None:
+        self.version += 1
+        self.updated_at = now
+
+
+@dataclass(frozen=True, slots=True)
+class AssetValidationResult:
+    id: str
+    workspace_id: str
+    operation_id: str
+    asset_version_id: str
+    asset_object_id: str
+    attempt_number: int
+    stage: ValidationStage
+    validator_name: str
+    validator_version: str
+    policy_version: str
+    verdict: ValidationVerdict
+    reason_code: str | None
+    object_provider_version_id: str
+    object_etag: str
+    content_sha256: str
+    evidence: Mapping[str, object]
+    retention_deadline: datetime | None
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)
+        _require_utc(self.created_at, "created_at")
+        if self.retention_deadline is not None:
+            _require_utc(self.retention_deadline, "retention_deadline")
+            if self.retention_deadline <= self.created_at:
+                raise ValueError("validation evidence retention must end after creation")
+        for value, field, maximum in (
+            (self.operation_id, "operation_id", 36),
+            (self.asset_version_id, "asset_version_id", 36),
+            (self.asset_object_id, "asset_object_id", 36),
+            (self.validator_name, "validator_name", 64),
+            (self.validator_version, "validator_version", 128),
+            (self.policy_version, "policy_version", 64),
+            (self.object_provider_version_id, "object_provider_version_id", 256),
+            (self.object_etag, "object_etag", 512),
+        ):
+            if not value or len(value) > maximum:
+                raise ValueError(f"{field} must contain 1-{maximum} characters")
+        if self.attempt_number < 1:
+            raise ValueError("validation attempt number must be positive")
+        if len(self.content_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in self.content_sha256
+        ):
+            raise ValueError("validation content SHA-256 must be lowercase hexadecimal")
+        if self.verdict in {
+            ValidationVerdict.REVIEW,
+            ValidationVerdict.BLOCK,
+            ValidationVerdict.RETRYABLE_FAILURE,
+            ValidationVerdict.TERMINAL_FAILURE,
+        }:
+            if not self.reason_code:
+                raise ValueError("non-pass validation verdicts require a reason code")
+        elif self.reason_code is not None:
+            raise ValueError("pass validation verdicts must not carry a reason code")
+        if self.reason_code is not None and len(self.reason_code) > 64:
+            raise ValueError("validation reason code exceeds 64 characters")
+        if not isinstance(self.evidence, dict):
+            raise ValueError("validation evidence must be constructed from a JSON object")
+        _validate_normalized_evidence(self.evidence)
+        _validate_stage_evidence(self.stage, self.evidence)
+        object.__setattr__(self, "evidence", _freeze_json(self.evidence))
+
+    def evidence_dict(self) -> dict[str, object]:
+        thawed = _thaw_json(self.evidence)
+        if not isinstance(thawed, dict):
+            raise RuntimeError("validation evidence root is not an object")
+        return thawed
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        asset_version_id: str,
+        asset_object_id: str,
+        attempt_number: int,
+        stage: ValidationStage,
+        validator_name: str,
+        validator_version: str,
+        policy_version: str,
+        verdict: ValidationVerdict,
+        reason_code: str | None,
+        object_provider_version_id: str,
+        object_etag: str,
+        content_sha256: str,
+        evidence: dict[str, object],
+        retention_deadline: datetime | None,
+        now: datetime,
+    ) -> AssetValidationResult:
+        return cls(
+            id=new_uuid7(),
+            workspace_id=workspace_id,
+            operation_id=operation_id,
+            asset_version_id=asset_version_id,
+            asset_object_id=asset_object_id,
+            attempt_number=attempt_number,
+            stage=stage,
+            validator_name=validator_name,
+            validator_version=validator_version,
+            policy_version=policy_version,
+            verdict=verdict,
+            reason_code=reason_code,
+            object_provider_version_id=object_provider_version_id,
+            object_etag=object_etag,
+            content_sha256=content_sha256,
+            evidence=evidence,
+            retention_deadline=retention_deadline,
+            created_at=now,
         )

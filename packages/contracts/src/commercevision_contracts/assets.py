@@ -13,14 +13,28 @@ from commercevision_domain import (
     OperationState,
     RetentionClass,
     UploadSessionState,
+    ValidationStage,
+    ValidationVerdict,
     canonicalize_uuid,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from .workspace_identity import WorkspaceId
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+SUPPORTED_LORA_MIME_TYPES = frozenset({"application/octet-stream", "application/x-safetensors"})
+IMAGE_MAX_BYTES = 10 * 1024 * 1024
+LORA_MAX_BYTES = 100 * 1024 * 1024
+PROMPT_TEMPLATE_MAX_BYTES = 256 * 1024
+MODEL_CONFIGURATION_MAX_BYTES = 64 * 1024
 
 
 class AssetContractV1(BaseModel):
@@ -32,7 +46,7 @@ class UploadSessionCreateRequestV1(AssetContractV1):
     asset_kind: AssetKind = AssetKind.IMAGE
     filename: str = Field(min_length=1, max_length=255)
     declared_mime: str = Field(min_length=1, max_length=128)
-    byte_length: int = Field(ge=1, le=10 * 1024 * 1024)
+    byte_length: int = Field(ge=1, le=LORA_MAX_BYTES)
     sha256: str = Field(pattern=SHA256_PATTERN)
     workflow_id: str | None = Field(default=None, pattern=UUID_PATTERN)
     product_id: str | None = Field(default=None, pattern=UUID_PATTERN)
@@ -62,6 +76,38 @@ class UploadSessionCreateRequestV1(AssetContractV1):
             raise ValueError("Foundation Assets must not reference a Workflow")
         if self.sku_id is not None and self.product_id is None:
             raise ValueError("sku_id requires product_id")
+        declared_mime = self.declared_mime.strip().lower()
+        object.__setattr__(self, "declared_mime", declared_mime)
+        suffix = self.filename.lower()
+        if self.asset_kind == AssetKind.IMAGE:
+            if declared_mime not in SUPPORTED_IMAGE_MIME_TYPES:
+                raise ValueError("image MIME type is not supported")
+            if self.byte_length > IMAGE_MAX_BYTES:
+                raise ValueError("image exceeds the 10 MiB upload limit")
+        else:
+            if self.retention_class != RetentionClass.FOUNDATION:
+                raise ValueError("registered non-image assets must be Foundation Assets")
+            if self.asset_kind == AssetKind.LORA:
+                if declared_mime not in SUPPORTED_LORA_MIME_TYPES:
+                    raise ValueError("LoRA MIME type is not supported")
+                if not suffix.endswith(".safetensors"):
+                    raise ValueError("LoRA registration requires a .safetensors filename")
+                if self.byte_length > LORA_MAX_BYTES:
+                    raise ValueError("LoRA exceeds the registration byte limit")
+            elif self.asset_kind == AssetKind.PROMPT_TEMPLATE:
+                if declared_mime != "application/json":
+                    raise ValueError("Prompt templates require application/json")
+                if not suffix.endswith(".prompt.json"):
+                    raise ValueError("Prompt template filename must end in .prompt.json")
+                if self.byte_length > PROMPT_TEMPLATE_MAX_BYTES:
+                    raise ValueError("Prompt template exceeds the registration byte limit")
+            elif self.asset_kind == AssetKind.MODEL_CONFIGURATION:
+                if declared_mime != "application/json":
+                    raise ValueError("model configurations require application/json")
+                if not suffix.endswith(".model.json"):
+                    raise ValueError("model configuration filename must end in .model.json")
+                if self.byte_length > MODEL_CONFIGURATION_MAX_BYTES:
+                    raise ValueError("model configuration exceeds the registration byte limit")
         return self
 
 
@@ -95,6 +141,8 @@ class UploadSessionResponseV1(BaseModel):
     role: str
     upload_policy_version: str
     integrity_policy_version: str
+    validation_transfer_policy_version: str
+    validation_transfer_policy_snapshot_sha256: str
     status: UploadSessionState
     failure_code: str | None
     asset_version_id: str | None
@@ -120,14 +168,17 @@ class AssetVersionResponseV1(BaseModel):
     sha256: str
     byte_size: int
     declared_mime: str
-    detected_mime: str
-    image_format: str
-    width: int
-    height: int
-    frame_count: int
+    detected_mime: str | None
+    image_format: str | None
+    width: int | None
+    height: int | None
+    frame_count: int | None
     category: str
     role: str
     integrity_policy_version: str
+    validation_policy_version: str
+    validation_transfer_policy_version: str
+    validation_transfer_policy_snapshot_sha256: str
     object_state: AssetObjectState
     created_at: datetime
 
@@ -141,6 +192,7 @@ class AssetResponseV1(BaseModel):
     product_id: str | None
     sku_id: str | None
     status: AssetState
+    block_reason: str | None
     current_version_id: str
     retention_deadline: datetime | None
     version: int
@@ -162,3 +214,37 @@ class UploadFinalizeResponseV1(BaseModel):
     asset: AssetResponseV1
     asset_version: AssetVersionResponseV1
     validation_operation: ValidationOperationSummaryV1
+
+
+class AssetValidationOperationResponseV1(AssetContractV1):
+    id: str
+    state: OperationState
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=1)
+    next_attempt_at: datetime | None
+    retryable: bool
+    failure_code: str | None
+    failure_category: str | None
+    completed_at: datetime | None
+
+
+class AssetValidationStageResponseV1(AssetContractV1):
+    id: str
+    attempt_number: int = Field(ge=1)
+    stage: ValidationStage
+    verdict: ValidationVerdict
+    reason_code: str | None
+    validator_name: str
+    validator_version: str
+    policy_version: str
+    evidence: dict[str, JsonValue]
+    created_at: datetime
+
+
+class AssetValidationStatusResponseV1(AssetContractV1):
+    asset_id: str
+    asset_version_id: str
+    asset_status: AssetState
+    validation_policy_version: str
+    operation: AssetValidationOperationResponseV1
+    stages: list[AssetValidationStageResponseV1]

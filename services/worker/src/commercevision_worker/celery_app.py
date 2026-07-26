@@ -217,9 +217,11 @@ def worker_bootstrap_readiness() -> dict[str, object]:
     required = set(settings.worker_required_operation_kinds)
     registered = set(_validated_factories or {}).union(available_builtin_operation_kinds(settings))
     missing = required.difference(registered)
-    dependencies_ready = (_dependency_readiness or {}).get("mysql") == "ok" and (
-        _dependency_readiness or {}
-    ).get("object_storage") in {"ok", "not_required"}
+    dependencies_ready = (
+        (_dependency_readiness or {}).get("mysql") == "ok"
+        and (_dependency_readiness or {}).get("object_storage") in {"ok", "not_required"}
+        and (_dependency_readiness or {}).get("malware_scanner") in {"ok", "not_required"}
+    )
     return {
         "ready": _consumer_ready and dependencies_ready and not missing,
         "consumer_ready": _consumer_ready,
@@ -230,6 +232,10 @@ def worker_bootstrap_readiness() -> dict[str, object]:
         "mysql": (_dependency_readiness or {}).get("mysql", "not_checked"),
         "object_storage": (_dependency_readiness or {}).get(
             "object_storage",
+            "not_checked",
+        ),
+        "malware_scanner": (_dependency_readiness or {}).get(
+            "malware_scanner",
             "not_checked",
         ),
         "error": _startup_error,

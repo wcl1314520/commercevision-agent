@@ -6,7 +6,7 @@ import random
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from commercevision_contracts.events import (
     OPERATION_RECOVERY_REQUESTED_V1,
@@ -21,6 +21,7 @@ from commercevision_domain import (
     NotFoundError,
     RetryExhaustedError,
     UniqueConstraintError,
+    new_uuid7,
     validate_workspace_id,
 )
 from commercevision_domain.messaging import (
@@ -613,6 +614,144 @@ class OperationApplicationService:
             uow.commit()
         return operation, True, should_process
 
+    def prepare_terminal_recovery_replay(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        source_dead_letter_id: str,
+        replay_attempt: int,
+        replay_event_id: str,
+        recovery_generation: int,
+        now: datetime | None = None,
+    ) -> tuple[DurableOperation, bool]:
+        """Prepare an idempotent target callback without consuming its generation."""
+
+        prepared_at = now or datetime.now(UTC)
+        preparation_kind = ReplayPreparationKind.TRANSPORT
+        work_kind = ReplayWorkKind.TERMINAL_CONVERGENCE
+        with self._uow_factory() as uow:
+            operation = self._get_for_update(uow, workspace_id, operation_id)
+            lifecycle = uow.dead_letters.get_replay_lifecycle(
+                source_dead_letter_id=source_dead_letter_id,
+                replay_attempt=replay_attempt,
+                replay_event_id=replay_event_id,
+                workspace_id=workspace_id,
+                for_update=True,
+            )
+            if lifecycle is None:
+                raise NotFoundError(
+                    f"replay event {replay_event_id} is not registered for "
+                    f"dead letter {source_dead_letter_id}"
+                )
+            if lifecycle.state != ReplayLifecycleState.RECORDED:
+                self._validate_replay_lifecycle(
+                    lifecycle,
+                    operation_id=operation_id,
+                    preparation_kind=preparation_kind,
+                    work_kind=work_kind,
+                )
+                if lifecycle.state == ReplayLifecycleState.COMPLETED:
+                    return operation, False
+                if lifecycle.state != ReplayLifecycleState.PREPARED:
+                    raise ConcurrencyError(
+                        f"terminal replay event {replay_event_id} has an invalid lifecycle state"
+                    )
+                if operation.recovery_consumed_generation >= recovery_generation:
+                    self._complete_unclaimed_replay(
+                        uow,
+                        replay_event_id=replay_event_id,
+                        operation=operation,
+                        completed_at=prepared_at,
+                    )
+                    return operation, False
+                self._assert_terminal_generation(
+                    operation,
+                    recovery_generation=recovery_generation,
+                )
+                return operation, True
+
+            already_consumed = (
+                recovery_generation > 0
+                and operation.recovery_consumed_generation >= recovery_generation
+            )
+            if not already_consumed:
+                self._assert_terminal_generation(
+                    operation,
+                    recovery_generation=recovery_generation,
+                )
+            uow.dead_letters.mark_replay_prepared(
+                replay_event_id=replay_event_id,
+                operation_id=operation_id,
+                preparation_kind=preparation_kind,
+                work_kind=work_kind,
+                prepared_operation_version=operation.version,
+                prepared_at=prepared_at,
+                completed=already_consumed,
+            )
+            uow.commit()
+        return operation, not already_consumed
+
+    def complete_terminal_recovery_replay(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        source_dead_letter_id: str,
+        replay_attempt: int,
+        replay_event_id: str,
+        recovery_generation: int,
+        now: datetime | None = None,
+    ) -> DurableOperation:
+        """Consume the generation only after the target callback has committed."""
+
+        completed_at = now or datetime.now(UTC)
+        with self._uow_factory() as uow:
+            operation = self._get_for_update(uow, workspace_id, operation_id)
+            lifecycle = uow.dead_letters.get_replay_lifecycle(
+                source_dead_letter_id=source_dead_letter_id,
+                replay_attempt=replay_attempt,
+                replay_event_id=replay_event_id,
+                workspace_id=workspace_id,
+                for_update=True,
+            )
+            if lifecycle is None:
+                raise NotFoundError(
+                    f"replay event {replay_event_id} is not registered for "
+                    f"dead letter {source_dead_letter_id}"
+                )
+            self._validate_replay_lifecycle(
+                lifecycle,
+                operation_id=operation_id,
+                preparation_kind=ReplayPreparationKind.TRANSPORT,
+                work_kind=ReplayWorkKind.TERMINAL_CONVERGENCE,
+            )
+            if lifecycle.state == ReplayLifecycleState.COMPLETED:
+                return operation
+            if lifecycle.state != ReplayLifecycleState.PREPARED:
+                raise ConcurrencyError(f"terminal replay event {replay_event_id} is not prepared")
+            self._assert_terminal_generation(
+                operation,
+                recovery_generation=recovery_generation,
+            )
+            if not operation.consume_recovery_generation(
+                recovery_generation,
+                now=completed_at,
+            ):
+                raise ConcurrencyError(
+                    f"terminal replay event {replay_event_id} lost its recovery generation"
+                )
+            uow.operations.save(operation)
+            uow.dead_letters.mark_replay_completed(
+                replay_event_id=replay_event_id,
+                operation_id=operation_id,
+                completed_operation_version=operation.version,
+                completed_at=completed_at,
+                expected_state=ReplayLifecycleState.PREPARED,
+            )
+            uow.commit()
+        return operation
+
     def claim_recovery_replay(
         self,
         *,
@@ -667,6 +806,13 @@ class OperationApplicationService:
                         False,
                     )
                 assert lifecycle.claim_token is not None
+                if operation.state == OperationState.FAILED:
+                    return _OperationReplayClaim(
+                        operation,
+                        ReplayWorkKind.TERMINAL_CONVERGENCE,
+                        lifecycle.claim_token,
+                        False,
+                    )
                 uow.dead_letters.mark_replay_completed(
                     replay_event_id=replay_event_id,
                     operation_id=operation_id,
@@ -751,6 +897,22 @@ class OperationApplicationService:
             if lease_token is None:
                 if operation_changed:
                     uow.operations.save(operation)
+                if operation.state == OperationState.FAILED:
+                    callback_token = new_uuid7()
+                    uow.dead_letters.mark_replay_claimed(
+                        replay_event_id=replay_event_id,
+                        operation_id=operation_id,
+                        claim_token=callback_token,
+                        claimed_operation_version=operation.version,
+                        claimed_at=claimed_at,
+                    )
+                    uow.commit()
+                    return _OperationReplayClaim(
+                        operation,
+                        ReplayWorkKind.TERMINAL_CONVERGENCE,
+                        callback_token,
+                        False,
+                    )
                 self._complete_unclaimed_replay(
                     uow,
                     replay_event_id=replay_event_id,
@@ -897,12 +1059,30 @@ class OperationApplicationService:
         claim_token: str,
         completed_at: datetime,
     ) -> None:
+        if operation.state == OperationState.FAILED:
+            return
         uow.dead_letters.complete_claimed_replays(
             operation_id=operation.id,
             claim_token=claim_token,
             completed_operation_version=operation.version,
             completed_at=completed_at,
         )
+
+    @staticmethod
+    def _assert_terminal_generation(
+        operation: DurableOperation,
+        *,
+        recovery_generation: int,
+    ) -> None:
+        if (
+            operation.state != OperationState.FAILED
+            or recovery_generation < 1
+            or operation.recovery_generation != recovery_generation
+            or operation.recovery_consumed_generation >= recovery_generation
+        ):
+            raise ConcurrencyError(
+                f"operation {operation.id} has no matching terminal recovery generation"
+            )
 
     def cancel(
         self,
@@ -1255,6 +1435,8 @@ class OperationRetryPolicy:
         error = failure.error
         if not error.retryable:
             return error, None
+        if operation.attempt_count >= operation.max_attempts:
+            return replace(error, retryable=False), None
         retry_at = failure.retry_at
         if retry_at is None:
             delay_seconds = _jittered_backoff_seconds(
@@ -1369,6 +1551,15 @@ class OperationExecutor(Protocol):
     ) -> OperationReconciliationResult: ...
 
 
+@runtime_checkable
+class OperationTerminalFailureHandler(Protocol):
+    def record_terminal_failure(
+        self,
+        request: OperationExecutionRequest,
+        error: NormalizedOperationError,
+    ) -> None: ...
+
+
 class OperationExecutorRegistry:
     def __init__(self) -> None:
         self._executors: dict[OperationKind, OperationExecutor] = {}
@@ -1396,6 +1587,15 @@ class OperationExecutorRegistry:
         request: OperationExecutionRequest,
     ) -> OperationReconciliationResult:
         return self._resolve(request.kind).reconcile(request)
+
+    def record_terminal_failure(
+        self,
+        request: OperationExecutionRequest,
+        error: NormalizedOperationError,
+    ) -> None:
+        executor = self._resolve(request.kind)
+        if isinstance(executor, OperationTerminalFailureHandler):
+            executor.record_terminal_failure(request, error)
 
     def _resolve(self, kind: OperationKind) -> OperationExecutor:
         executor = self._executors.get(kind)
@@ -1431,6 +1631,15 @@ class OperationExecutionBoundary:
     ) -> OperationReconciliationResult:
         self._assert_transaction_free()
         return self._executor.reconcile(request)
+
+    def record_terminal_failure(
+        self,
+        request: OperationExecutionRequest,
+        error: NormalizedOperationError,
+    ) -> None:
+        self._assert_transaction_free()
+        if isinstance(self._executor, OperationTerminalFailureHandler):
+            self._executor.record_terminal_failure(request, error)
 
     def _assert_transaction_free(self) -> None:
         if self._transaction_active():
@@ -1494,15 +1703,17 @@ class DurableOperationWorker:
             elif operation.state == OperationState.RECONCILING:
                 return self._reconcile(operation)
             elif operation.state.terminal:
-                return operation
+                return self._converge_terminal_failure(operation)
             else:
                 raise InvalidTransitionError(
                     f"operation {operation.id} cannot execute from {operation.state.value}"
                 )
         except RetryExhaustedError:
-            return self._operations.get(
-                workspace_id=workspace_id,
-                operation_id=operation_id,
+            return self._converge_terminal_failure(
+                self._operations.get(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                )
             )
         running = self._operations.start(
             workspace_id=workspace_id,
@@ -1550,7 +1761,7 @@ class DurableOperationWorker:
                 failure=exc,
                 now=failed_at,
             )
-            return self._operations.fail(
+            failed = self._operations.fail(
                 workspace_id=running.workspace_id,
                 operation_id=running.id,
                 lease_token=lease_token,
@@ -1560,6 +1771,7 @@ class DurableOperationWorker:
                 expected_attempt_count=running.attempt_count,
                 now=failed_at,
             )
+            return self._converge_terminal_failure(failed)
         if result.operation_id != running.id:
             required_at = self._clock()
             return self._operations.require_reconciliation(
@@ -1592,10 +1804,36 @@ class DurableOperationWorker:
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
+        terminal_convergence = (
+            payload.recovery_reason == OperationRecoveryReason.TERMINAL_FAILURE
+            and payload.recovery_generation > 0
+        )
         if event.source_dead_letter_id is None:
             operation = self.execute(
                 workspace_id=operation.workspace_id,
                 operation_id=operation.id,
+            )
+        elif terminal_convergence:
+            operation, should_converge = self._operations.prepare_terminal_recovery_replay(
+                workspace_id=payload.workspace_id,
+                operation_id=payload.operation_id,
+                source_dead_letter_id=event.source_dead_letter_id,
+                replay_attempt=event.replay_attempt,
+                replay_event_id=event.envelope.event_id,
+                recovery_generation=payload.recovery_generation,
+                now=self._clock(),
+            )
+            if not should_converge:
+                return operation
+            self._converge_terminal_failure(operation)
+            return self._operations.complete_terminal_recovery_replay(
+                workspace_id=payload.workspace_id,
+                operation_id=payload.operation_id,
+                source_dead_letter_id=event.source_dead_letter_id,
+                replay_attempt=event.replay_attempt,
+                replay_event_id=event.envelope.event_id,
+                recovery_generation=payload.recovery_generation,
+                now=self._clock(),
             )
         else:
             replayed_at = self._clock()
@@ -1628,7 +1866,19 @@ class DurableOperationWorker:
                     now=self._clock(),
                 )
                 operation = claim.operation
-                if claim.provider_claimed:
+                if claim.work_kind == ReplayWorkKind.TERMINAL_CONVERGENCE:
+                    assert claim.lease_token is not None
+                    self._converge_terminal_failure(operation)
+                    operation = self._operations.complete_recovery_replay(
+                        workspace_id=payload.workspace_id,
+                        operation_id=payload.operation_id,
+                        source_dead_letter_id=event.source_dead_letter_id,
+                        replay_attempt=event.replay_attempt,
+                        replay_event_id=event.envelope.event_id,
+                        claim_token=claim.lease_token,
+                        now=self._clock(),
+                    )
+                elif claim.provider_claimed:
                     assert claim.lease_token is not None
                     if claim.work_kind == ReplayWorkKind.RECONCILIATION:
                         operation = self._reconcile_claimed(operation, claim.lease_token)
@@ -1653,11 +1903,13 @@ class DurableOperationWorker:
     def _reconcile(self, operation: DurableOperation) -> DurableOperation:
         reconciliation_at = self._clock()
         if operation.reconciliation_exhausted(now=reconciliation_at):
-            return self._operations.exhaust_reconciliation(
-                workspace_id=operation.workspace_id,
-                operation_id=operation.id,
-                error=self._reconciliation_exhausted_error(),
-                now=reconciliation_at,
+            return self._converge_terminal_failure(
+                self._operations.exhaust_reconciliation(
+                    workspace_id=operation.workspace_id,
+                    operation_id=operation.id,
+                    error=self._reconciliation_exhausted_error(),
+                    now=reconciliation_at,
+                )
             )
         try:
             lease_token = self._operations.claim_reconciliation(
@@ -1668,9 +1920,11 @@ class DurableOperationWorker:
                 now=reconciliation_at,
             )
         except RetryExhaustedError:
-            return self._operations.get(
-                workspace_id=operation.workspace_id,
-                operation_id=operation.id,
+            return self._converge_terminal_failure(
+                self._operations.get(
+                    workspace_id=operation.workspace_id,
+                    operation_id=operation.id,
+                )
             )
         current = self._operations.get(
             workspace_id=operation.workspace_id,
@@ -1740,7 +1994,7 @@ class DurableOperationWorker:
                 ),
                 now=resolved_at,
             )
-            return self._operations.resolve_reconciliation(
+            resolved = self._operations.resolve_reconciliation(
                 workspace_id=current.workspace_id,
                 operation_id=current.id,
                 lease_token=lease_token,
@@ -1752,6 +2006,7 @@ class DurableOperationWorker:
                 expected_reconciliation_attempt_count=(current.reconciliation_attempt_count),
                 now=resolved_at,
             )
+            return self._converge_terminal_failure(resolved)
         resolved_at = self._clock()
         return self._operations.resolve_reconciliation(
             workspace_id=current.workspace_id,
@@ -1781,7 +2036,7 @@ class DurableOperationWorker:
             failure=failure,
             now=deferred_at,
         )
-        return self._operations.defer_reconciliation(
+        deferred = self._operations.defer_reconciliation(
             workspace_id=operation.workspace_id,
             operation_id=operation.id,
             lease_token=lease_token,
@@ -1792,6 +2047,25 @@ class DurableOperationWorker:
             expected_reconciliation_attempt_count=(operation.reconciliation_attempt_count),
             now=deferred_at,
         )
+        return self._converge_terminal_failure(deferred)
+
+    def _converge_terminal_failure(
+        self,
+        operation: DurableOperation,
+    ) -> DurableOperation:
+        if operation.state != OperationState.FAILED:
+            return operation
+        error = operation.error or NormalizedOperationError(
+            code="OPERATION_FAILED",
+            category="operation",
+            message="operation reached a terminal failed state",
+            retryable=False,
+        )
+        self._execution.record_terminal_failure(
+            OperationExecutionRequest.from_operation(operation),
+            error,
+        )
+        return operation
 
     @staticmethod
     def _result_mismatch_error() -> NormalizedOperationError:

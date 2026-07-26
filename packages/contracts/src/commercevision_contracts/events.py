@@ -61,6 +61,10 @@ class CompatibleEventPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class StrictEventPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 class WorkflowRunRequestedPayload(CompatibleEventPayload):
     workflow_id: str = Field(min_length=1, max_length=36)
     action: Literal["start", "retry", "recover"]
@@ -115,6 +119,7 @@ class OperationRecoveryReason(StrEnum):
     EXPIRED_CLAIM = "EXPIRED_CLAIM"
     UNKNOWN_EXTERNAL_OUTCOME = "UNKNOWN_EXTERNAL_OUTCOME"
     RECONCILIATION_PENDING = "RECONCILIATION_PENDING"
+    TERMINAL_FAILURE = "TERMINAL_FAILURE"
 
 
 class OperationRecoveryRequestedPayload(CompatibleEventPayload):
@@ -148,7 +153,43 @@ class AssetValidationRequestedPayload(CompatibleEventPayload):
     asset_version_id: str = Field(min_length=1, max_length=36)
     object_fact_id: str = Field(min_length=1, max_length=36)
     integrity_policy_version: str = Field(min_length=1, max_length=64)
+    validation_policy_version: str | None = Field(default=None, min_length=1, max_length=64)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AssetValidationCompletedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    asset_id: str = Field(min_length=1, max_length=36)
+    asset_version_id: str = Field(min_length=1, max_length=36)
+    operation_id: str = Field(min_length=1, max_length=36)
+    attempt_number: int = Field(ge=1)
+    outcome: Literal["PENDING_RIGHTS", "PENDING_REVIEW"]
+    reason_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Z][A-Z0-9_]{0,63}$",
+    )
+
+
+class AssetValidationFailedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    asset_id: str = Field(min_length=1, max_length=36)
+    asset_version_id: str = Field(min_length=1, max_length=36)
+    operation_id: str = Field(min_length=1, max_length=36)
+    attempt_number: int = Field(
+        ge=0,
+        description=(
+            "Execution attempt that produced the terminal failure; zero means the "
+            "operation expired before its first execution claim."
+        ),
+    )
+    outcome: Literal["BLOCKED", "FAILED"]
+    reason_code: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Z][A-Z0-9_]{0,63}$",
+    )
 
 
 class UploadCleanupReason(StrEnum):
@@ -278,6 +319,20 @@ ASSET_VALIDATION_REQUESTED_V1 = EventContract(
     AssetValidationRequestedPayload,
     EventHandling.COMMAND,
 )
+ASSET_VALIDATION_COMPLETED_V1 = EventContract(
+    EventType.ASSET_VALIDATION_COMPLETED,
+    1,
+    EventQueue.ASSET,
+    AssetValidationCompletedPayload,
+    EventHandling.OBSERVATION,
+)
+ASSET_VALIDATION_FAILED_V1 = EventContract(
+    EventType.ASSET_VALIDATION_FAILED,
+    1,
+    EventQueue.ASSET,
+    AssetValidationFailedPayload,
+    EventHandling.OBSERVATION,
+)
 ASSET_DELETE_REQUESTED_V1 = EventContract(
     EventType.ASSET_DELETE_REQUESTED,
     1,
@@ -300,16 +355,8 @@ PHASE2_EVENT_CONTRACTS = (
     DEAD_LETTER_REPLAY_RECORDED_V1,
     ASSET_UPLOAD_FINALIZED_V1,
     ASSET_VALIDATION_REQUESTED_V1,
-    _phase2_contract(
-        EventType.ASSET_VALIDATION_COMPLETED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
-    _phase2_contract(
-        EventType.ASSET_VALIDATION_FAILED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
+    ASSET_VALIDATION_COMPLETED_V1,
+    ASSET_VALIDATION_FAILED_V1,
     _phase2_contract(
         EventType.ASSET_RIGHTS_CHANGED,
         EventQueue.ASSET,

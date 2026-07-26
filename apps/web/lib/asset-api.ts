@@ -1,5 +1,6 @@
 import type {
   AssetResponseV1,
+  AssetValidationStatusResponseV1,
   ErrorResponse,
   OperationResponseV1,
   PresignedUploadV1,
@@ -167,6 +168,12 @@ export class AssetApi {
   getAsset(assetId: string): Promise<AssetResponseV1> {
     return this.request<AssetResponseV1>(
       `/api/v1/assets/${encodeURIComponent(assetId)}`,
+    );
+  }
+
+  getAssetValidation(assetId: string): Promise<AssetValidationStatusResponseV1> {
+    return this.request<AssetValidationStatusResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/validation`,
     );
   }
 

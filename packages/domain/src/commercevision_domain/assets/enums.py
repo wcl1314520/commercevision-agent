@@ -43,6 +43,30 @@ class AssetObjectState(StrEnum):
     DELETED = "DELETED"
 
 
+class ValidationStage(StrEnum):
+    LOCAL_FORMAT = "LOCAL_FORMAT"
+    MALWARE = "MALWARE"
+    CONTENT_SAFETY = "CONTENT_SAFETY"
+    PROVENANCE = "PROVENANCE"
+    PROMOTION = "PROMOTION"
+
+
+class ValidationVerdict(StrEnum):
+    PASS = "PASS"
+    REVIEW = "REVIEW"
+    BLOCK = "BLOCK"
+    RETRYABLE_FAILURE = "RETRYABLE_FAILURE"
+    TERMINAL_FAILURE = "TERMINAL_FAILURE"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class ProvenanceStatus(StrEnum):
+    VERIFIED = "VERIFIED"
+    UNVERIFIED = "UNVERIFIED"
+    CONFLICTING = "CONFLICTING"
+    NOT_PRESENT = "NOT_PRESENT"
+
+
 class StorageLocationClass(StrEnum):
     QUARANTINE = "QUARANTINE"
     TASK = "TASK"

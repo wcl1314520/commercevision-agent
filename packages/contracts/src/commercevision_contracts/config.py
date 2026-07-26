@@ -7,7 +7,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 from urllib.parse import urlsplit
 
-from commercevision_domain import OperationKind, StorageLocationClass
+from commercevision_domain import (
+    AssetKind,
+    OperationKind,
+    RetentionClass,
+    StorageLocationClass,
+)
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -16,6 +21,9 @@ from pydantic_settings import (
     SettingsConfigDict,
     YamlConfigSettingsSource,
 )
+
+from .endpoint_identity import validate_canonical_endpoint_host
+from .workspace_identity import validate_workspace_id
 
 _FINALIZE_STORAGE_REQUEST_BOUND = 3
 
@@ -112,9 +120,171 @@ class Settings(BaseSettings):
     upload_max_image_pixels: int = Field(default=1280 * 1280, ge=1, le=1280 * 1280)
     upload_max_image_frames: int = Field(default=1, ge=1, le=100)
     upload_max_metadata_bytes: int = Field(default=256 * 1024, ge=1024, le=1024 * 1024)
+    upload_max_lora_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        ge=1,
+        le=512 * 1024 * 1024,
+    )
+    upload_max_prompt_template_bytes: int = Field(
+        default=256 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
+    upload_max_model_configuration_bytes: int = Field(
+        default=64 * 1024,
+        ge=1,
+        le=1024 * 1024,
+    )
     upload_policy_version: str = "direct-put-v1"
     upload_integrity_policy_version: str = "image-integrity-v1"
+    asset_validation_policy_version: str = "asset-validation-v1"
     asset_validation_max_attempts: int = Field(default=5, ge=1, le=50)
+    asset_retention_cleanup_version_page_size: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+    )
+    asset_retention_cleanup_max_version_pages: int = Field(
+        default=50,
+        ge=2,
+        le=1000,
+    )
+    asset_retention_cleanup_max_versions: int = Field(
+        default=1000,
+        ge=1,
+        le=100_000,
+    )
+    asset_retention_cleanup_stable_empty_passes: int = Field(
+        default=2,
+        ge=2,
+        le=10,
+    )
+    asset_validation_image_decoded_max_bytes: int = Field(
+        default=32 * 1024 * 1024,
+        ge=1,
+        le=256 * 1024 * 1024,
+    )
+    asset_validation_safetensors_header_max_bytes: int = Field(
+        default=1024 * 1024,
+        ge=8,
+        le=16 * 1024 * 1024,
+    )
+    asset_validation_safetensors_max_tensors: int = Field(
+        default=4096,
+        ge=1,
+        le=100_000,
+    )
+    asset_validation_safetensors_max_rank: int = Field(default=8, ge=1, le=32)
+    asset_validation_safetensors_max_dimension: int = Field(
+        default=1_000_000,
+        ge=1,
+        le=2_147_483_647,
+    )
+    asset_validation_safetensors_max_elements: int = Field(
+        default=100_000_000,
+        ge=1,
+        le=10_000_000_000,
+    )
+    asset_validation_json_maximum_depth: int = Field(default=32, ge=2, le=128)
+    asset_validation_json_maximum_nodes: int = Field(
+        default=10_000,
+        ge=16,
+        le=1_000_000,
+    )
+    asset_validation_content_reference_lifetime_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+    )
+    asset_malware_adapter: Literal["deterministic", "clamav"] = "deterministic"
+    clamav_host: str = "clamav"
+    clamav_port: int = Field(default=3310, ge=1, le=65535)
+    clamav_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    clamav_maximum_concurrency: int = Field(default=4, ge=1, le=128)
+    clamav_stream_max_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        ge=1,
+        le=512 * 1024 * 1024,
+    )
+    clamav_chunk_bytes: int = Field(default=64 * 1024, ge=1024, le=1024 * 1024)
+    clamav_maximum_response_bytes: int = Field(default=4096, ge=64, le=64 * 1024)
+    asset_content_safety_adapter: Literal["deterministic", "alibaba"] = "deterministic"
+    deterministic_content_safety_outcome: Literal["PASS", "REVIEW", "BLOCK"] = "PASS"
+    content_safety_policy_version: str = "content-safety-policy-v1"
+    content_safety_mapping_version: str = "content-safety-map-v1"
+    alibaba_content_safety_access_key_id: SecretStr | None = None
+    alibaba_content_safety_access_key_secret: SecretStr | None = None
+    alibaba_content_safety_endpoint: str = "green-cip.cn-shanghai.aliyuncs.com"
+    alibaba_content_safety_endpoint_region: str = "cn-shanghai"
+    alibaba_content_safety_service: str = "postImageCheckByVL_ec"
+    alibaba_content_safety_sdk_version: str = "3.2.4"
+    alibaba_content_safety_connect_timeout_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=30,
+    )
+    alibaba_content_safety_read_timeout_seconds: float = Field(
+        default=8.0,
+        gt=0,
+        le=60,
+    )
+    alibaba_content_safety_end_to_end_timeout_seconds: float = Field(
+        default=12.0,
+        gt=0,
+        le=120,
+    )
+    alibaba_content_safety_maximum_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=128,
+    )
+    alibaba_content_safety_minimum_url_validity_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        le=300,
+    )
+    alibaba_content_safety_allowed_url_origins: list[str] = Field(default_factory=list)
+    validation_data_transfer_enabled: bool = False
+    validation_data_transfer_policy_version: str = "validation-transfer-deny-v1"
+    validation_data_transfer_allowed_workspace_ids: list[str] = Field(default_factory=list)
+    validation_data_transfer_allowed_asset_kinds: list[AssetKind] = Field(default_factory=list)
+    validation_data_transfer_allowed_retention_classes: list[RetentionClass] = Field(
+        default_factory=list
+    )
+    validation_data_transfer_allowed_providers: list[str] = Field(default_factory=list)
+    validation_data_transfer_allowed_endpoint_regions: list[str] = Field(default_factory=list)
+    validation_data_transfer_allowed_endpoint_hosts: list[str] = Field(default_factory=list)
+    asset_provenance_adapter: Literal["deterministic", "c2pa"] = "deterministic"
+    deterministic_provenance_status: Literal[
+        "VERIFIED",
+        "UNVERIFIED",
+        "CONFLICTING",
+        "NOT_PRESENT",
+    ] = "NOT_PRESENT"
+    c2pa_trust_config_version: str = "c2pa-trust-v1"
+    c2pa_trust_anchors_pem: SecretStr | None = None
+    c2pa_trust_eku_policy: SecretStr | None = None
+    c2pa_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    c2pa_maximum_concurrency: int = Field(default=2, ge=1, le=64)
+    c2pa_maximum_report_bytes: int = Field(
+        default=1024 * 1024,
+        ge=1024,
+        le=16 * 1024 * 1024,
+    )
+    c2pa_maximum_report_depth: int = Field(default=32, ge=1, le=128)
+    c2pa_maximum_report_nodes: int = Field(default=50_000, ge=1, le=1_000_000)
+    c2pa_maximum_manifests: int = Field(default=128, ge=1, le=1024)
+    c2pa_maximum_status_codes: int = Field(default=64, ge=1, le=128)
+    c2pa_subprocess_memory_limit_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=64 * 1024 * 1024,
+        le=4 * 1024 * 1024 * 1024,
+    )
+    c2pa_subprocess_file_descriptor_limit: int = Field(
+        default=64,
+        ge=16,
+        le=1024,
+    )
 
     mysql_pool_size: int = Field(default=10, ge=1, le=100)
     mysql_max_overflow: int = Field(default=20, ge=0, le=200)
@@ -203,6 +373,15 @@ class Settings(BaseSettings):
         "object_store_role_session_name",
         "upload_policy_version",
         "upload_integrity_policy_version",
+        "asset_validation_policy_version",
+        "clamav_host",
+        "content_safety_policy_version",
+        "content_safety_mapping_version",
+        "alibaba_content_safety_endpoint_region",
+        "alibaba_content_safety_service",
+        "alibaba_content_safety_sdk_version",
+        "validation_data_transfer_policy_version",
+        "c2pa_trust_config_version",
         "worker_consumer_name",
         "worker_readiness_path",
         "workflow_queue_name",
@@ -215,6 +394,107 @@ class Settings(BaseSettings):
         normalized = value.strip()
         if not normalized:
             raise ValueError("queue and consumer identities must not be blank")
+        return normalized
+
+    @field_validator(
+        "content_safety_policy_version",
+        "content_safety_mapping_version",
+        "alibaba_content_safety_sdk_version",
+        "validation_data_transfer_policy_version",
+        "c2pa_trust_config_version",
+    )
+    @classmethod
+    def _validate_validation_identity_width(cls, value: str) -> str:
+        if len(value) > 64:
+            raise ValueError("validation policy and provider identities must not exceed 64 chars")
+        return value
+
+    @field_validator("validation_data_transfer_allowed_workspace_ids")
+    @classmethod
+    def _validate_transfer_workspaces(cls, value: list[str]) -> list[str]:
+        try:
+            validated = [validate_workspace_id(item) for item in value]
+        except ValueError as exc:
+            raise ValueError("validation data transfer workspace allowlist is invalid") from exc
+        if len(set(validated)) != len(validated):
+            raise ValueError("validation data transfer workspace allowlist must be unique")
+        return validated
+
+    @field_validator(
+        "validation_data_transfer_allowed_providers",
+        "validation_data_transfer_allowed_endpoint_regions",
+    )
+    @classmethod
+    def _validate_transfer_canonical_allowlists(
+        cls,
+        value: list[str],
+    ) -> list[str]:
+        normalized = [item.strip().lower() for item in value]
+        if any(not item or len(item) > 128 for item in normalized):
+            raise ValueError("validation data transfer allowlists contain invalid values")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("validation data transfer allowlists must be unique")
+        return normalized
+
+    @field_validator("validation_data_transfer_allowed_endpoint_hosts")
+    @classmethod
+    def _validate_transfer_endpoint_hosts(cls, value: list[str]) -> list[str]:
+        validated = [validate_canonical_endpoint_host(item) for item in value]
+        if len(set(validated)) != len(validated):
+            raise ValueError("validation data transfer endpoint hosts must be unique")
+        return validated
+
+    @field_validator(
+        "validation_data_transfer_allowed_asset_kinds",
+        "validation_data_transfer_allowed_retention_classes",
+    )
+    @classmethod
+    def _validate_transfer_enum_allowlists(cls, value: list[object]) -> list[object]:
+        if len(set(value)) != len(value):
+            raise ValueError("validation data transfer allowlists must be unique")
+        return value
+
+    @field_validator("clamav_host")
+    @classmethod
+    def _validate_validation_hostname(cls, value: str) -> str:
+        if (
+            not value.isascii()
+            or len(value) > 253
+            or "://" in value
+            or any(character in value for character in "/?#@")
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("validation dependency hostnames must be credential-free DNS names")
+        return value.lower()
+
+    @field_validator("alibaba_content_safety_endpoint")
+    @classmethod
+    def _validate_alibaba_endpoint_host(cls, value: str) -> str:
+        return validate_canonical_endpoint_host(value)
+
+    @field_validator("alibaba_content_safety_allowed_url_origins")
+    @classmethod
+    def _validate_content_safety_origins(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for origin in value:
+            parsed = urlsplit(origin)
+            try:
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError("content-safety origins must be valid HTTPS origins") from exc
+            if (
+                parsed.scheme.lower() != "https"
+                or parsed.hostname is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("content-safety origins must be credential-free HTTPS origins")
+            normalized.append(origin.rstrip("/"))
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("content-safety origins must be unique")
         return normalized
 
     @field_validator(
@@ -338,6 +618,11 @@ class Settings(BaseSettings):
             raise ValueError("worker message retry maximum must not be below the initial delay")
         if self.operation_retry_max_seconds < self.operation_retry_initial_seconds:
             raise ValueError("operation retry maximum must not be below the initial delay")
+        if (
+            self.asset_retention_cleanup_max_version_pages
+            < self.asset_retention_cleanup_stable_empty_passes
+        ):
+            raise ValueError("retention cleanup page budget must cover stable empty scans")
         minimum_retry_coverage = 0.0
         retry_base = self.operation_retry_initial_seconds
         for _ in range(self.upload_cleanup_max_attempts - 1):
@@ -495,6 +780,79 @@ class Settings(BaseSettings):
             and self.trusted_principal_current_key_id == self.trusted_principal_previous_key_id
         ):
             raise ValueError("trusted-principal current and previous key ids must be distinct")
+        if self.asset_malware_adapter == "clamav":
+            largest_upload = max(
+                self.upload_max_bytes,
+                self.upload_max_lora_bytes,
+                self.upload_max_prompt_template_bytes,
+                self.upload_max_model_configuration_bytes,
+            )
+            if self.clamav_stream_max_bytes < largest_upload:
+                raise ValueError("ClamAV StreamMaxLength must cover every upload byte limit")
+        alibaba_id = self.alibaba_content_safety_access_key_id
+        alibaba_secret = self.alibaba_content_safety_access_key_secret
+        if (alibaba_id is None) != (alibaba_secret is None):
+            raise ValueError("Alibaba content-safety credentials must be configured together")
+        if self.asset_content_safety_adapter == "alibaba":
+            if alibaba_id is None or alibaba_secret is None:
+                raise ValueError("Alibaba content-safety credentials are required")
+            if not self.alibaba_content_safety_allowed_url_origins:
+                raise ValueError("Alibaba content safety requires controlled HTTPS origins")
+            transport_budget = (
+                self.alibaba_content_safety_connect_timeout_seconds
+                + self.alibaba_content_safety_read_timeout_seconds
+            )
+            if self.alibaba_content_safety_end_to_end_timeout_seconds <= transport_budget:
+                raise ValueError("Alibaba content-safety deadline must exceed transport timeouts")
+            if (
+                self.alibaba_content_safety_minimum_url_validity_seconds
+                < self.alibaba_content_safety_end_to_end_timeout_seconds
+                or self.asset_validation_content_reference_lifetime_seconds
+                < self.alibaba_content_safety_minimum_url_validity_seconds
+            ):
+                raise ValueError(
+                    "content-safety URL lifetime must cover the full provider deadline"
+                )
+            if self.environment == "production":
+                transfer_allowlists = (
+                    self.validation_data_transfer_allowed_workspace_ids,
+                    self.validation_data_transfer_allowed_asset_kinds,
+                    self.validation_data_transfer_allowed_retention_classes,
+                    self.validation_data_transfer_allowed_providers,
+                    self.validation_data_transfer_allowed_endpoint_regions,
+                    self.validation_data_transfer_allowed_endpoint_hosts,
+                )
+                if (
+                    not self.validation_data_transfer_enabled
+                    or any(not allowlist for allowlist in transfer_allowlists)
+                    or "alibaba-green" not in self.validation_data_transfer_allowed_providers
+                    or AssetKind.IMAGE not in self.validation_data_transfer_allowed_asset_kinds
+                    or self.alibaba_content_safety_endpoint_region
+                    not in self.validation_data_transfer_allowed_endpoint_regions
+                    or self.alibaba_content_safety_endpoint
+                    not in self.validation_data_transfer_allowed_endpoint_hosts
+                ):
+                    raise ValueError(
+                        "production Alibaba requires an explicit enabled validation "
+                        "data transfer policy with exact allowlists"
+                    )
+        c2pa_anchors = self.c2pa_trust_anchors_pem
+        c2pa_eku = self.c2pa_trust_eku_policy
+        if (c2pa_anchors is None) != (c2pa_eku is None):
+            raise ValueError("C2PA trust anchors and EKU policy must be configured together")
+        if self.asset_provenance_adapter == "c2pa" and (c2pa_anchors is None or c2pa_eku is None):
+            raise ValueError("C2PA trust anchors and EKU policy are required")
+        if self.environment == "production" and self.worker_requires_asset_validation:
+            if OperationKind.ASSET_VALIDATION not in self.worker_required_operation_kinds:
+                raise ValueError("production Asset workers must require ASSET_VALIDATION")
+            if (
+                self.asset_malware_adapter != "clamav"
+                or self.asset_content_safety_adapter != "alibaba"
+                or self.asset_provenance_adapter != "c2pa"
+            ):
+                raise ValueError(
+                    "production Asset validation requires ClamAV, Alibaba, and C2PA adapters"
+                )
         return self
 
     @property
@@ -519,7 +877,16 @@ class Settings(BaseSettings):
 
     @property
     def worker_requires_object_storage(self) -> bool:
-        return self.maintenance_queue_name in self.configured_worker_queues
+        return bool(
+            {
+                self.asset_queue_name,
+                self.maintenance_queue_name,
+            }.intersection(self.configured_worker_queues)
+        )
+
+    @property
+    def worker_requires_asset_validation(self) -> bool:
+        return self.asset_queue_name in self.configured_worker_queues
 
     @classmethod
     def settings_customise_sources(

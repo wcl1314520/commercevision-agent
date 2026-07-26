@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "External model provider adapters"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "alibabacloud-green20220302==3.2.4",
+  "c2pa-python==0.36.0",
   "commercevision-contracts",
   "httpx>=0.28,<1",
 ]

@@ -39,7 +39,7 @@ from .asset_idempotency import (
     key_hash,
     replay_finalize,
 )
-from .asset_integrity import ImageUploadIntegrityVerifier, VerifiedUpload
+from .asset_integrity import UploadIntegrityVerifier, VerifiedUpload
 from .asset_ports import AssetUnitOfWorkFactory, AssetUnitOfWorkPort
 from .asset_registry_facts import (
     add_upload_audit,
@@ -64,7 +64,7 @@ class UploadFinalizeCoordinator:
         self,
         *,
         uow_factory: AssetUnitOfWorkFactory,
-        verifier: ImageUploadIntegrityVerifier,
+        verifier: UploadIntegrityVerifier,
         finalize_lease_duration: timedelta,
         validation_policy: AssetValidationPolicy,
         cleanup_policy: UploadCleanupPolicy,
@@ -334,6 +334,13 @@ class UploadFinalizeCoordinator:
                         category=upload_session.category,
                         role=upload_session.role,
                         integrity_policy_version=upload_session.integrity_policy_version,
+                        validation_policy_version=self._validation_policy.policy_version,
+                        validation_transfer_policy_version=(
+                            upload_session.validation_transfer_policy_version
+                        ),
+                        validation_transfer_policy_snapshot_sha256=(
+                            upload_session.validation_transfer_policy_snapshot_sha256
+                        ),
                         now=now,
                     )
                     asset = Asset.create_quarantined(
@@ -362,18 +369,9 @@ class UploadFinalizeCoordinator:
                         now=now,
                     )
                     operation = build_validation_operation(
+                        asset=asset,
                         asset_version=asset_version,
                         object_fact=object_fact,
-                        input_hash=canonical_hash(
-                            {
-                                "asset_version_id": asset_version.id,
-                                "content_sha256": asset_version.sha256,
-                                "integrity_policy_version": (
-                                    asset_version.integrity_policy_version
-                                ),
-                                "object_fact_id": object_fact.id,
-                            }
-                        ),
                         policy=self._validation_policy,
                         now=now,
                     )

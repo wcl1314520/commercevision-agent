@@ -195,6 +195,26 @@ Scheduler 通过另一共享 Anchor 获取 Cleanup 重协调参数，避免调�
 Upload Session Cleanup。Web BFF 的控制面 JSON 请求/响应分别硬限制为 1 MiB/2 MiB，并使用
 `CV_API_PROXY_TIMEOUT_MS` 覆盖连接、响应头和响应体读取；图片字节不经过 BFF。
 
+## Asset Validation
+
+Compose Worker 消费 `commercevision.asset` 并注册 `ASSET_VALIDATION` built-in Executor。
+四种支持的上传类型都在 Quarantine 内完成 local format、ClamAV 和适用的内容安全/C2PA
+stage；全部通过后才执行受控目标复核与源清理。Compose 使用真实 ClamAV，本地 Alibaba 与
+C2PA 使用 deterministic Adapter；production 配置会拒绝 deterministic Adapter。
+
+```powershell
+docker compose -f infra\compose\docker-compose.yml `
+  -f infra\compose\docker-compose.clamav-test.yml up -d --wait clamav
+docker compose -f infra\compose\docker-compose.yml `
+  -f infra\compose\docker-compose.clamav-test.yml ps clamav
+uv run pytest tests\integration\test_clamav_real.py -q
+```
+
+默认 Compose 不发布 ClamAV TCP 端口。显式测试 override 才固定绑定
+`127.0.0.1:13310`，且不读取 `CV_BIND_HOST`。完整配置、readiness、stuck quarantine、
+Provider throttling、Worker death、promotion recovery、指标和 DLQ 处置见
+[Asset Validation Runbook](../runbooks/asset-validation.md)。
+
 CI 中的 OSS Adapter Contract 使用确定性的 OSS SDK 协议替身，覆盖签名参数、版本 ID、
 不透明 ETag、受限读取、条件复制/删除、临时读取和错误归一化，不需要或保存云凭证。由于
 仓库没有可用的阿里云账号，Ticket 04 未执行真实 OSS 服务测试；生产上线前仍须在目标

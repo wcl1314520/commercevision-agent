@@ -122,6 +122,7 @@ Upload Session 是独立聚合，不是 Asset 的临时状态：
 - 文件名、声明 MIME、预期字节数和预期 SHA-256
 - 可选 Workflow/Product/SKU 复合归属
 - 上传策略版本和完整性策略版本
+- Validation Data Transfer Policy version 和 canonical snapshot SHA-256
 - 内部存储后端、隔离区逻辑位置、Bucket 和服务端生成 Key
 - 按保留类型预留的 Task/Foundation 目标位置、Bucket 和服务端生成 Key
 - `state`: `OPEN` / `FINALIZING` / `FINALIZED` / `EXPIRED` / `ABORTED`
@@ -155,6 +156,7 @@ Asset Version 创建后不可更新：
 - 文件名、SHA-256、字节数、声明/检测 MIME
 - 图片格式、宽、高和帧数
 - 品类、角色和完整性策略版本
+- Asset validation policy version、Validation Data Transfer Policy version 和 snapshot SHA-256
 - `created_at`
 
 `UNIQUE(upload_session_id)` 是一个 Upload Session 最多产生一个 Asset Version 的数据库
@@ -177,6 +179,21 @@ Asset Version 创建后不可更新：
 
 ETag 只用于对象存储条件操作，不能替代 SHA-256。所有 Asset 历史外键均为
 Workspace 前置复合外键和 `RESTRICT`。
+
+### `asset_validation_results`
+
+Validation Result 是 append-only evidence：
+
+- Workspace、Durable Operation、Asset Version 和精确 source Asset Object 身份
+- execution attempt、allowlisted stage、validator name/version 和 validation policy version
+- verdict、bounded reason code、Provider Version ID、不透明 ETag 和 lowercase SHA-256
+- stage-specific normalized `evidence_json`
+- Task retention deadline 和 `created_at`，均使用 `DATETIME(6)`
+
+唯一键限制同一 attempt/stage 只有一条事实，`UPDATE` trigger 阻止改写；Retention 清理仍可
+按治理策略 `DELETE`，数据库没有全局 no-delete trigger。外部内容安全 evidence 只保存
+Validation Data Transfer Policy version/snapshot、purpose、provider 和 region 等 allowlisted
+身份，不保存签名 URL、对象 Key、Secret 或 Provider 原始响应。
 
 ### `asset_rights`
 

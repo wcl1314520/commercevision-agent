@@ -209,6 +209,7 @@ class ReplayPreparationKind(StrEnum):
 class ReplayWorkKind(StrEnum):
     EXECUTION = "EXECUTION"
     RECONCILIATION = "RECONCILIATION"
+    TERMINAL_CONVERGENCE = "TERMINAL_CONVERGENCE"
 
 
 @dataclass(frozen=True, slots=True)

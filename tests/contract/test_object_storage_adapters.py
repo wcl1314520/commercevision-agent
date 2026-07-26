@@ -24,7 +24,9 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    DeleteMarkerRequest,
     ObjectReference,
+    ObjectVersionListRequest,
     PresignPutRequest,
     TemporaryReadRequest,
 )
@@ -136,9 +138,13 @@ class _S3Client:
         self.copy_collision: _StoredObject | None = None
         self.fail_stream = False
         self.last_read_version_id: str | None = None
+        self.head_version_ids: list[str | None] = []
         self.versioning_status: dict[str, str] = {}
         self.encryption_algorithm: dict[str, str | None] = {}
         self.readiness_calls: list[tuple[str, str]] = []
+        self.version_listing_pages: list[dict[str, object]] = []
+        self.version_listing_requests: list[dict[str, object]] = []
+        self.deleted_markers: list[tuple[str, str, str]] = []
 
     @staticmethod
     def _missing(operation: str) -> ClientError:
@@ -179,6 +185,7 @@ class _S3Client:
         Key: str,
         VersionId: str | None = None,
     ) -> dict[str, object]:
+        self.head_version_ids.append(VersionId)
         stored = self.objects.get((Bucket, Key))
         if stored is None:
             raise self._missing("HeadObject")
@@ -237,11 +244,17 @@ class _S3Client:
             metadata={str(name): str(value) for name, value in metadata.items()},
             version_id="copy-version-1",
         )
-        return {"CopyObjectResult": {"ETag": '"opaque-copy-etag"'}}
+        return {
+            "CopyObjectResult": {"ETag": '"opaque-copy-etag"'},
+            "VersionId": "copy-version-1",
+        }
 
     def delete_object(self, **params: object) -> dict[str, object]:
         bucket = str(params["Bucket"])
         key = str(params["Key"])
+        if "IfMatch" not in params:
+            self.deleted_markers.append((bucket, key, str(params["VersionId"])))
+            return {}
         stored = self.objects.get((bucket, key))
         if stored is None:
             raise self._missing("DeleteObject")
@@ -250,6 +263,12 @@ class _S3Client:
             raise self._precondition("DeleteObject")
         del self.objects[(bucket, key)]
         return {}
+
+    def list_object_versions(self, **params: object) -> dict[str, object]:
+        self.version_listing_requests.append(params)
+        if self.version_listing_pages:
+            return self.version_listing_pages.pop(0)
+        return {"Versions": [], "DeleteMarkers": [], "IsTruncated": False}
 
     def head_bucket(self, *, Bucket: str) -> dict[str, object]:
         self.readiness_calls.append(("head", Bucket))
@@ -336,6 +355,8 @@ def test_minio_adapter_contract_covers_bounded_read_copy_delete_and_temporary_re
         upload_session_id="019f8a00-0000-7000-8000-000000000001",
     )
     first_copy = storage.copy_if_absent(copy_request)
+    assert first_copy.reference.version_id == "copy-version-1"
+    assert client.head_version_ids[-1] == "copy-version-1"
     assert storage.copy_if_absent(copy_request).etag == first_copy.etag
     assert first_copy.metadata["upload-session-id"] == copy_request.upload_session_id
 
@@ -377,6 +398,54 @@ def test_minio_adapter_contract_covers_bounded_read_copy_delete_and_temporary_re
     assert storage.delete_if_match(
         ConditionalDeleteRequest(reference=destination, expected_etag=first_copy.etag)
     )
+    client.version_listing_pages = [
+        {
+            "Versions": [
+                {"Key": "task/destination", "VersionId": "version-3"},
+                {"Key": "task/destination-suffix", "VersionId": "other-version"},
+            ],
+            "DeleteMarkers": [{"Key": "task/destination", "VersionId": "delete-marker-2"}],
+            "IsTruncated": True,
+            "NextKeyMarker": "task/destination",
+            "NextVersionIdMarker": "delete-marker-2",
+        },
+        {
+            "Versions": [{"Key": "task/destination", "VersionId": "version-1"}],
+            "DeleteMarkers": [],
+            "IsTruncated": False,
+        },
+    ]
+    first_page = storage.list_versions(ObjectVersionListRequest(reference=destination, page_size=2))
+    assert [(entry.kind, entry.reference.version_id) for entry in first_page.entries] == [
+        ("OBJECT", "version-3"),
+        ("DELETE_MARKER", "delete-marker-2"),
+    ]
+    assert first_page.continuation_token is not None
+    second_page = storage.list_versions(
+        ObjectVersionListRequest(
+            reference=destination,
+            page_size=2,
+            continuation_token=first_page.continuation_token,
+        )
+    )
+    assert [entry.reference.version_id for entry in second_page.entries] == ["version-1"]
+    assert second_page.continuation_token is None
+    assert client.version_listing_requests[1]["KeyMarker"] == "task/destination"
+    assert client.version_listing_requests[1]["VersionIdMarker"] == "delete-marker-2"
+    with pytest.raises(StoragePreconditionError, match="continuation token"):
+        storage.list_versions(
+            ObjectVersionListRequest(
+                reference=destination,
+                page_size=2,
+                continuation_token="a",
+            )
+        )
+    assert storage.delete_marker(
+        DeleteMarkerRequest(
+            reference=destination.model_copy(update={"version_id": "delete-marker-2"})
+        )
+    )
+    assert client.deleted_markers == [("task", "task/destination", "delete-marker-2")]
     client.fail_stream = True
     with (
         pytest.raises(StorageUnavailableError),
@@ -668,6 +737,9 @@ class _OssBucket:
         self.versioning_status = "Enabled"
         self.encryption_algorithm: str | None = "AES256"
         self.readiness_calls: list[str] = []
+        self.version_listing_pages: list[SimpleNamespace] = []
+        self.version_listing_requests: list[dict[str, object]] = []
+        self.deleted_markers: list[tuple[str, str]] = []
 
     def get_bucket_versioning(self) -> SimpleNamespace:
         self.readiness_calls.append("versioning")
@@ -806,6 +878,13 @@ class _OssBucket:
         headers: dict[str, str] | None = None,
     ) -> SimpleNamespace:
         version_id = params.get("versionId") if params is not None else None
+        if (
+            headers is None
+            and version_id is not None
+            and (self.name, key, version_id) not in self.versions
+        ):
+            self.deleted_markers.append((key, version_id))
+            return SimpleNamespace(status=204)
         stored = (
             self.versions[(self.name, key, version_id)]
             if version_id is not None
@@ -820,6 +899,18 @@ class _OssBucket:
         else:
             del self.objects[(self.name, key)]
         return SimpleNamespace(status=204)
+
+    def list_object_versions(self, **params: object) -> SimpleNamespace:
+        self.version_listing_requests.append(params)
+        if self.version_listing_pages:
+            return self.version_listing_pages.pop(0)
+        return SimpleNamespace(
+            versions=[],
+            delete_marker=[],
+            is_truncated=False,
+            next_key_marker="",
+            next_versionid_marker="",
+        )
 
 
 def test_oss_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read() -> None:
@@ -978,6 +1069,57 @@ def test_oss_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read
             expected_etag=first_copy.etag,
         )
     )
+    task_client = clients[StorageLocationClass.TASK]
+    task_client.version_listing_pages = [
+        SimpleNamespace(
+            versions=[
+                SimpleNamespace(key="task/destination", versionid="version-3"),
+                SimpleNamespace(key="task/destination-suffix", versionid="other-version"),
+            ],
+            delete_marker=[SimpleNamespace(key="task/destination", versionid="delete-marker-2")],
+            is_truncated=True,
+            next_key_marker="task/destination",
+            next_versionid_marker="delete-marker-2",
+        ),
+        SimpleNamespace(
+            versions=[SimpleNamespace(key="task/destination", versionid="version-1")],
+            delete_marker=[],
+            is_truncated=False,
+            next_key_marker="",
+            next_versionid_marker="",
+        ),
+    ]
+    first_page = storage.list_versions(ObjectVersionListRequest(reference=destination, page_size=2))
+    assert [(entry.kind, entry.reference.version_id) for entry in first_page.entries] == [
+        ("OBJECT", "version-3"),
+        ("DELETE_MARKER", "delete-marker-2"),
+    ]
+    assert first_page.continuation_token is not None
+    second_page = storage.list_versions(
+        ObjectVersionListRequest(
+            reference=destination,
+            page_size=2,
+            continuation_token=first_page.continuation_token,
+        )
+    )
+    assert [entry.reference.version_id for entry in second_page.entries] == ["version-1"]
+    assert second_page.continuation_token is None
+    assert task_client.version_listing_requests[1]["key_marker"] == "task/destination"
+    assert task_client.version_listing_requests[1]["versionid_marker"] == "delete-marker-2"
+    with pytest.raises(StoragePreconditionError, match="continuation token"):
+        storage.list_versions(
+            ObjectVersionListRequest(
+                reference=destination,
+                page_size=2,
+                continuation_token="a",
+            )
+        )
+    assert storage.delete_marker(
+        DeleteMarkerRequest(
+            reference=destination.model_copy(update={"version_id": "delete-marker-2"})
+        )
+    )
+    assert task_client.deleted_markers == [("task/destination", "delete-marker-2")]
     clients[StorageLocationClass.QUARANTINE].fail_stream = True
     with (
         pytest.raises(StorageUnavailableError),

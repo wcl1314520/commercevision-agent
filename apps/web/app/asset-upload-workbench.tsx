@@ -10,28 +10,158 @@ import {
 } from "../lib/asset-api";
 import type { DurableOperationResponseV1 } from "../lib/asset-api";
 import type {
+  AssetKind,
   AssetResponseV1,
+  AssetValidationStageResponseV1,
+  AssetValidationStatusResponseV1,
   OperationState,
   UploadFinalizeResponseV1,
   UploadSessionCreateRequestV1,
   UploadSessionCreateResponseV1,
   UploadSessionResponseV1,
+  ValidationStage,
+  ValidationVerdict,
 } from "../lib/generated/catalog-api";
+import {
+  ASSET_UPLOAD_POLICIES,
+  declaredMimeForAsset,
+} from "../lib/asset-upload-policy";
 import {
   operationPollDelayMs,
   shouldContinueOperationPolling,
 } from "../lib/operation-polling";
 import { useUploadWorkflow } from "../lib/use-upload-workflow";
 import type { PersistedSessionUpload } from "../lib/upload-workflow";
+import { validationPresentation } from "../lib/validation-presentation";
 
 const api = new AssetApi();
-const MAXIMUM_IMAGE_BYTES = 10 * 1024 * 1024;
-const SUPPORTED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const TERMINAL_OPERATION_STATES = new Set<OperationState>([
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
 ]);
+const ASSET_KIND_LABELS: Record<AssetKind, string> = {
+  IMAGE: "商品图片",
+  LORA: "LoRA",
+  PROMPT_TEMPLATE: "提示词模板",
+  MODEL_CONFIGURATION: "模型配置",
+};
+const ROLE_OPTIONS: Record<AssetKind, Array<{ label: string; value: string }>> = {
+  IMAGE: [
+    { label: "商品主图", value: "product-primary" },
+    { label: "商品参考图", value: "product-reference" },
+  ],
+  LORA: [{ label: "生成 LoRA", value: "generation-lora" }],
+  PROMPT_TEMPLATE: [
+    { label: "生成提示词", value: "generation-prompt-template" },
+  ],
+  MODEL_CONFIGURATION: [
+    { label: "生成模型配置", value: "generation-model-configuration" },
+  ],
+};
+
+function formatByteSize(byteSize: number): string {
+  if (byteSize >= 1024 * 1024) {
+    return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (byteSize >= 1024) {
+    return `${(byteSize / 1024).toFixed(1)} KB`;
+  }
+  return `${byteSize} B`;
+}
+const VALIDATION_STAGE_LABELS: Record<ValidationStage, string> = {
+  LOCAL_FORMAT: "本地格式",
+  MALWARE: "恶意软件",
+  CONTENT_SAFETY: "内容安全",
+  PROVENANCE: "来源凭证",
+  PROMOTION: "受控存储",
+};
+const VALIDATION_VERDICT_LABELS: Record<ValidationVerdict, string> = {
+  PASS: "通过",
+  REVIEW: "待复核",
+  BLOCK: "拒绝",
+  RETRYABLE_FAILURE: "待重试",
+  TERMINAL_FAILURE: "系统失败",
+  NOT_APPLICABLE: "不适用",
+};
+
+function scalarEvidence(
+  evidence: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = evidence[key];
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+    ? String(value)
+    : null;
+}
+
+function stageEvidenceSummary(stage: AssetValidationStageResponseV1): string[] {
+  const evidence = stage.evidence;
+  const facts =
+    typeof evidence.facts === "object" && evidence.facts !== null
+      ? (evidence.facts as Record<string, unknown>)
+      : {};
+  switch (stage.stage) {
+    case "LOCAL_FORMAT": {
+      const dimensions =
+        scalarEvidence(facts, "width") && scalarEvidence(facts, "height")
+          ? `${scalarEvidence(facts, "width")} × ${scalarEvidence(facts, "height")}`
+          : null;
+      return [
+        scalarEvidence(evidence, "format_name"),
+        scalarEvidence(evidence, "detected_mime"),
+        dimensions,
+        scalarEvidence(facts, "tensor_count")
+          ? `${scalarEvidence(facts, "tensor_count")} tensors`
+          : null,
+        scalarEvidence(facts, "schema_version"),
+      ].filter((value): value is string => value !== null);
+    }
+    case "MALWARE":
+      return [
+        scalarEvidence(evidence, "outcome"),
+        scalarEvidence(evidence, "scanner_version"),
+        scalarEvidence(evidence, "signature"),
+      ].filter((value): value is string => value !== null);
+    case "CONTENT_SAFETY": {
+      const labels = Array.isArray(evidence.labels)
+        ? evidence.labels
+            .map((label) =>
+              typeof label === "object" &&
+              label !== null &&
+              typeof (label as Record<string, unknown>).code === "string"
+                ? String((label as Record<string, unknown>).code)
+                : null,
+            )
+            .filter((value): value is string => value !== null)
+        : [];
+      return [
+        scalarEvidence(evidence, "outcome"),
+        scalarEvidence(evidence, "risk_level"),
+        ...labels,
+      ].filter((value): value is string => value !== null);
+    }
+    case "PROVENANCE":
+      return [
+        scalarEvidence(evidence, "status"),
+        scalarEvidence(evidence, "validation_state"),
+        scalarEvidence(evidence, "manifest_count")
+          ? `${scalarEvidence(evidence, "manifest_count")} manifests`
+          : null,
+      ].filter((value): value is string => value !== null);
+    case "PROMOTION":
+      return [
+        scalarEvidence(evidence, "destination_verified") === "true"
+          ? "目标已核验"
+          : null,
+        scalarEvidence(evidence, "source_deleted") === "true"
+          ? "隔离副本已清理"
+          : null,
+      ].filter((value): value is string => value !== null);
+  }
+}
 
 function uploadMessage(error: unknown): string {
   if (error instanceof AssetApiError) {
@@ -91,6 +221,7 @@ export function AssetUploadWorkbench({
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [assetKind, setAssetKind] = useState<AssetKind>("IMAGE");
   const [role, setRole] = useState("product-primary");
   const [session, setSession] = useState<UploadSessionResponseV1 | null>(null);
   const [asset, setAsset] = useState<AssetResponseV1 | null>(null);
@@ -101,6 +232,10 @@ export function AssetUploadWorkbench({
     useState<UploadSessionCreateResponseV1 | null>(null);
   const [validationOperation, setValidationOperation] =
     useState<DurableOperationResponseV1 | null>(null);
+  const [validationStatus, setValidationStatus] =
+    useState<AssetValidationStatusResponseV1 | null>(null);
+  const [validationControlError, setValidationControlError] =
+    useState<string | null>(null);
   const [operationPollingPaused, setOperationPollingPaused] = useState(false);
   const [operationPollingEpoch, setOperationPollingEpoch] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -118,6 +253,7 @@ export function AssetUploadWorkbench({
       setFinalized(result);
       setSession(result.upload_session);
       setAsset(result.asset);
+      setAssetKind(result.upload_session.asset_kind);
       transition(current, {
         type: "FINALIZED",
         sessionId: result.upload_session.id,
@@ -204,11 +340,17 @@ export function AssetUploadWorkbench({
     setFinalized(null);
     setCreatedSession(null);
     setValidationOperation(null);
+    setValidationStatus(null);
+    setValidationControlError(null);
     setProgress(0);
     setError(null);
     setBusy("recover");
     const current = loadPersisted();
-    setRole(current?.createRequest?.role ?? "product-primary");
+    const recoveredKind = current?.createRequest?.asset_kind ?? "IMAGE";
+    setAssetKind(recoveredKind);
+    setRole(
+      current?.createRequest?.role ?? ROLE_OPTIONS[recoveredKind][0].value,
+    );
     if (!current) {
       setBusy(null);
       return () => {
@@ -255,6 +397,8 @@ export function AssetUploadWorkbench({
         const recoveredSession = await api.getUploadSession(current.sessionId);
         if (!active) return;
         setSession(recoveredSession);
+        setAssetKind(recoveredSession.asset_kind);
+        setRole(recoveredSession.role);
         if (recoveredSession.status === "FINALIZED") {
           const recoveredAsset = await api.getAsset(
             recoveredSession.reserved_asset_id,
@@ -295,11 +439,18 @@ export function AssetUploadWorkbench({
     [previewUrl],
   );
 
+  const validationAssetId =
+    asset?.id ??
+    finalized?.asset.id ??
+    (session?.status === "FINALIZED" ? session.reserved_asset_id : null);
+
   useEffect(() => {
     const operationId = session?.validation_operation_id;
     setValidationOperation(null);
+    setValidationStatus(null);
+    setValidationControlError(null);
     setOperationPollingPaused(false);
-    if (!operationId) return;
+    if (!operationId || !validationAssetId) return;
 
     let active = true;
     let completedRequests = 0;
@@ -316,16 +467,36 @@ export function AssetUploadWorkbench({
     };
     const poll = async () => {
       try {
-        const operation = await api.getOperation(operationId);
+        let operationState: OperationState;
+        try {
+          const projection = await api.getAssetValidation(validationAssetId);
+          if (!active) return;
+          setValidationStatus(projection);
+          setValidationControlError(null);
+          operationState = projection.operation.state;
+        } catch (projectionError) {
+          if (
+            !(projectionError instanceof AssetApiError) ||
+            projectionError.status !== 404
+          ) {
+            throw projectionError;
+          }
+          const operation = await api.getOperation(operationId);
+          if (!active) return;
+          setValidationOperation(operation);
+          setValidationControlError(null);
+          operationState = operation.state;
+        }
         completedRequests += 1;
-        if (!active) return;
-        setValidationOperation(operation);
-        if (!TERMINAL_OPERATION_STATES.has(operation.state)) {
+        if (!TERMINAL_OPERATION_STATES.has(operationState)) {
           scheduleNextPoll();
         }
-      } catch {
+      } catch (requestError) {
         completedRequests += 1;
-        if (active) scheduleNextPoll();
+        if (active) {
+          setValidationControlError(uploadMessage(requestError));
+          scheduleNextPoll();
+        }
       }
     };
     void poll();
@@ -334,7 +505,11 @@ export function AssetUploadWorkbench({
       active = false;
       if (nextPoll) clearTimeout(nextPoll);
     };
-  }, [operationPollingEpoch, session?.validation_operation_id]);
+  }, [
+    operationPollingEpoch,
+    session?.validation_operation_id,
+    validationAssetId,
+  ]);
 
   const selectFile = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0] ?? null;
@@ -345,20 +520,28 @@ export function AssetUploadWorkbench({
       setPreviewUrl(null);
       return;
     }
-    if (!SUPPORTED_MIME_TYPES.has(selected.type)) {
+    try {
+      declaredMimeForAsset(assetKind, selected);
+    } catch (selectionError) {
       setFile(null);
       setPreviewUrl(null);
-      setError("仅支持 JPEG、PNG 和 WebP 图片。");
-      return;
-    }
-    if (selected.size < 1 || selected.size > MAXIMUM_IMAGE_BYTES) {
-      setFile(null);
-      setPreviewUrl(null);
-      setError("图片大小必须在 1 字节到 10 MB 之间。");
+      setError(uploadMessage(selectionError));
       return;
     }
     setFile(selected);
-    setPreviewUrl(URL.createObjectURL(selected));
+    setPreviewUrl(
+      assetKind === "IMAGE" ? URL.createObjectURL(selected) : null,
+    );
+  };
+
+  const changeAssetKind = (nextKind: AssetKind) => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setAssetKind(nextKind);
+    setRole(ROLE_OPTIONS[nextKind][0].value);
+    setFile(null);
+    setPreviewUrl(null);
+    setError(null);
+    setProgress(0);
   };
 
   const clearLocalUpload = () => {
@@ -368,6 +551,8 @@ export function AssetUploadWorkbench({
     setPreviewUrl(null);
     setSession(null);
     setCreatedSession(null);
+    setAssetKind("IMAGE");
+    setRole(ROLE_OPTIONS.IMAGE[0].value);
     setProgress(0);
     setError(null);
     setBusy(null);
@@ -420,6 +605,7 @@ export function AssetUploadWorkbench({
     setError(null);
     setProgress(0);
     try {
+      const declaredMime = declaredMimeForAsset(assetKind, file);
       const checksum = await sha256Hex(file);
       let created: UploadSessionCreateResponseV1;
       let current: PersistedSessionUpload;
@@ -466,9 +652,9 @@ export function AssetUploadWorkbench({
       } else {
         const createRequest: UploadSessionCreateRequestV1 = {
           retention_class: "FOUNDATION",
-          asset_kind: "IMAGE",
+          asset_kind: assetKind,
           filename: file.name,
-          declared_mime: file.type,
+          declared_mime: declaredMime,
           byte_length: file.size,
           sha256: checksum,
           workflow_id: null,
@@ -502,8 +688,9 @@ export function AssetUploadWorkbench({
       }
       if (
         current.createRequest &&
-        (current.createRequest.filename !== file.name ||
-          current.createRequest.declared_mime !== file.type ||
+        (current.createRequest.asset_kind !== assetKind ||
+          current.createRequest.filename !== file.name ||
+          current.createRequest.declared_mime !== declaredMime ||
           current.createRequest.byte_length !== file.size ||
           current.createRequest.sha256 !== checksum)
       ) {
@@ -535,8 +722,15 @@ export function AssetUploadWorkbench({
   };
 
   const operationState =
-    validationOperation?.state ?? finalized?.validation_operation.state ?? null;
+    validationStatus?.operation.state ??
+    validationOperation?.state ??
+    finalized?.validation_operation.state ??
+    null;
   const displayAsset = asset ?? finalized?.asset ?? null;
+  const validationView = validationPresentation(
+    validationStatus,
+    operationState,
+  );
   const canRetryFinalize =
     persisted !== null &&
       persisted.stage !== "CREATING" &&
@@ -547,8 +741,14 @@ export function AssetUploadWorkbench({
       persisted.stage === "FINALIZING");
   const dimensions = useMemo(() => {
     const version = displayAsset?.current_version;
-    return version ? `${version.width} × ${version.height}` : null;
+    return version?.width !== null &&
+      version?.width !== undefined &&
+      version.height !== null &&
+      version.height !== undefined
+      ? `${version.width} × ${version.height}`
+      : null;
   }, [displayAsset]);
+  const uploadPolicy = ASSET_UPLOAD_POLICIES[assetKind];
 
   return (
     <section className="panel asset-upload-panel" aria-labelledby="asset-upload-heading">
@@ -568,23 +768,57 @@ export function AssetUploadWorkbench({
             // The preview is a short-lived local object URL and never traverses the API.
             // eslint-disable-next-line @next/next/no-img-element
             <img alt={file?.name ?? "待上传图片"} src={previewUrl} />
+          ) : file ? (
+            <div className="asset-fact">
+              <strong>{file.name}</strong>
+              <span>{ASSET_KIND_LABELS[assetKind]}</span>
+              <span>{formatByteSize(file.size)}</span>
+            </div>
           ) : displayAsset?.current_version ? (
             <div className="asset-fact">
               <strong>{displayAsset.current_version.filename}</strong>
-              <span>{dimensions}</span>
-              <span>{displayAsset.current_version.image_format}</span>
+              <span>{ASSET_KIND_LABELS[displayAsset.asset_kind]}</span>
+              <span>
+                {dimensions ??
+                  formatByteSize(displayAsset.current_version.byte_size)}
+              </span>
+              <span>
+                {displayAsset.current_version.image_format ??
+                  displayAsset.current_version.detected_mime ??
+                  displayAsset.current_version.declared_mime}
+              </span>
             </div>
           ) : (
-            <span className="muted">未选择图片</span>
+            <span className="muted">未选择文件</span>
           )}
         </div>
 
         <div className="asset-upload-controls">
           <label>
-            <span>商品图片</span>
+            <span>资产类型</span>
+            <select
+              disabled={
+                busy !== null ||
+                persisted?.stage === "CREATING" ||
+                persisted?.stage === "OPEN"
+              }
+              onChange={(event) =>
+                changeAssetKind(event.target.value as AssetKind)
+              }
+              value={assetKind}
+            >
+              <option value="IMAGE">商品图片</option>
+              <option value="LORA">LoRA</option>
+              <option value="PROMPT_TEMPLATE">提示词模板</option>
+              <option value="MODEL_CONFIGURATION">模型配置</option>
+            </select>
+          </label>
+          <label>
+            <span>{uploadPolicy.label}</span>
             <input
-              accept="image/jpeg,image/png,image/webp"
+              accept={uploadPolicy.accept}
               disabled={busy !== null || persisted?.stage === "CREATING"}
+              key={assetKind}
               onChange={selectFile}
               type="file"
             />
@@ -600,8 +834,11 @@ export function AssetUploadWorkbench({
               onChange={(event) => setRole(event.target.value)}
               value={role}
             >
-              <option value="product-primary">商品主图</option>
-              <option value="product-reference">商品参考图</option>
+              {ROLE_OPTIONS[assetKind].map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           {busy === "upload" || progress > 0 ? (
@@ -678,6 +915,86 @@ export function AssetUploadWorkbench({
             </dd>
           </div>
         </dl>
+      ) : null}
+      {validationStatus?.stages.length ? (
+        <section
+          aria-labelledby="asset-validation-heading"
+          className="asset-validation"
+        >
+          <div className="asset-validation-heading">
+            <h3 id="asset-validation-heading">素材校验</h3>
+            <span>{validationStatus.validation_policy_version}</span>
+          </div>
+          <ol className="validation-stages">
+            {validationStatus.stages.map((stage) => {
+              const summary = stageEvidenceSummary(stage);
+              return (
+                <li
+                  className={`validation-stage validation-stage-${stage.verdict}`}
+                  key={stage.id}
+                >
+                  <div>
+                    <strong>{VALIDATION_STAGE_LABELS[stage.stage]}</strong>
+                    <span>{VALIDATION_VERDICT_LABELS[stage.verdict]}</span>
+                  </div>
+                  <p>
+                    {summary.length
+                      ? summary.join(" · ")
+                      : stage.reason_code ?? stage.validator_name}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ) : null}
+      {validationView.kind === "retryable" ? (
+        <div className="validation-banner validation-banner-retryable" role="status">
+          <strong>校验暂时中断</strong>
+          <span>
+            系统将自动重试
+            {validationView.reason
+              ? `（${validationView.reason}）`
+              : ""}
+          </span>
+        </div>
+      ) : null}
+      {validationView.kind === "review" ? (
+        <div className="validation-banner validation-banner-review" role="status">
+          <strong>等待人工复核</strong>
+          <span>{validationView.reason ?? "素材将在复核完成后继续流转。"}</span>
+        </div>
+      ) : null}
+      {validationView.kind === "rejected" ? (
+        <div className="validation-banner validation-banner-rejected" role="alert">
+          <strong>素材未通过校验</strong>
+          <span>
+            {validationView.reason ??
+              "该素材不能进入可用资产库。"}
+            {validationView.cleanup_retrying
+              ? `；隔离文件清理正在自动重试${
+                  validationView.cleanup_reason
+                    ? `（${validationView.cleanup_reason}）`
+                    : ""
+                }`
+              : ""}
+          </span>
+        </div>
+      ) : null}
+      {validationView.kind === "failed" ? (
+        <div className="validation-banner validation-banner-failed" role="alert">
+          <strong>校验无法完成</strong>
+          <span>
+            系统未能完成该素材的校验
+            {validationView.reason ? `（${validationView.reason}）` : "。"}
+          </span>
+        </div>
+      ) : null}
+      {validationControlError ? (
+        <div className="validation-banner validation-banner-control" role="alert">
+          <strong>无法读取校验状态</strong>
+          <span>{validationControlError}</span>
+        </div>
       ) : null}
       {error ? (
         <div className="error-banner" role="alert">

@@ -64,11 +64,7 @@ class OperationRecoveryService:
                 record_terminal_operation_failure(uow, operation, now=scanned_at)
                 if (
                     reason is not None
-                    and operation.state
-                    in {
-                        OperationState.RETRYABLE_FAILED,
-                        OperationState.RECONCILING,
-                    }
+                    and self._can_emit_recovery(operation, reason=reason)
                     and operation.recovery_generation == operation.recovery_consumed_generation
                     and not uow.outbox.has_unpublished(
                         aggregate_id=operation.id,
@@ -87,7 +83,7 @@ class OperationRecoveryService:
                     emitted += 1
                 if operation.version != original_version:
                     uow.operations.save(operation)
-                if expired_claim_token is not None:
+                if expired_claim_token is not None and operation.state != OperationState.FAILED:
                     uow.dead_letters.complete_claimed_replays(
                         operation_id=operation.id,
                         claim_token=expired_claim_token,
@@ -96,6 +92,19 @@ class OperationRecoveryService:
                     )
             uow.commit()
         return emitted
+
+    @staticmethod
+    def _can_emit_recovery(
+        operation: DurableOperation,
+        *,
+        reason: OperationRecoveryReason,
+    ) -> bool:
+        if reason == OperationRecoveryReason.TERMINAL_FAILURE:
+            return operation.state == OperationState.FAILED
+        return operation.state in {
+            OperationState.RETRYABLE_FAILED,
+            OperationState.RECONCILING,
+        }
 
     @staticmethod
     def _prepare_recovery(
@@ -110,6 +119,8 @@ class OperationRecoveryService:
                 reconciliation_deadline_at=now + reconciliation_max_elapsed,
                 now=now,
             )
+            if operation.state == OperationState.FAILED:
+                return OperationRecoveryReason.TERMINAL_FAILURE
             return (
                 OperationRecoveryReason.EXPIRED_CLAIM
                 if operation.state == OperationState.RETRYABLE_FAILED
@@ -130,7 +141,7 @@ class OperationRecoveryService:
                     error=operation.error or _reconciliation_exhausted_error(),
                     now=now,
                 )
-                return None
+                return OperationRecoveryReason.TERMINAL_FAILURE
             return OperationRecoveryReason.RECONCILIATION_PENDING
         return None
 

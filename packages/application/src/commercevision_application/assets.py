@@ -8,6 +8,9 @@ from datetime import UTC, datetime, timedelta
 
 from commercevision_contracts import (
     AssetResponseV1,
+    AssetValidationOperationResponseV1,
+    AssetValidationStageResponseV1,
+    AssetValidationStatusResponseV1,
     PresignedUploadV1,
     UploadFinalizeResponseV1,
     UploadSessionCreateRequestV1,
@@ -15,7 +18,12 @@ from commercevision_contracts import (
     UploadSessionMutationRequestV1,
     UploadSessionResponseV1,
 )
-from commercevision_contracts.assets import SUPPORTED_IMAGE_MIME_TYPES
+from commercevision_contracts.assets import (
+    IMAGE_MAX_BYTES,
+    LORA_MAX_BYTES,
+    MODEL_CONFIGURATION_MAX_BYTES,
+    PROMPT_TEMPLATE_MAX_BYTES,
+)
 from commercevision_contracts.object_storage import (
     ObjectReference,
     ObjectStorage,
@@ -24,11 +32,11 @@ from commercevision_contracts.object_storage import (
 from commercevision_domain import (
     AssetKind,
     ConcurrencyError,
+    DataIntegrityError,
     NotFoundError,
     ObjectMismatchError,
     RetentionClass,
     StorageLocationClass,
-    UnsupportedAssetKindError,
     UploadAbortedError,
     UploadExpiredError,
     UploadSession,
@@ -57,7 +65,7 @@ from .asset_idempotency import (
 from .asset_idempotency import (
     key_hash as hash_idempotency_key,
 )
-from .asset_integrity import ImageUploadIntegrityVerifier
+from .asset_integrity import UploadIntegrityVerifier
 from .asset_ports import AssetUnitOfWorkFactory, AssetUnitOfWorkPort
 from .asset_registry_facts import (
     add_upload_audit,
@@ -71,6 +79,12 @@ from .asset_registry_facts import (
     retention_deadline as resolve_retention_deadline,
 )
 from .asset_validation_dispatch import AssetValidationPolicy
+from .asset_validation_target import (
+    AssetValidationTargetBinder,
+    AssetValidationTargetError,
+)
+from .asset_validation_transfer import ValidationDataTransferPolicy
+from .operations import OperationExecutionRequest
 
 
 class AssetRegistryApplicationService:
@@ -79,7 +93,7 @@ class AssetRegistryApplicationService:
         *,
         uow_factory: AssetUnitOfWorkFactory,
         storage: ObjectStorage,
-        verifier: ImageUploadIntegrityVerifier,
+        verifier: UploadIntegrityVerifier,
         quarantine_bucket: str,
         task_bucket: str,
         foundation_bucket: str,
@@ -88,7 +102,11 @@ class AssetRegistryApplicationService:
         upload_policy_version: str,
         integrity_policy_version: str,
         maximum_bytes: int,
+        maximum_lora_bytes: int = LORA_MAX_BYTES,
+        maximum_prompt_template_bytes: int = PROMPT_TEMPLATE_MAX_BYTES,
+        maximum_model_configuration_bytes: int = MODEL_CONFIGURATION_MAX_BYTES,
         validation_policy: AssetValidationPolicy,
+        validation_transfer_policy: ValidationDataTransferPolicy | None = None,
         cleanup_policy: UploadCleanupPolicy,
         lease_owner: str,
         clock: Callable[[], datetime] | None = None,
@@ -103,6 +121,7 @@ class AssetRegistryApplicationService:
             raise ValueError("Asset storage buckets must not be blank")
         self._uow_factory = uow_factory
         self._storage = storage
+        self._validation_target_binder = AssetValidationTargetBinder(uow_factory=uow_factory)
         self._finalizer = UploadFinalizeCoordinator(
             uow_factory=uow_factory,
             verifier=verifier,
@@ -120,8 +139,22 @@ class AssetRegistryApplicationService:
         self._upload_session_lifetime = upload_session_lifetime
         self._upload_policy_version = upload_policy_version
         self._integrity_policy_version = integrity_policy_version
-        self._maximum_bytes = maximum_bytes
+        self._maximum_bytes_by_kind = {
+            AssetKind.IMAGE: min(maximum_bytes, IMAGE_MAX_BYTES),
+            AssetKind.LORA: min(maximum_lora_bytes, LORA_MAX_BYTES),
+            AssetKind.PROMPT_TEMPLATE: min(
+                maximum_prompt_template_bytes,
+                PROMPT_TEMPLATE_MAX_BYTES,
+            ),
+            AssetKind.MODEL_CONFIGURATION: min(
+                maximum_model_configuration_bytes,
+                MODEL_CONFIGURATION_MAX_BYTES,
+            ),
+        }
         self._cleanup_policy = cleanup_policy
+        self._validation_transfer_policy = (
+            validation_transfer_policy or ValidationDataTransferPolicy.deny_all()
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def create_upload_session(
@@ -202,6 +235,10 @@ class AssetRegistryApplicationService:
                     role=request.role,
                     upload_policy_version=self._upload_policy_version,
                     integrity_policy_version=self._integrity_policy_version,
+                    validation_transfer_policy_version=(self._validation_transfer_policy.version),
+                    validation_transfer_policy_snapshot_sha256=(
+                        self._validation_transfer_policy.snapshot_sha256
+                    ),
                     storage_backend=self._storage.backend,
                     storage_bucket=self._quarantine_bucket,
                     storage_key=self._new_quarantine_key(
@@ -380,6 +417,86 @@ class AssetRegistryApplicationService:
         version_response = asset_version_response(asset_version, object_fact)
         return asset_response(asset, current_version=version_response)
 
+    def get_asset_validation(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+    ) -> AssetValidationStatusResponseV1:
+        validate_workspace_id(workspace_id)
+        asset_id = canonicalize_resource_id(asset_id, resource="Asset")
+        with self._uow_factory() as uow:
+            asset = uow.assets.get(workspace_id=workspace_id, asset_id=asset_id)
+            if asset is None:
+                raise NotFoundError(f"Asset {asset_id} was not found")
+            asset_version = uow.assets.get_version(
+                workspace_id=workspace_id,
+                asset_version_id=asset.current_version_id,
+            )
+            if asset_version is None:
+                raise DataIntegrityError("Asset current version is missing")
+            upload_session = uow.upload_sessions.get(
+                workspace_id=workspace_id,
+                upload_session_id=asset_version.upload_session_id,
+            )
+            if upload_session is None or upload_session.validation_operation_id is None:
+                raise DataIntegrityError("Asset validation operation binding is missing")
+            operation = uow.operations.get(
+                upload_session.validation_operation_id,
+                workspace_id=workspace_id,
+            )
+            if operation is None:
+                raise DataIntegrityError("Asset validation operation binding is invalid")
+
+        try:
+            target = self._validation_target_binder.load_historical(
+                OperationExecutionRequest.from_operation(operation)
+            )
+        except AssetValidationTargetError as exc:
+            raise DataIntegrityError("Asset validation operation binding is invalid") from exc
+
+        with self._uow_factory() as uow:
+            results = uow.assets.list_validation_results(
+                workspace_id=workspace_id,
+                asset_version_id=target.asset_version.id,
+            )
+
+        asset = target.asset
+        asset_version = target.asset_version
+        operation_error = operation.error
+        return AssetValidationStatusResponseV1(
+            asset_id=asset.id,
+            asset_version_id=asset_version.id,
+            asset_status=asset.status,
+            validation_policy_version=asset_version.validation_policy_version,
+            operation=AssetValidationOperationResponseV1(
+                id=operation.id,
+                state=operation.state,
+                attempt_count=operation.attempt_count,
+                max_attempts=operation.max_attempts,
+                next_attempt_at=operation.next_attempt_at,
+                retryable=operation_error.retryable if operation_error else False,
+                failure_code=operation_error.code if operation_error else None,
+                failure_category=operation_error.category if operation_error else None,
+                completed_at=operation.completed_at,
+            ),
+            stages=[
+                AssetValidationStageResponseV1(
+                    id=result.id,
+                    attempt_number=result.attempt_number,
+                    stage=result.stage,
+                    verdict=result.verdict,
+                    reason_code=result.reason_code,
+                    validator_name=result.validator_name,
+                    validator_version=result.validator_version,
+                    policy_version=result.policy_version,
+                    evidence=result.evidence_dict(),
+                    created_at=result.created_at,
+                )
+                for result in results
+            ],
+        )
+
     def _create_response(
         self,
         upload_session: UploadSession,
@@ -455,13 +572,7 @@ class AssetRegistryApplicationService:
         return retention_deadline
 
     def _validate_upload_request(self, request: UploadSessionCreateRequestV1) -> None:
-        if request.asset_kind != AssetKind.IMAGE:
-            raise UnsupportedAssetKindError(
-                f"Asset kind {request.asset_kind.value} is not supported by direct image upload"
-            )
-        if request.declared_mime.lower() not in SUPPORTED_IMAGE_MIME_TYPES:
-            raise UnsupportedAssetKindError(f"MIME type {request.declared_mime} is not supported")
-        if request.byte_length > self._maximum_bytes:
+        if request.byte_length > self._maximum_bytes_by_kind[request.asset_kind]:
             raise ObjectMismatchError("declared byte length exceeds the configured limit")
 
     @staticmethod

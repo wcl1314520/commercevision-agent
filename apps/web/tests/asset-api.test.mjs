@@ -51,6 +51,31 @@ describe("AssetApi durable operation reads", () => {
     });
   });
 
+  it("gets sanitized stage evidence from the exact asset validation resource", async () => {
+    const assetId = "019f8a00-0000-7000-8000-000000000011";
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        asset_id: assetId,
+        operation: { state: "RETRYABLE_FAILED", retryable: true },
+        stages: [{ stage: "MALWARE", verdict: "PASS", evidence: { outcome: "CLEAN" } }],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const validation = await new AssetApi({
+      baseUrl: "https://web.example",
+      workspaceId: "catalog-demo",
+    }).getAssetValidation(assetId);
+
+    expect(validation).toMatchObject({
+      asset_id: assetId,
+      operation: { state: "RETRYABLE_FAILED", retryable: true },
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `https://web.example/api/v1/assets/${assetId}/validation`,
+    );
+  });
+
   it("aborts a control-plane request at the configured deadline", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(

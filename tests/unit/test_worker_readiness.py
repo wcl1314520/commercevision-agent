@@ -65,18 +65,35 @@ class FakeStorage:
         self.closed = True
 
 
+class FakeMalwareScanner:
+    def __init__(self) -> None:
+        self.probed = False
+
+    def assert_ready(self) -> str:
+        self.probed = True
+        return "deterministic-clamav-v1"
+
+
 def test_worker_dependency_probe_queries_mysql_and_closes_all_clients(
     monkeypatch,
 ) -> None:
     connection = FakeConnection(1)
     database = FakeDatabase(connection)
     storage = FakeStorage()
+    scanner = FakeMalwareScanner()
     monkeypatch.setattr(readiness_module, "create_database", lambda _settings: database)
     monkeypatch.setattr(readiness_module, "build_object_storage", lambda _settings: storage)
+    monkeypatch.setattr(
+        readiness_module,
+        "build_malware_scanner",
+        lambda _settings: scanner,
+        raising=False,
+    )
 
     assert readiness_module.probe_worker_dependencies(Settings(environment="ci")) == {
         "mysql": "ok",
         "object_storage": "ok",
+        "malware_scanner": "ok",
     }
     assert connection.queries == ["SELECT 1"]
     assert database.disposed is True
@@ -86,6 +103,7 @@ def test_worker_dependency_probe_queries_mysql_and_closes_all_clients(
         StorageLocationClass.FOUNDATION,
     )
     assert storage.closed is True
+    assert scanner.probed is True
 
 
 def test_worker_dependency_probe_disposes_mysql_on_unexpected_result(
@@ -128,6 +146,7 @@ def test_workflow_only_worker_does_not_probe_object_storage(monkeypatch) -> None
     assert readiness_module.probe_worker_dependencies(settings) == {
         "mysql": "ok",
         "object_storage": "not_required",
+        "malware_scanner": "not_required",
     }
     assert database.disposed is True
     assert storage_built is False

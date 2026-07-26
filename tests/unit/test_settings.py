@@ -10,6 +10,90 @@ def test_settings_reject_unknown_environment() -> None:
         Settings(environment="invalid")
 
 
+def test_validation_transfer_workspace_allowlist_preserves_binary_identity() -> None:
+    settings = Settings(
+        validation_data_transfer_allowed_workspace_ids=["Catalog-A", "catalog-a"],
+        validation_data_transfer_allowed_providers=[" ALIBABA-GREEN "],
+        validation_data_transfer_allowed_endpoint_regions=[" CN-SHANGHAI "],
+    )
+
+    assert settings.validation_data_transfer_allowed_workspace_ids == [
+        "Catalog-A",
+        "catalog-a",
+    ]
+    assert settings.validation_data_transfer_allowed_providers == ["alibaba-green"]
+    assert settings.validation_data_transfer_allowed_endpoint_regions == ["cn-shanghai"]
+
+
+@pytest.mark.parametrize(
+    "workspace_id",
+    [
+        " Catalog-A",
+        "Catalog-A ",
+        "catalog workspace",
+        "catalog/workspace",
+        ".catalog",
+        "-catalog",
+        "",
+        "\u5546\u54c1\u5de5\u4f5c\u533a",
+    ],
+)
+def test_validation_transfer_workspace_allowlist_rejects_noncanonical_identity(
+    workspace_id: str,
+) -> None:
+    with pytest.raises(
+        ValidationError,
+        match="validation data transfer workspace allowlist is invalid",
+    ):
+        Settings(validation_data_transfer_allowed_workspace_ids=[workspace_id])
+
+
+def test_validation_transfer_workspace_allowlist_rejects_exact_duplicates() -> None:
+    with pytest.raises(ValidationError, match="workspace allowlist must be unique"):
+        Settings(
+            validation_data_transfer_allowed_workspace_ids=[
+                "Catalog-A",
+                "Catalog-A",
+            ]
+        )
+
+
+def test_validation_transfer_endpoint_hosts_are_exact_canonical_dns_names() -> None:
+    settings = Settings(
+        alibaba_content_safety_endpoint="green-cip.cn-shanghai.aliyuncs.com",
+        validation_data_transfer_allowed_endpoint_hosts=["green-cip.cn-shanghai.aliyuncs.com"],
+    )
+
+    assert settings.alibaba_content_safety_endpoint == "green-cip.cn-shanghai.aliyuncs.com"
+    assert settings.validation_data_transfer_allowed_endpoint_hosts == [
+        "green-cip.cn-shanghai.aliyuncs.com"
+    ]
+
+
+@pytest.mark.parametrize(
+    "endpoint_host",
+    [
+        " green-cip.cn-shanghai.aliyuncs.com",
+        "Green-CIP.cn-shanghai.aliyuncs.com",
+        "https://green-cip.cn-shanghai.aliyuncs.com",
+        "green-cip.cn-shanghai.aliyuncs.com:443",
+        "green-cip.cn-shanghai.aliyuncs.com/path",
+        "green-cip.cn-shanghai.aliyuncs.com.",
+        "*.aliyuncs.com",
+        "127.0.0.1",
+        "localhost",
+        "\u5185\u5bb9\u5b89\u5168.example",
+    ],
+)
+def test_settings_rejects_noncanonical_provider_endpoint_hosts(
+    endpoint_host: str,
+) -> None:
+    with pytest.raises(ValidationError, match="canonical DNS hostname|IP literal"):
+        Settings(alibaba_content_safety_endpoint=endpoint_host)
+    with pytest.raises(ValidationError, match="canonical DNS hostname|IP literal"):
+        Settings(validation_data_transfer_allowed_endpoint_hosts=[endpoint_host])
+
+
 def test_load_settings_sets_process_name(monkeypatch) -> None:
     monkeypatch.delenv("CV_SERVICE_NAME", raising=False)
     settings = load_settings("scheduler")
@@ -212,20 +296,41 @@ def test_settings_validate_operation_retry_policy() -> None:
         )
 
 
+def test_settings_validate_bounded_retention_version_cleanup() -> None:
+    settings = Settings(
+        asset_retention_cleanup_version_page_size=50,
+        asset_retention_cleanup_max_version_pages=20,
+        asset_retention_cleanup_max_versions=500,
+        asset_retention_cleanup_stable_empty_passes=2,
+    )
+
+    assert settings.asset_retention_cleanup_version_page_size == 50
+    assert settings.asset_retention_cleanup_max_versions == 500
+    with pytest.raises(
+        ValidationError,
+        match="page budget must cover stable empty scans",
+    ):
+        Settings(
+            asset_retention_cleanup_max_version_pages=2,
+            asset_retention_cleanup_stable_empty_passes=3,
+        )
+
+
 def test_production_requires_explicit_operation_executor_kinds() -> None:
     with pytest.raises(ValidationError, match="required operation kinds"):
         Settings(environment="production")
 
     settings = Settings(
         environment="production",
-        worker_required_operation_kinds=[OperationKind.ASSET_VALIDATION],
+        worker_queues=["commercevision.maintenance"],
+        worker_required_operation_kinds=[OperationKind.ASSET_DELETION],
         object_store_endpoint="https://minio.internal.example",
         object_store_presign_endpoint="https://assets.example",
         object_store_secret_key="production-object-store-secret",
         object_store_require_encryption=True,
     )
 
-    assert settings.worker_required_operation_kinds == [OperationKind.ASSET_VALIDATION]
+    assert settings.worker_required_operation_kinds == [OperationKind.ASSET_DELETION]
 
     workflow_only = Settings(
         environment="production",
@@ -338,7 +443,8 @@ def test_production_requires_distinct_internal_and_browser_storage_origins() -> 
 def test_production_oss_requires_virtual_hosted_addressing() -> None:
     production_oss = {
         "environment": "production",
-        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "worker_queues": ["commercevision.maintenance"],
+        "worker_required_operation_kinds": [OperationKind.ASSET_DELETION],
         "object_store_backend": "oss",
         "object_store_credential_mode": "ecs_ram_role",
         "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
@@ -356,7 +462,8 @@ def test_production_oss_requires_virtual_hosted_addressing() -> None:
 def test_production_oss_requires_renewable_workload_identity() -> None:
     production_oss = {
         "environment": "production",
-        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "worker_queues": ["commercevision.maintenance"],
+        "worker_required_operation_kinds": [OperationKind.ASSET_DELETION],
         "object_store_backend": "oss",
         "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
         "object_store_presign_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
@@ -429,7 +536,8 @@ def test_oss_oidc_workload_identity_configuration_is_atomic() -> None:
 def test_production_oidc_requires_an_explicit_sts_endpoint() -> None:
     production_oidc = {
         "environment": "production",
-        "worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION],
+        "worker_queues": ["commercevision.maintenance"],
+        "worker_required_operation_kinds": [OperationKind.ASSET_DELETION],
         "object_store_backend": "oss",
         "object_store_credential_mode": "oidc_role_arn",
         "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",

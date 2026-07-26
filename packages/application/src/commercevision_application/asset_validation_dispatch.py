@@ -18,13 +18,18 @@ from commercevision_domain import (
 )
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 
+from .asset_validation_target import asset_validation_input_hash
+
 
 @dataclass(frozen=True, slots=True)
 class AssetValidationPolicy:
+    policy_version: str
     max_attempts: int
     execution_max_elapsed: timedelta
 
     def __post_init__(self) -> None:
+        if not self.policy_version or len(self.policy_version) > 64:
+            raise ValueError("Asset validation policy version is invalid")
         if self.max_attempts < 1:
             raise ValueError("Asset validation max_attempts must be positive")
         if self.execution_max_elapsed <= timedelta(0):
@@ -33,9 +38,9 @@ class AssetValidationPolicy:
 
 def build_validation_operation(
     *,
+    asset: Asset,
     asset_version: AssetVersion,
     object_fact: AssetObject,
-    input_hash: str,
     policy: AssetValidationPolicy,
     now: datetime,
 ) -> DurableOperation:
@@ -45,7 +50,7 @@ def build_validation_operation(
         target_type="ASSET_VERSION",
         target_id=asset_version.id,
         target_version=asset_version.version_number,
-        input_hash=input_hash,
+        input_hash=asset_validation_input_hash(asset, asset_version, object_fact),
         input_ref=f"mysql://asset-versions/{asset_version.id}",
         max_attempts=policy.max_attempts,
         execution_max_elapsed=policy.execution_max_elapsed,
@@ -69,6 +74,7 @@ def build_validation_event(
         asset_version_id=asset_version.id,
         object_fact_id=object_fact.id,
         integrity_policy_version=asset_version.integrity_policy_version,
+        validation_policy_version=asset_version.validation_policy_version,
         content_sha256=asset_version.sha256,
     )
     return OutboxEvent(

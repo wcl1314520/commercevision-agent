@@ -35,13 +35,26 @@ def _compose_services() -> dict[str, object]:
     return compose["services"]
 
 
-def test_compose_worker_consumes_maintenance_without_claiming_future_asset_work() -> None:
-    configured = json.loads(_compose_services()["worker"]["environment"]["CV_WORKER_QUEUES"])
+def _clamav_test_override_services() -> dict[str, object]:
+    compose = yaml.safe_load(
+        (_REPOSITORY_ROOT / "infra/compose/docker-compose.clamav-test.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    return compose["services"]
+
+
+def test_compose_worker_consumes_asset_validation_and_maintenance_work() -> None:
+    worker_environment = _compose_services()["worker"]["environment"]
+    configured = json.loads(worker_environment["CV_WORKER_QUEUES"])
+    required = json.loads(worker_environment["CV_WORKER_REQUIRED_OPERATION_KINDS"])
 
     assert configured == [
         "commercevision.workflow",
+        "commercevision.asset",
         "commercevision.maintenance",
     ]
+    assert required == ["ASSET_VALIDATION", "ASSET_DELETION"]
 
 
 def test_compose_worker_uses_the_control_api_object_storage_identity() -> None:
@@ -67,6 +80,33 @@ def test_compose_worker_fixes_prefork_and_validates_master_readiness_payload() -
     assert "consumer_ready" in healthcheck
     assert "master_pid" in healthcheck
     assert "object_storage" in healthcheck
+    assert "malware_scanner" in healthcheck
     assert "missing_kinds" in healthcheck
     assert "CV_WORKER_CONCURRENCY" in healthcheck
     assert ".children" in healthcheck
+
+
+def test_compose_asset_worker_depends_on_pinned_clamav_and_explicit_adapters() -> None:
+    services = _compose_services()
+    clamav = services["clamav"]
+    worker = services["worker"]
+    environment = worker["environment"]
+
+    assert clamav["image"] == (
+        "clamav/clamav:1.5.3_base"
+        "@sha256:b2be682d7514281f20117fb8fe15a7f8da9e4f6ea0b4b819f6c74c84ce84d1d7"
+    )
+    assert "ports" not in clamav
+    assert clamav["volumes"] == ["clamav_data:/var/lib/clamav"]
+    assert worker["depends_on"]["clamav"] == {"condition": "service_healthy"}
+    assert environment["CV_ASSET_MALWARE_ADAPTER"] == "clamav"
+    assert environment["CV_CLAMAV_HOST"] == "clamav"
+    assert environment["CV_CLAMAV_PORT"] == "3310"
+    assert environment["CV_ASSET_CONTENT_SAFETY_ADAPTER"] == "deterministic"
+    assert environment["CV_ASSET_PROVENANCE_ADAPTER"] == "deterministic"
+
+
+def test_clamav_real_test_override_is_loopback_only_and_not_configurable() -> None:
+    clamav = _clamav_test_override_services()["clamav"]
+
+    assert clamav["ports"] == ["127.0.0.1:13310:3310"]

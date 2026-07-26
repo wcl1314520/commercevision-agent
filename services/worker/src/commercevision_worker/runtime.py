@@ -31,6 +31,9 @@ from commercevision_application import (
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
     ASSET_DELETE_REQUESTED_V1,
+    ASSET_UPLOAD_FINALIZED_V1,
+    ASSET_VALIDATION_COMPLETED_V1,
+    ASSET_VALIDATION_FAILED_V1,
     ASSET_VALIDATION_REQUESTED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
     OPERATION_RECOVERY_REQUESTED_V1,
@@ -43,6 +46,9 @@ from commercevision_contracts.events import (
     WORKFLOW_RESUME_REQUESTED_V1,
     WORKFLOW_RUN_REQUESTED_V1,
     AssetDeleteRequestedPayload,
+    AssetUploadFinalizedPayload,
+    AssetValidationCompletedPayload,
+    AssetValidationFailedPayload,
     AssetValidationRequestedPayload,
     EventQueue,
     EventType,
@@ -69,6 +75,7 @@ from commercevision_tool_runtime import (
 from commercevision_tool_runtime.policy import ToolPolicy
 
 from .asset_cleanup import UploadSessionCleanupExecutor
+from .asset_validation import build_asset_validation_executor
 from .executors import available_builtin_operation_kinds
 
 
@@ -83,6 +90,7 @@ class WorkerRuntime:
     operation_worker: DurableOperationWorker
     operation_executors: OperationExecutorRegistry
     object_storage: ObjectStorage | None
+    resources: tuple[object, ...]
 
     @classmethod
     def build(
@@ -102,7 +110,24 @@ class WorkerRuntime:
         object_storage = (
             build_object_storage(settings) if settings.worker_requires_object_storage else None
         )
-        if object_storage is not None and OperationKind.ASSET_DELETION not in configured_executors:
+        resources: list[object] = []
+        if (
+            object_storage is not None
+            and settings.worker_requires_asset_validation
+            and OperationKind.ASSET_VALIDATION not in configured_executors
+        ):
+            built_validation = build_asset_validation_executor(
+                settings=settings,
+                database=database,
+                storage=object_storage,
+            )
+            configured_executors[OperationKind.ASSET_VALIDATION] = built_validation.executor
+            resources.extend(built_validation.closeables)
+        if (
+            object_storage is not None
+            and settings.maintenance_queue_name in settings.configured_worker_queues
+            and OperationKind.ASSET_DELETION not in configured_executors
+        ):
             configured_executors[OperationKind.ASSET_DELETION] = UploadSessionCleanupExecutor(
                 uow_factory=lambda: SqlAlchemyAssetUnitOfWork(database.session_factory),
                 cleaner=UploadObjectCleaner(object_storage),
@@ -215,6 +240,7 @@ class WorkerRuntime:
             operation_worker=operation_worker,
             operation_executors=executor_registry,
             object_storage=object_storage,
+            resources=tuple(resources),
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
@@ -253,8 +279,20 @@ class WorkerRuntime:
             handler=runtime._observe_replay_event,
         )
         runtime.event_router.register_handler(
+            contract=ASSET_UPLOAD_FINALIZED_V1,
+            handler=runtime._observe_asset_upload_finalized,
+        )
+        runtime.event_router.register_handler(
             contract=ASSET_VALIDATION_REQUESTED_V1,
             handler=runtime._handle_asset_validation,
+        )
+        runtime.event_router.register_handler(
+            contract=ASSET_VALIDATION_COMPLETED_V1,
+            handler=runtime._observe_asset_validation_terminal,
+        )
+        runtime.event_router.register_handler(
+            contract=ASSET_VALIDATION_FAILED_V1,
+            handler=runtime._observe_asset_validation_terminal,
         )
         runtime.event_router.register_handler(
             contract=ASSET_DELETE_REQUESTED_V1,
@@ -307,6 +345,10 @@ class WorkerRuntime:
         return "processed"
 
     def close(self) -> None:
+        for resource in reversed(self.resources):
+            close = getattr(resource, "close", None)
+            if callable(close):
+                close()
         if self.object_storage is not None:
             close_object_storage(self.object_storage)
         self.database.dispose()
@@ -365,6 +407,27 @@ class WorkerRuntime:
     def _handle_operation_recovery(self, event: OutboxEvent) -> None:
         self.operation_worker.handle_recovery_event(event)
 
+    @staticmethod
+    def _observe_asset_upload_finalized(event: OutboxEvent) -> None:
+        """Acknowledge one bound upload audit observation through the Inbox."""
+
+        payload = ASSET_UPLOAD_FINALIZED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, AssetUploadFinalizedPayload):
+            raise TypeError("Asset upload contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Asset upload workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "Asset"
+            or event.envelope.aggregate_id != payload.asset_id
+        ):
+            raise EventRoutingError(
+                "Asset upload identity does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+
     def _handle_asset_validation(self, event: OutboxEvent) -> None:
         payload = ASSET_VALIDATION_REQUESTED_V1.validate_payload(event.envelope.payload)
         if not isinstance(payload, AssetValidationRequestedPayload):
@@ -383,6 +446,35 @@ class WorkerRuntime:
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
+
+    @staticmethod
+    def _observe_asset_validation_terminal(event: OutboxEvent) -> None:
+        """Acknowledge one strictly bound validation outcome through the Inbox."""
+
+        contract = (
+            ASSET_VALIDATION_COMPLETED_V1
+            if event.envelope.event_type == EventType.ASSET_VALIDATION_COMPLETED.value
+            else ASSET_VALIDATION_FAILED_V1
+        )
+        payload = contract.validate_payload(event.envelope.payload)
+        if not isinstance(
+            payload,
+            AssetValidationCompletedPayload | AssetValidationFailedPayload,
+        ):
+            raise TypeError("Asset validation terminal contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Asset validation terminal workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "Asset"
+            or event.envelope.aggregate_id != payload.asset_id
+        ):
+            raise EventRoutingError(
+                "Asset validation terminal identity does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
 
     def _handle_asset_delete(self, event: OutboxEvent) -> None:
         payload = ASSET_DELETE_REQUESTED_V1.validate_payload(event.envelope.payload)

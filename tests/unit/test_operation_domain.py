@@ -446,6 +446,37 @@ def test_operation_retry_policy_uses_exponential_jitter_and_stable_deadline() ->
     assert retry_at == NOW + timedelta(seconds=3)
 
 
+def test_operation_retry_policy_normalizes_exhausted_attempts_to_terminal() -> None:
+    operation = create_operation(max_attempts=1)
+    token = operation.claim(
+        owner="worker-a",
+        lease_duration=timedelta(seconds=30),
+        now=NOW,
+    )
+    operation.start(lease_token=token, now=NOW)
+    policy = OperationRetryPolicy(
+        initial_delay=timedelta(seconds=1),
+        maximum_delay=timedelta(seconds=30),
+        maximum_elapsed=timedelta(minutes=5),
+    )
+
+    error, retry_at = policy.decide(
+        operation=operation,
+        failure=OperationExecutionFailure(
+            NormalizedOperationError(
+                code="PROVIDER_TEMPORARY",
+                category="provider",
+                message="provider is temporarily unavailable",
+                retryable=True,
+            )
+        ),
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert error.retryable is False
+    assert retry_at is None
+
+
 @pytest.mark.parametrize("provider_offset", [timedelta(microseconds=-1), timedelta(0)])
 def test_reconciliation_policy_normalizes_stale_retry_to_strict_future_readiness(
     provider_offset: timedelta,

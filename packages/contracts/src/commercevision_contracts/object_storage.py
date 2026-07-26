@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from commercevision_domain import StorageBackend, StorageLocationClass
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StorageContract(BaseModel):
@@ -70,6 +70,44 @@ class ConditionalDeleteRequest(StorageContract):
     expected_etag: str
 
 
+class ObjectVersionListRequest(StorageContract):
+    reference: ObjectReference
+    page_size: int = Field(ge=1, le=1000)
+    continuation_token: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def require_unversioned_key(self) -> ObjectVersionListRequest:
+        if self.reference.version_id is not None:
+            raise ValueError("version listing requires an unversioned exact key")
+        return self
+
+
+class ObjectVersionEntry(StorageContract):
+    reference: ObjectReference
+    kind: Literal["OBJECT", "DELETE_MARKER"]
+
+    @model_validator(mode="after")
+    def require_exact_version(self) -> ObjectVersionEntry:
+        if self.reference.version_id is None:
+            raise ValueError("listed object versions require an exact provider version")
+        return self
+
+
+class ObjectVersionPage(StorageContract):
+    entries: tuple[ObjectVersionEntry, ...]
+    continuation_token: str | None = Field(default=None, min_length=1, max_length=4096)
+
+
+class DeleteMarkerRequest(StorageContract):
+    reference: ObjectReference
+
+    @model_validator(mode="after")
+    def require_exact_version(self) -> DeleteMarkerRequest:
+        if self.reference.version_id is None:
+            raise ValueError("delete marker removal requires an exact provider version")
+        return self
+
+
 class TemporaryReadRequest(StorageContract):
     reference: ObjectReference
     expires_at: datetime
@@ -92,5 +130,9 @@ class ObjectStorage(Protocol):
     def copy_if_absent(self, request: ConditionalCopyRequest) -> ObjectStat: ...
 
     def delete_if_match(self, request: ConditionalDeleteRequest) -> bool: ...
+
+    def list_versions(self, request: ObjectVersionListRequest) -> ObjectVersionPage: ...
+
+    def delete_marker(self, request: DeleteMarkerRequest) -> bool: ...
 
     def temporary_read(self, request: TemporaryReadRequest) -> PresignedRequest: ...

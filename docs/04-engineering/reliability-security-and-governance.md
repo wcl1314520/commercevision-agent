@@ -102,6 +102,13 @@ Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件�
   `PENDING`、`NOT_FOUND` 和查询异常都保持 `RECONCILING`；只有明确
   `CONFIRMED_FAILURE` 才能回到外部执行重试。预算耗尽后原子写入 Operation 死信；显式
   重放保留累计对账计数并将最大值设为当前计数加一，每次重放只允许一次额外状态查询。
+- Recovery Scanner 自身触发终态时还会保留一个未消费的 `TERMINAL_FAILURE` Recovery
+  Generation。Worker 通过可选、事务外且幂等的 Executor 回调收敛目标聚合；回调失败时不
+  消费 Generation，消息重投后再次执行。通用 Operation/DLQ 是业务失败权威，目标回调只
+  补齐所属聚合与类型化终态事件，不能创建第二套重试状态机。
+- 普通 Operation DLQ replay 只有在目标终态回调成功后才进入 `COMPLETED`。回调失败时
+  Replay Lifecycle 保持 `CLAIMED`，再次投递只补偿回调，不重复 Provider 执行。执行截止
+  时间在首次认领前耗尽时，类型化失败事件以 `attempt_number=0` 明确表达零次执行。
 - 外部系统返回的 Provider Request ID 独立保存于 Operation；最新执行/查询错误拥有单独的
   Error Provider ID。首次执行成功或对账确认成功也可建立该身份；Worker 重启或多次状态
   查询失败后，对账请求仍携带原始 Request ID。
@@ -159,6 +166,8 @@ Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件�
 - 仅 `.safetensors`。
 - 不执行 Pickle、脚本或仓库代码。
 - 限制 Header 和张量元数据大小。
+- SafeTensors Header、Prompt Template 和 Model Configuration 的 JSON 解析统一限制
+  嵌套深度与节点数，并把解析器递归失败归一为格式拒绝。
 - 必须记录许可证和基础模型。
 
 ## SSRF 与出站
@@ -169,6 +178,10 @@ Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件�
 - 每次重定向重新校验。
 - 设置连接、首字节、总时限和响应体上限。
 - 生产出站通过固定 NAT/EIP 和 NetworkPolicy。
+- 内容安全数据出境策略必须绑定实际 Adapter 的规范 endpoint host；Provider、Region 或
+  请求工厂标签不能替代真实发送端点。endpoint host 必须进入策略快照和验证证据。
+- Workspace allowlist 使用统一的二进制精确 Workspace ID 语法，配置层不得静默修剪或
+  规范化非法身份。
 
 ## Prompt Injection
 
@@ -193,6 +206,11 @@ Scheduler 识别同一行的未来 `available_at`，不会用旧锁把该事件�
 - 公开数据集和品牌资产按许可证保存。
 - 用户可以提前删除任务。
 - 删除资产后先禁止检索，再删除 OSS 和 Milvus。
+- Task Asset promotion 在提交前以应用 UTC 和 MySQL `UTC_TIMESTAMP(6)` 双时钟围栏检查
+  创建时确定的保留截止时间；过期事务回滚后在事务外精确补偿对象版本。
+- Versioned Bucket 清理分页枚举精确 Key 的全部对象版本和 delete marker。只有连续两次
+  完整空扫描后才提交 `DELETED`；游标循环、缺失 Version ID、页/删除预算耗尽和存储异常
+  都保持 `DELETE_PENDING` 并由 Durable Operation 重试。
 - 审计保存脱敏元数据 180 天。
 - 供应商登记数据地域、保留期和训练政策。
 
