@@ -31,6 +31,8 @@ from commercevision_application import (
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
     ASSET_DELETE_REQUESTED_V1,
+    ASSET_RIGHTS_CHANGED_V1,
+    ASSET_RIGHTS_EXPIRED_V1,
     ASSET_UPLOAD_FINALIZED_V1,
     ASSET_VALIDATION_COMPLETED_V1,
     ASSET_VALIDATION_FAILED_V1,
@@ -46,6 +48,7 @@ from commercevision_contracts.events import (
     WORKFLOW_RESUME_REQUESTED_V1,
     WORKFLOW_RUN_REQUESTED_V1,
     AssetDeleteRequestedPayload,
+    AssetRightsChangedPayload,
     AssetUploadFinalizedPayload,
     AssetValidationCompletedPayload,
     AssetValidationFailedPayload,
@@ -298,6 +301,14 @@ class WorkerRuntime:
             contract=ASSET_DELETE_REQUESTED_V1,
             handler=runtime._handle_asset_delete,
         )
+        runtime.event_router.register_handler(
+            contract=ASSET_RIGHTS_CHANGED_V1,
+            handler=runtime._observe_asset_rights_changed,
+        )
+        runtime.event_router.register_handler(
+            contract=ASSET_RIGHTS_EXPIRED_V1,
+            handler=runtime._observe_asset_rights_changed,
+        )
         return runtime
 
     def operation_executor_readiness(self) -> dict[str, object]:
@@ -494,6 +505,30 @@ class WorkerRuntime:
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
+
+    @staticmethod
+    def _observe_asset_rights_changed(event: OutboxEvent) -> None:
+        contract = (
+            ASSET_RIGHTS_EXPIRED_V1
+            if event.envelope.event_type == EventType.ASSET_RIGHTS_EXPIRED.value
+            else ASSET_RIGHTS_CHANGED_V1
+        )
+        payload = contract.validate_payload(event.envelope.payload)
+        if not isinstance(payload, AssetRightsChangedPayload):
+            raise TypeError("Asset rights contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Asset rights workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "Asset"
+            or event.envelope.aggregate_id != payload.asset_id
+        ):
+            raise EventRoutingError(
+                "Asset rights identity does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
 
     @staticmethod
     def _observe_replay_event(_event: OutboxEvent) -> None:

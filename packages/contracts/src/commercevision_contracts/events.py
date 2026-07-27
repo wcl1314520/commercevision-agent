@@ -6,8 +6,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-from commercevision_domain import ApprovalDecision, ApprovalType, OperationKind, WorkflowStatus
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel
+from commercevision_domain import (
+    ApprovalDecision,
+    ApprovalType,
+    OperationKind,
+    WorkflowStatus,
+)
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, model_validator
 
 from .workspace_identity import WorkspaceId
 
@@ -192,6 +197,77 @@ class AssetValidationFailedPayload(StrictEventPayload):
     )
 
 
+class AssetRightsChange(StrEnum):
+    REGISTERED = "REGISTERED"
+    REPLACED = "REPLACED"
+    ACTIVATED = "ACTIVATED"
+    REVOKED = "REVOKED"
+    EXPIRED = "EXPIRED"
+    ADMINISTRATOR_BLOCKED = "ADMINISTRATOR_BLOCKED"
+
+
+class AssetRightsConvergence(StrEnum):
+    REINDEX = "REINDEX"
+    REMOVE_EXTERNAL_DERIVATIVES = "REMOVE_EXTERNAL_DERIVATIVES"
+
+
+class AssetRightsChangedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    asset_id: str = Field(min_length=1, max_length=36)
+    asset_version_id: str = Field(min_length=1, max_length=36)
+    rights_record_id: str | None = Field(default=None, min_length=1, max_length=36)
+    rights_record_version: int | None = Field(default=None, ge=1)
+    change: Literal[
+        "REGISTERED",
+        "REPLACED",
+        "ACTIVATED",
+        "REVOKED",
+        "EXPIRED",
+        "ADMINISTRATOR_BLOCKED",
+    ]
+    resulting_asset_state: Literal[
+        "PENDING_RIGHTS",
+        "AVAILABLE",
+        "BLOCKED",
+        "RIGHTS_EXPIRED",
+    ]
+    required_convergence: Literal["REINDEX", "REMOVE_EXTERNAL_DERIVATIVES"]
+
+    @model_validator(mode="after")
+    def validate_rights_identity(self) -> AssetRightsChangedPayload:
+        if (self.rights_record_id is None) != (self.rights_record_version is None):
+            raise ValueError("Rights Record id and version must be present together")
+        if (
+            self.change != AssetRightsChange.ADMINISTRATOR_BLOCKED.value
+            and self.rights_record_id is None
+        ):
+            raise ValueError("Rights Record identity is required for a rights transition")
+        expected_convergence = (
+            AssetRightsConvergence.REINDEX.value
+            if self.resulting_asset_state == "AVAILABLE"
+            else AssetRightsConvergence.REMOVE_EXTERNAL_DERIVATIVES.value
+        )
+        if self.required_convergence != expected_convergence:
+            raise ValueError("Rights convergence contradicts the resulting Asset state")
+        required_state = {
+            AssetRightsChange.ACTIVATED.value: "AVAILABLE",
+            AssetRightsChange.REVOKED.value: "BLOCKED",
+            AssetRightsChange.EXPIRED.value: "RIGHTS_EXPIRED",
+            AssetRightsChange.ADMINISTRATOR_BLOCKED.value: "BLOCKED",
+        }.get(self.change)
+        if required_state is not None and self.resulting_asset_state != required_state:
+            raise ValueError("Rights change contradicts the resulting Asset state")
+        return self
+
+
+class AssetRightsExpiredPayload(AssetRightsChangedPayload):
+    rights_record_id: str = Field(min_length=1, max_length=36)
+    rights_record_version: int = Field(ge=1)
+    change: Literal["EXPIRED"]
+    resulting_asset_state: Literal["RIGHTS_EXPIRED"]
+    required_convergence: Literal["REMOVE_EXTERNAL_DERIVATIVES"]
+
+
 class UploadCleanupReason(StrEnum):
     UPLOAD_EXPIRED = "UPLOAD_EXPIRED"
     UPLOAD_ABORTED = "UPLOAD_ABORTED"
@@ -333,6 +409,20 @@ ASSET_VALIDATION_FAILED_V1 = EventContract(
     AssetValidationFailedPayload,
     EventHandling.OBSERVATION,
 )
+ASSET_RIGHTS_CHANGED_V1 = EventContract(
+    EventType.ASSET_RIGHTS_CHANGED,
+    1,
+    EventQueue.ASSET,
+    AssetRightsChangedPayload,
+    EventHandling.OBSERVATION,
+)
+ASSET_RIGHTS_EXPIRED_V1 = EventContract(
+    EventType.ASSET_RIGHTS_EXPIRED,
+    1,
+    EventQueue.ASSET,
+    AssetRightsExpiredPayload,
+    EventHandling.OBSERVATION,
+)
 ASSET_DELETE_REQUESTED_V1 = EventContract(
     EventType.ASSET_DELETE_REQUESTED,
     1,
@@ -357,16 +447,8 @@ PHASE2_EVENT_CONTRACTS = (
     ASSET_VALIDATION_REQUESTED_V1,
     ASSET_VALIDATION_COMPLETED_V1,
     ASSET_VALIDATION_FAILED_V1,
-    _phase2_contract(
-        EventType.ASSET_RIGHTS_CHANGED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
-    _phase2_contract(
-        EventType.ASSET_RIGHTS_EXPIRED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
+    ASSET_RIGHTS_CHANGED_V1,
+    ASSET_RIGHTS_EXPIRED_V1,
     _phase2_contract(
         EventType.PRODUCT_BRIEF_REQUESTED,
         EventQueue.ASSET,

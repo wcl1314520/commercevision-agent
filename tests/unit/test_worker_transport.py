@@ -11,19 +11,19 @@ from celery.worker.worker import WorkController
 from commercevision_application import (
     EventRoutingError,
     MalformedEventPayloadError,
-    UnhandledEventError,
     UnknownEventTypeError,
     UnsupportedSchemaVersionError,
 )
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
+    ASSET_RIGHTS_CHANGED_V1,
     ASSET_UPLOAD_FINALIZED_V1,
     ASSET_VALIDATION_COMPLETED_V1,
     ASSET_VALIDATION_FAILED_V1,
+    AssetRightsChangedPayload,
     AssetUploadFinalizedPayload,
     AssetValidationCompletedPayload,
     AssetValidationFailedPayload,
-    EventType,
 )
 from commercevision_domain import OperationKind
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
@@ -229,13 +229,30 @@ def test_worker_binds_known_upload_observation_without_weakening_event_routing()
             runtime.event_router.resolve(replace(event.envelope, schema_version=2))
         with pytest.raises(MalformedEventPayloadError):
             runtime.event_router.resolve(replace(event.envelope, payload={}))
-        with pytest.raises(UnhandledEventError):
-            runtime.event_router.resolve(
-                replace(
-                    event.envelope,
-                    event_type=EventType.ASSET_RIGHTS_CHANGED.value,
-                )
-            )
+        rights_payload = AssetRightsChangedPayload(
+            workspace_id=payload.workspace_id,
+            asset_id=payload.asset_id,
+            asset_version_id=payload.asset_version_id,
+            rights_record_id="rights-record-1",
+            rights_record_version=1,
+            change="REGISTERED",
+            resulting_asset_state="AVAILABLE",
+            required_convergence="REINDEX",
+        )
+        rights_envelope = EventEnvelope.create(
+            event_type=ASSET_RIGHTS_CHANGED_V1.event_type.value,
+            aggregate_type="Asset",
+            aggregate_id=payload.asset_id,
+            aggregate_version=2,
+            trace_id="trace-rights-changed",
+            payload=rights_payload.model_dump(mode="json"),
+        )
+        rights_event = OutboxEvent(
+            envelope=rights_envelope,
+            available_at=rights_envelope.occurred_at,
+            workspace_id=payload.workspace_id,
+        )
+        runtime.event_router.resolve(rights_envelope)(rights_event)
         with pytest.raises(EventRoutingError, match="workspace"):
             handler(replace(event, workspace_id="other-workspace"))
         with pytest.raises(EventRoutingError, match="aggregate"):

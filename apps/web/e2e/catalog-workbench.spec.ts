@@ -2126,3 +2126,399 @@ test("renders pending review as a recoverable human gate", async ({ page }) => {
     "素材未通过校验",
   );
 });
+
+test("manages immutable rights history and current usability", async ({ page }) => {
+  await mockReadyCatalog(page);
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-upload-finalize-rights-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route("**/api/web-capabilities", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ administrator: true }),
+    });
+  });
+
+  let currentAsset = {
+    ...quarantinedAsset,
+    status: "PENDING_RIGHTS",
+    current_rights_record_id: null as string | null,
+    retention_deadline: null as string | null,
+    version: 2,
+  };
+  const rightsHistory: Record<string, unknown>[] = [];
+  let conflictNextReplacement = true;
+
+  const rightsRecord = (
+    version: number,
+    decision: "GRANT" | "REVOKE",
+    evidence: string,
+  ) => ({
+    id: `019f8a00-0000-7000-8000-00000000005${version}`,
+    workspace_id: "catalog-demo",
+    asset_id: quarantinedAsset.id,
+    asset_version_id: assetVersion.id,
+    version_number: version,
+    decision,
+    owner_reference: "Northstar Labs",
+    source: "brand-library",
+    license_reference: "license://northstar/2026",
+    allowed_uses: decision === "GRANT" ? ["RETRIEVAL"] : [],
+    allowed_providers: decision === "GRANT" ? ["milvus"] : [],
+    derivative_allowed: decision === "GRANT",
+    public_demo_allowed: false,
+    evidence_reference: evidence,
+    terms_sha256: "a".repeat(64),
+    valid_from: "2026-07-24T00:00:00Z",
+    valid_until: null,
+    perpetual: true,
+    supersedes_record_id:
+      version > 1
+        ? `019f8a00-0000-7000-8000-00000000005${version - 1}`
+        : null,
+    created_by: "catalog-operator",
+    created_at: `2026-07-24T12:4${version}:00Z`,
+  });
+
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: currentAsset.status,
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "SUCCEEDED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: null,
+            failure_category: null,
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [],
+        }),
+      });
+    },
+  );
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/**`,
+    async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+
+      if (path.endsWith("/rights") && request.method() === "GET") {
+        const beforeVersion = Number(
+          new URL(request.url()).searchParams.get("before_version"),
+        );
+        const candidates = Number.isSafeInteger(beforeVersion) && beforeVersion > 0
+          ? rightsHistory.filter(
+              (record) => Number(record.version_number) < beforeVersion,
+            )
+          : rightsHistory;
+        const items = candidates.slice(0, 2);
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            items,
+            next_cursor:
+              candidates.length > items.length
+                ? Number(items.at(-1)?.version_number)
+                : null,
+          }),
+        });
+        return;
+      }
+      if (
+        (path.endsWith("/rights") || path.endsWith("/rights:replace")) &&
+        request.method() === "POST"
+      ) {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        if (
+          path.endsWith("/rights:replace") &&
+          conflictNextReplacement
+        ) {
+          conflictNextReplacement = false;
+          const externalRecord = rightsRecord(
+            rightsHistory.length + 1,
+            "GRANT",
+            "evidence://rights/external-update",
+          );
+          rightsHistory.unshift(externalRecord);
+          currentAsset = {
+            ...currentAsset,
+            status: "AVAILABLE",
+            current_rights_record_id: String(externalRecord.id),
+            version: currentAsset.version + 1,
+          };
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              ...errorEnvelope,
+              message: "rights version is stale",
+            }),
+          });
+          return;
+        }
+        const record = {
+          ...rightsRecord(
+            rightsHistory.length + 1,
+            "GRANT",
+            String(body.evidence_reference),
+          ),
+          ...body,
+          id: `019f8a00-0000-7000-8000-00000000005${rightsHistory.length + 1}`,
+          version_number: rightsHistory.length + 1,
+          decision: "GRANT",
+          created_by: "catalog-operator",
+          created_at: "2026-07-24T12:45:00Z",
+        };
+        rightsHistory.unshift(record);
+        currentAsset = {
+          ...currentAsset,
+          status: "AVAILABLE",
+          current_rights_record_id: String(record.id),
+          version: currentAsset.version + 1,
+        };
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            asset_id: currentAsset.id,
+            asset_version: currentAsset.version,
+            asset_state: currentAsset.status,
+            current_rights_record: record,
+          }),
+        });
+        return;
+      }
+      if (path.endsWith("/rights:revoke") && request.method() === "POST") {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        const record = rightsRecord(
+          rightsHistory.length + 1,
+          "REVOKE",
+          String(body.evidence_reference),
+        );
+        rightsHistory.unshift(record);
+        currentAsset = {
+          ...currentAsset,
+          status: "BLOCKED",
+          current_rights_record_id: String(record.id),
+          version: currentAsset.version + 1,
+        };
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            asset_id: currentAsset.id,
+            asset_version: currentAsset.version,
+            asset_state: currentAsset.status,
+            current_rights_record: record,
+          }),
+        });
+        return;
+      }
+      if (path.endsWith("/usability:check") && request.method() === "POST") {
+        const current = rightsHistory[0];
+        const validUntil =
+          typeof current.valid_until === "string"
+            ? Date.parse(current.valid_until)
+            : null;
+        const rightsActive =
+          current.perpetual === true ||
+          (validUntil !== null && Date.now() < validUntil);
+        const retentionActive =
+          currentAsset.retention_deadline === null ||
+          Date.now() < Date.parse(currentAsset.retention_deadline);
+        const authorized =
+          current.decision === "GRANT" && rightsActive && retentionActive;
+        const reasonCode = !retentionActive
+          ? "ASSET_RETENTION_EXPIRED"
+          : !rightsActive
+            ? "RIGHTS_EXPIRED"
+            : current.decision === "REVOKE"
+              ? "RIGHTS_REVOKED"
+              : "AUTHORIZED";
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            authorized,
+            reason_code: reasonCode,
+            asset_id: currentAsset.id,
+            asset_version_id: assetVersion.id,
+            rights_record_id: current.id,
+            rights_record_version: current.version_number,
+            decided_at: new Date().toISOString(),
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    },
+  );
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(currentAsset),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "使用权利" })).toBeVisible();
+  await expect(page.getByLabel("管理员阻断原因")).toBeVisible();
+  await page.getByLabel("权利人").fill("Northstar Labs");
+  await page.getByLabel("许可来源").fill("brand-library");
+  await page.getByLabel("许可证引用").fill("license://northstar/2026");
+  await page.getByLabel("证据引用").fill("evidence://rights/register");
+  await page.getByLabel("素材检索").check();
+  await page.getByLabel("Milvus 检索").check();
+  await page.getByLabel("生效时间").fill("2026-07-24T00:00");
+  await page.getByLabel("条款 SHA-256").fill("a".repeat(64));
+  await page.getByLabel("明确设为永久权利").check();
+  await page.getByRole("button", { name: "登记权利记录" }).click();
+
+  await expect(page.locator(".rights-history")).toContainText(
+    "evidence://rights/register",
+  );
+  await page.getByRole("button", { name: "检查当前可用性" }).click();
+  await expect(page.locator(".rights-authorized")).toContainText("AUTHORIZED");
+  await expect(page.locator(".rights-authorized")).toContainText("决策时间");
+
+  const focusedHistoryReload = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname.endsWith(
+        `/assets/${quarantinedAsset.id}/rights`,
+      ),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await focusedHistoryReload;
+  await expect(page.locator(".rights-authorized")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const clockWindow = window as typeof window & {
+      __commercevisionRealDateNow?: () => number;
+    };
+    clockWindow.__commercevisionRealDateNow = Date.now;
+    Date.now = () => clockWindow.__commercevisionRealDateNow!() - 86_400_000;
+  });
+  const expiringRecord = rightsHistory[0];
+  expiringRecord.perpetual = false;
+  expiringRecord.valid_until = new Date(Date.now() + 1_500).toISOString();
+  const expiringHistoryReload = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname.endsWith(
+        `/assets/${quarantinedAsset.id}/rights`,
+      ),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expiringHistoryReload;
+  await page.getByRole("button", { name: "检查当前可用性" }).click();
+  await expect(page.locator(".rights-authorized")).toContainText("AUTHORIZED");
+  await expect(page.locator(".rights-authorized")).toHaveCount(0, {
+    timeout: 5_000,
+  });
+
+  expiringRecord.perpetual = true;
+  expiringRecord.valid_until = null;
+  currentAsset = {
+    ...currentAsset,
+    retention_deadline: new Date(Date.now() + 1_500).toISOString(),
+  };
+  const retentionHistoryReload = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname.endsWith(
+        `/assets/${quarantinedAsset.id}/rights`,
+      ),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await retentionHistoryReload;
+  await page.getByRole("button", { name: "检查当前可用性" }).click();
+  await expect(page.locator(".rights-authorized")).toContainText("AUTHORIZED");
+  await expect(page.locator(".rights-authorized")).toHaveCount(0, {
+    timeout: 5_000,
+  });
+  currentAsset = {
+    ...currentAsset,
+    retention_deadline: null,
+  };
+
+  await page.getByLabel("证据引用").fill("evidence://rights/replacement");
+  await page.getByRole("button", { name: "替换权利记录" }).click();
+  await expect(page.locator(".rights-denied[role='alert']")).toContainText(
+    "检测到并发更新",
+  );
+  await expect(page.getByLabel("证据引用")).toHaveValue(
+    "evidence://rights/replacement",
+  );
+  await expect(
+    page.getByRole("button", { name: "替换权利记录" }),
+  ).toBeDisabled();
+  await expect(page.locator(".rights-history")).toContainText(
+    "evidence://rights/external-update",
+  );
+  await page
+    .getByRole("button", { name: "载入最新权利并放弃本地草稿" })
+    .click();
+  await expect(page.getByLabel("证据引用")).toHaveValue(
+    "evidence://rights/external-update",
+  );
+  await page.getByLabel("证据引用").fill("evidence://rights/replacement");
+  await page.getByRole("button", { name: "替换权利记录" }).click();
+  await expect(page.locator(".rights-history")).toContainText(
+    "evidence://rights/replacement",
+  );
+  await expect(page.locator(".rights-history li")).toHaveCount(2);
+  await expect(page.locator(".rights-authorized")).toHaveCount(0);
+
+  await page.getByLabel("撤销原因").fill("license withdrawn");
+  await page.getByLabel("撤销证据").fill("evidence://rights/revocation");
+  await page.getByRole("button", { name: "撤销当前权利" }).click();
+  await expect(page.locator(".rights-history li")).toHaveCount(2);
+  await page.getByRole("button", { name: "载入更早记录" }).click();
+  await expect(page.locator(".rights-history li")).toHaveCount(4);
+  await expect(page.locator(".rights-history")).toContainText(
+    "evidence://rights/revocation",
+  );
+  await expect(page.locator(".rights-history li").first()).toContainText(
+    "REVOKE",
+  );
+  await expect(page.locator(".rights-authorized")).toHaveCount(0);
+  await page.evaluate(() => {
+    const clockWindow = window as typeof window & {
+      __commercevisionRealDateNow?: () => number;
+    };
+    if (clockWindow.__commercevisionRealDateNow !== undefined) {
+      Date.now = clockWindow.__commercevisionRealDateNow;
+      delete clockWindow.__commercevisionRealDateNow;
+    }
+  });
+});

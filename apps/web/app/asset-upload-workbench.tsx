@@ -33,6 +33,7 @@ import {
 import { useUploadWorkflow } from "../lib/use-upload-workflow";
 import type { PersistedSessionUpload } from "../lib/upload-workflow";
 import { validationPresentation } from "../lib/validation-presentation";
+import { AssetRightsWorkbench } from "./asset-rights-workbench";
 
 const api = new AssetApi();
 const TERMINAL_OPERATION_STATES = new Set<OperationState>([
@@ -510,6 +511,28 @@ export function AssetUploadWorkbench({
     session?.validation_operation_id,
     validationAssetId,
   ]);
+
+  useEffect(() => {
+    if (
+      !validationAssetId ||
+      !validationStatus ||
+      !["PENDING_RIGHTS", "AVAILABLE", "BLOCKED", "RIGHTS_EXPIRED"].includes(
+        validationStatus.asset_status,
+      )
+    ) {
+      return;
+    }
+    let active = true;
+    void api
+      .getAsset(validationAssetId)
+      .then((current) => {
+        if (active) setAsset(current);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [validationAssetId, validationStatus]);
 
   const selectFile = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0] ?? null;
@@ -995,6 +1018,9 @@ export function AssetUploadWorkbench({
           <strong>无法读取校验状态</strong>
           <span>{validationControlError}</span>
         </div>
+      ) : null}
+      {displayAsset ? (
+        <AssetRightsWorkbench asset={displayAsset} onAssetChange={setAsset} />
       ) : null}
       {error ? (
         <div className="error-banner" role="alert">

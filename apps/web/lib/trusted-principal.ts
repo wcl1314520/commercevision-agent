@@ -26,18 +26,39 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function configuredWorkspaces(): Set<string> {
-  const raw = requiredEnvironment("CV_WEB_ALLOWED_WORKSPACE_IDS");
+function parseWorkspaceSet(raw: string, name: string): Set<string> {
   const workspaces = raw.split(",");
   if (
     workspaces.some((value) => !WORKSPACE_ID_PATTERN.test(value)) ||
     new Set(workspaces).size !== workspaces.length
   ) {
     throw new TrustedPrincipalConfigurationError(
-      "CV_WEB_ALLOWED_WORKSPACE_IDS must contain unique canonical workspace IDs",
+      `${name} must contain unique canonical workspace IDs`,
     );
   }
   return new Set(workspaces);
+}
+
+function configuredWorkspaces(): Set<string> {
+  return parseWorkspaceSet(
+    requiredEnvironment("CV_WEB_ALLOWED_WORKSPACE_IDS"),
+    "CV_WEB_ALLOWED_WORKSPACE_IDS",
+  );
+}
+
+function configuredAdminWorkspaces(allowedWorkspaces: Set<string>): Set<string> {
+  const raw = process.env.CV_WEB_ADMIN_WORKSPACE_IDS;
+  if (!raw) return new Set();
+  const adminWorkspaces = parseWorkspaceSet(
+    raw,
+    "CV_WEB_ADMIN_WORKSPACE_IDS",
+  );
+  if ([...adminWorkspaces].some((workspace) => !allowedWorkspaces.has(workspace))) {
+    throw new TrustedPrincipalConfigurationError(
+      "CV_WEB_ADMIN_WORKSPACE_IDS must be a subset of CV_WEB_ALLOWED_WORKSPACE_IDS",
+    );
+  }
+  return adminWorkspaces;
 }
 
 function configuredActorId(): string {
@@ -54,17 +75,27 @@ function configuredActorId(): string {
   return actorId;
 }
 
+export function workspaceGatewayCapabilities(workspaceId: string | null): {
+  administrator: boolean;
+} {
+  const allowedWorkspaces = configuredWorkspaces();
+  if (
+    workspaceId === null ||
+    !WORKSPACE_ID_PATTERN.test(workspaceId) ||
+    !allowedWorkspaces.has(workspaceId)
+  ) {
+    throw new WorkspaceBoundaryError();
+  }
+  return {
+    administrator: configuredAdminWorkspaces(allowedWorkspaces).has(workspaceId),
+  };
+}
+
 export function issueWorkspacePrincipal(
   workspaceId: string | null,
   issuedAt = Math.floor(Date.now() / 1000),
 ): { actorId: string; token: string } {
-  if (
-    workspaceId === null ||
-    !WORKSPACE_ID_PATTERN.test(workspaceId) ||
-    !configuredWorkspaces().has(workspaceId)
-  ) {
-    throw new WorkspaceBoundaryError();
-  }
+  const capabilities = workspaceGatewayCapabilities(workspaceId);
   const keyId = requiredEnvironment("CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID");
   const secret = requiredEnvironment(
     "CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET",
@@ -88,7 +119,7 @@ export function issueWorkspacePrincipal(
   const claims = {
     actor_id: actorId,
     workspace_ids: [workspaceId],
-    admin_workspace_ids: [],
+    admin_workspace_ids: capabilities.administrator ? [workspaceId] : [],
     system_admin: false,
     issued_at: issuedAt,
   };

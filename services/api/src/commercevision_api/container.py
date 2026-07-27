@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from commercevision_application import (
     AssetRegistryApplicationService,
+    AssetRightsApplicationService,
     CatalogApplicationService,
     DeadLetterOperatorService,
     OperationApplicationService,
@@ -41,6 +42,7 @@ from .identity import PrincipalAccessPolicy, SignedTrustedPrincipalResolver
 class ApiContainer:
     database: Database
     assets: AssetRegistryApplicationService
+    rights: AssetRightsApplicationService
     catalog: CatalogApplicationService
     operations: OperationApplicationService
     dead_letters: DeadLetterOperatorService
@@ -136,6 +138,7 @@ class ApiContainer:
                 ),
                 lease_owner=f"{socket.gethostname()}:{settings.service_name}",
             ),
+            rights=AssetRightsApplicationService(uow_factory=asset_uow_factory),
             catalog=CatalogApplicationService(uow_factory=catalog_uow_factory),
             operations=OperationApplicationService(
                 uow_factory=operation_uow_factory,

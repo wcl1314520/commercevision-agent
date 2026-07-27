@@ -150,3 +150,6 @@ final_score =
 | 新模型回填中 | 继续使用旧版本，不能混合不可比较向量 |
 | 无合适参考 | Planner 明确标记无参考方案 |
 
+Milvus、Embedding metadata 和任何应用缓存都不是授权源。每次检索或下游 Provider 使用都
+必须以 MySQL 当前 Asset、精确 Asset Version 和 `current_rights_record_id` 重新计算可用性；
+索引中的历史许可只能帮助收敛或修复，不能把已撤销、到期或管理员阻断的素材恢复为可用。

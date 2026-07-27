@@ -58,6 +58,13 @@ _FORBIDDEN_EVIDENCE_KEYS = frozenset(
         "service_parameters",
     }
 )
+_RIGHTS_BLOCK_REASONS = frozenset(
+    {
+        "RIGHTS_REVOKED",
+        "RIGHTS_PERMISSION_EMPTY",
+        "RIGHTS_NOT_ACTIVE",
+    }
+)
 _LOCAL_FACT_KEYS = frozenset(
     {
         "character_count",
@@ -654,6 +661,7 @@ class Asset:
     version: int
     created_at: datetime
     updated_at: datetime
+    current_rights_record_id: str | None = None
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
@@ -775,21 +783,117 @@ class Asset:
         if not reason_code or len(reason_code) > 64:
             raise ValueError("Asset block reason must contain 1-64 characters")
         if self.status == AssetState.BLOCKED:
-            if self.block_reason != reason_code:
-                raise InvalidTransitionError(
-                    f"Asset {self.id} is already blocked for another reason"
-                )
-            return
+            if self.block_reason == reason_code:
+                return
+            if (
+                reason_code == "ADMINISTRATIVELY_BLOCKED"
+                and self.block_reason in _RIGHTS_BLOCK_REASONS
+            ):
+                self.block_reason = reason_code
+                self._touch(now)
+                return
+            raise InvalidTransitionError(f"Asset {self.id} is already blocked for another reason")
         if self.status not in {
             AssetState.VALIDATING,
             AssetState.PENDING_REVIEW,
             AssetState.PENDING_RIGHTS,
+            AssetState.AVAILABLE,
+            AssetState.RIGHTS_EXPIRED,
         }:
             raise InvalidTransitionError(
                 f"Asset {self.id} cannot be blocked from {self.status.value}"
             )
         self.status = AssetState.BLOCKED
         self.block_reason = reason_code
+        self._touch(now)
+
+    def select_available_rights(self, *, rights_record_id: str, now: datetime) -> None:
+        _require_utc(now, "now")
+        if not rights_record_id:
+            raise ValueError("Rights Record id must not be blank")
+        if self.status not in {
+            AssetState.PENDING_RIGHTS,
+            AssetState.AVAILABLE,
+            AssetState.RIGHTS_EXPIRED,
+            AssetState.BLOCKED,
+        }:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot select usable rights from {self.status.value}"
+            )
+        if self.status == AssetState.BLOCKED and self.block_reason not in _RIGHTS_BLOCK_REASONS:
+            raise InvalidTransitionError(f"Asset {self.id} cannot replace a non-rights block")
+        self.current_rights_record_id = rights_record_id
+        self.status = AssetState.AVAILABLE
+        self.block_reason = None
+        self._touch(now)
+
+    def select_revoked_rights(self, *, rights_record_id: str, now: datetime) -> None:
+        _require_utc(now, "now")
+        if not rights_record_id:
+            raise ValueError("Rights Record id must not be blank")
+        if self.status in {AssetState.DELETING, AssetState.DELETED}:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot revoke rights from {self.status.value}"
+            )
+        self.current_rights_record_id = rights_record_id
+        if self.status == AssetState.BLOCKED and self.block_reason not in _RIGHTS_BLOCK_REASONS:
+            self._touch(now)
+            return
+        self.status = AssetState.BLOCKED
+        self.block_reason = "RIGHTS_REVOKED"
+        self._touch(now)
+
+    def select_pending_rights(self, *, rights_record_id: str, now: datetime) -> None:
+        _require_utc(now, "now")
+        if not rights_record_id:
+            raise ValueError("Rights Record id must not be blank")
+        if self.status != AssetState.PENDING_RIGHTS:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot select pending rights from {self.status.value}"
+            )
+        self.current_rights_record_id = rights_record_id
+        self._touch(now)
+
+    def select_unusable_rights(
+        self,
+        *,
+        rights_record_id: str,
+        reason_code: str,
+        expired: bool,
+        now: datetime,
+    ) -> None:
+        _require_utc(now, "now")
+        if not rights_record_id or not reason_code:
+            raise ValueError("Rights Record id and denial reason must not be blank")
+        if self.status in {
+            AssetState.QUARANTINED,
+            AssetState.VALIDATING,
+            AssetState.PENDING_REVIEW,
+            AssetState.DELETING,
+            AssetState.DELETED,
+            AssetState.FAILED,
+        }:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot select unusable rights from {self.status.value}"
+            )
+        self.current_rights_record_id = rights_record_id
+        if self.status == AssetState.BLOCKED and self.block_reason not in _RIGHTS_BLOCK_REASONS:
+            self._touch(now)
+            return
+        self.status = AssetState.RIGHTS_EXPIRED if expired else AssetState.BLOCKED
+        self.block_reason = None if expired else reason_code
+        self._touch(now)
+
+    def expire_rights(self, *, now: datetime) -> None:
+        _require_utc(now, "now")
+        if self.status == AssetState.RIGHTS_EXPIRED:
+            return
+        if self.status != AssetState.AVAILABLE:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot expire rights from {self.status.value}"
+            )
+        self.status = AssetState.RIGHTS_EXPIRED
+        self.block_reason = None
         self._touch(now)
 
     def begin_retention_cleanup(self, *, now: datetime) -> None:
@@ -807,7 +911,9 @@ class Asset:
             AssetState.VALIDATING,
             AssetState.PENDING_REVIEW,
             AssetState.PENDING_RIGHTS,
+            AssetState.AVAILABLE,
             AssetState.BLOCKED,
+            AssetState.RIGHTS_EXPIRED,
             AssetState.FAILED,
         }:
             raise InvalidTransitionError(
@@ -832,7 +938,9 @@ class Asset:
             AssetState.VALIDATING,
             AssetState.PENDING_REVIEW,
             AssetState.PENDING_RIGHTS,
+            AssetState.AVAILABLE,
             AssetState.BLOCKED,
+            AssetState.RIGHTS_EXPIRED,
             AssetState.FAILED,
             AssetState.DELETING,
         }:

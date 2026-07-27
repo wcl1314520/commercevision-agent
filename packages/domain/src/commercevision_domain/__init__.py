@@ -8,9 +8,13 @@ from .assets import (
     AssetState,
     AssetValidationResult,
     AssetVersion,
+    CurrentUsabilityDecision,
     ObjectMismatchError,
     ProvenanceStatus,
     RetentionClass,
+    RightsDecisionCode,
+    RightsRecord,
+    RightsRecordDecision,
     StorageBackend,
     StorageLocationClass,
     StoragePreconditionError,
@@ -24,6 +28,7 @@ from .assets import (
     UploadSessionState,
     ValidationStage,
     ValidationVerdict,
+    evaluate_current_usability,
 )
 from .catalog import SKU, DuplicateExternalIdentifierError, Product
 from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
@@ -59,6 +64,7 @@ from .workflow.errors import (
     ReferenceConstraintError,
     RetryExhaustedError,
     RetryNotReadyError,
+    RightsDeniedError,
     UniqueConstraintError,
     WorkspaceAccessError,
 )
@@ -85,6 +91,7 @@ __all__ = [
     "ApprovalType",
     "AttemptStatus",
     "ConcurrencyError",
+    "CurrentUsabilityDecision",
     "DataIntegrityError",
     "DomainError",
     "DuplicateExternalIdentifierError",
@@ -101,7 +108,11 @@ __all__ = [
     "ProvenanceStatus",
     "ReferenceConstraintError",
     "RetentionClass",
+    "RightsDecisionCode",
+    "RightsRecord",
+    "RightsRecordDecision",
     "RetentionStatus",
+    "RightsDeniedError",
     "ReconciliationOutcome",
     "RetryExhaustedError",
     "RetryNotReadyError",
@@ -135,4 +146,5 @@ __all__ = [
     "new_uuid7",
     "normalize_provider_request_id",
     "validate_workspace_id",
+    "evaluate_current_usability",
 ]

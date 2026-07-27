@@ -39,6 +39,16 @@ from .operations import (
     OperationListResponseV1,
     OperationResponseV1,
 )
+from .rights import (
+    AssetAdministratorBlockRequestV1,
+    RightsHistoryResponseV1,
+    RightsMutationResponseV1,
+    RightsRecordMutationRequestV1,
+    RightsRecordResponseV1,
+    RightsRecordRevokeRequestV1,
+    RightsUsabilityRequestV1,
+    RightsUsabilityResponseV1,
+)
 from .workflow import (
     ApprovalRequest,
     ApprovalResponse,
@@ -61,6 +71,7 @@ __all__ = [
     "ApprovalRequest",
     "ApprovalResponse",
     "AssetResponseV1",
+    "AssetAdministratorBlockRequestV1",
     "AssetValidationOperationResponseV1",
     "AssetValidationStageResponseV1",
     "AssetValidationStatusResponseV1",
@@ -86,6 +97,13 @@ __all__ = [
     "ProductSummaryResponseV1",
     "ProductUpdateRequestV1",
     "PresignedUploadV1",
+    "RightsHistoryResponseV1",
+    "RightsMutationResponseV1",
+    "RightsRecordMutationRequestV1",
+    "RightsRecordResponseV1",
+    "RightsRecordRevokeRequestV1",
+    "RightsUsabilityRequestV1",
+    "RightsUsabilityResponseV1",
     "ServiceMetadata",
     "Settings",
     "SKUCreateRequestV1",

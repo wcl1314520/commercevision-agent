@@ -2,6 +2,12 @@
 
 export type AssetKind = "IMAGE" | "LORA" | "PROMPT_TEMPLATE" | "MODEL_CONFIGURATION";
 
+export interface AssetAdministratorBlockRequestV1 {
+  expected_asset_version: number;
+  reason: string;
+  evidence_reference: string;
+}
+
 export type AssetObjectState = "QUARANTINED" | "CONTROLLED" | "DELETE_PENDING" | "DELETED";
 
 export interface AssetResponseV1 {
@@ -15,6 +21,7 @@ export interface AssetResponseV1 {
   status: AssetState;
   block_reason: string | null;
   current_version_id: string;
+  current_rights_record_id: string | null;
   retention_deadline: string | null;
   version: number;
   created_at: string;
@@ -219,6 +226,91 @@ export interface ProductUpdateRequestV1 {
 export type ReconciliationOutcome = "NOT_REQUIRED" | "PENDING" | "CONFIRMED_SUCCESS" | "CONFIRMED_FAILURE" | "NOT_FOUND";
 
 export type RetentionClass = "TASK" | "FOUNDATION";
+
+export type RightsDecisionCode = "AUTHORIZED" | "NO_CURRENT_RIGHTS" | "RIGHTS_REVOKED" | "RIGHTS_NOT_YET_VALID" | "RIGHTS_EXPIRED" | "RIGHTS_ASSET_VERSION_MISMATCH" | "ASSET_VERSION_NOT_CURRENT" | "ASSET_NOT_AVAILABLE" | "ASSET_RETENTION_EXPIRED" | "ASSET_BLOCKED" | "ADMINISTRATIVELY_BLOCKED" | "USE_NOT_ALLOWED" | "PROVIDER_NOT_ALLOWED" | "DERIVATIVE_NOT_ALLOWED";
+
+export interface RightsHistoryResponseV1 {
+  items: Array<RightsRecordResponseV1>;
+  next_cursor?: number | null;
+}
+
+export interface RightsMutationResponseV1 {
+  asset_id: string;
+  asset_version: number;
+  asset_state: AssetState;
+  current_rights_record: RightsRecordResponseV1 | null;
+}
+
+export type RightsRecordDecision = "GRANT" | "REVOKE";
+
+export interface RightsRecordMutationRequestV1 {
+  expected_asset_version: number;
+  asset_version_id?: string | null;
+  owner_reference: string;
+  source: string;
+  license_reference: string;
+  allowed_uses: Array<string>;
+  allowed_providers: Array<string>;
+  derivative_allowed: boolean;
+  public_demo_allowed: boolean;
+  evidence_reference: string;
+  terms_sha256: string;
+  valid_from: string;
+  valid_until: string | null;
+  perpetual: boolean;
+}
+
+export interface RightsRecordResponseV1 {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  asset_version_id: string | null;
+  version_number: number;
+  decision: RightsRecordDecision;
+  owner_reference: string;
+  source: string;
+  license_reference: string;
+  allowed_uses: Array<string>;
+  allowed_providers: Array<string>;
+  derivative_allowed: boolean;
+  public_demo_allowed: boolean;
+  evidence_reference: string;
+  terms_sha256: string;
+  valid_from: string;
+  valid_until: string | null;
+  perpetual: boolean;
+  supersedes_record_id: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface RightsRecordRevokeRequestV1 {
+  expected_asset_version: number;
+  reason: string;
+  evidence_reference: string;
+}
+
+export interface RightsUsabilityRequestV1 {
+  asset_version_id: string;
+  purpose: string;
+  provider: string;
+  requires_derivative: boolean;
+  decision_time: string;
+}
+
+export interface RightsUsabilityResponseV1 {
+  authorized: boolean;
+  reason_code: RightsDecisionCode;
+  workspace_id: string;
+  asset_id: string;
+  asset_version_id: string;
+  rights_record_id: string | null;
+  rights_record_version: number | null;
+  purpose: string;
+  provider: string;
+  requires_derivative: boolean;
+  decided_at: string;
+}
 
 export interface SKUCreateRequestV1 {
   source_namespace: string;

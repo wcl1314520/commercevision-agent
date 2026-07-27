@@ -65,8 +65,8 @@ def integration_database(integration_settings: Settings):
     database = create_database(integration_settings)
     with database.engine.begin() as connection:
         connection.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        for table in reversed(Base.metadata.sorted_tables):
-            connection.execute(table.delete())
+        for table in reversed(tuple(Base.metadata.tables.values())):
+            connection.exec_driver_sql(f"TRUNCATE TABLE `{table.name}`")
         connection.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
     try:
         yield database

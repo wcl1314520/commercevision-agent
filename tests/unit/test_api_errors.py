@@ -3,6 +3,7 @@ from commercevision_domain import (
     DuplicateExternalIdentifierError,
     InvalidDataError,
     ReferenceConstraintError,
+    RightsDeniedError,
     UniqueConstraintError,
 )
 
@@ -32,5 +33,14 @@ def test_integrity_errors_have_stable_non_retryable_api_classification() -> None
         409,
         "DUPLICATE_EXTERNAL_IDENTIFIER",
         "conflict",
+        False,
+    )
+
+
+def test_rights_denial_has_a_stable_authorization_code() -> None:
+    assert _classification(RightsDeniedError("provider is not permitted")) == (
+        403,
+        "RIGHTS_DENIED",
+        "authorization",
         False,
     )

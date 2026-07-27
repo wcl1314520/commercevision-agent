@@ -386,6 +386,97 @@ def test_asset_validation_and_promotion_transitions_are_idempotent() -> None:
         asset.begin_validation(now=NOW + timedelta(seconds=5))
 
 
+@pytest.mark.parametrize(
+    ("source_state", "cleanup_method", "expected_state"),
+    [
+        (AssetState.AVAILABLE, "begin", AssetState.DELETING),
+        (AssetState.AVAILABLE, "complete", AssetState.DELETED),
+        (AssetState.RIGHTS_EXPIRED, "begin", AssetState.DELETING),
+        (AssetState.RIGHTS_EXPIRED, "complete", AssetState.DELETED),
+    ],
+)
+def test_task_retention_cleanup_accepts_every_post_rights_usable_state(
+    source_state: AssetState,
+    cleanup_method: str,
+    expected_state: AssetState,
+) -> None:
+    deadline = NOW + timedelta(days=3)
+    asset = Asset.create_quarantined(
+        asset_id=new_uuid7(),
+        workspace_id="asset-domain",
+        retention_class=RetentionClass.TASK,
+        kind=AssetKind.IMAGE,
+        workflow_id=new_uuid7(),
+        product_id=None,
+        sku_id=None,
+        current_version_id=new_uuid7(),
+        retention_deadline=deadline,
+        now=NOW,
+    )
+    asset.begin_validation(now=NOW + timedelta(seconds=1))
+    asset.mark_pending_rights(now=NOW + timedelta(seconds=2))
+    asset.select_available_rights(
+        rights_record_id=new_uuid7(),
+        now=NOW + timedelta(seconds=3),
+    )
+    if source_state == AssetState.RIGHTS_EXPIRED:
+        asset.expire_rights(now=NOW + timedelta(seconds=4))
+
+    if cleanup_method == "begin":
+        asset.begin_retention_cleanup(now=deadline)
+    else:
+        asset.expire_retention(now=deadline)
+
+    assert asset.status == expected_state
+
+
+@pytest.mark.parametrize(
+    "stronger_reason",
+    ["ADMINISTRATIVELY_BLOCKED", "MALWARE_INFECTED"],
+)
+@pytest.mark.parametrize("rights_transition", ["revoke", "unusable"])
+def test_rights_changes_cannot_downgrade_a_stronger_asset_block(
+    stronger_reason: str,
+    rights_transition: str,
+) -> None:
+    asset = _asset()
+    asset.begin_validation(now=NOW + timedelta(seconds=1))
+    asset.mark_pending_rights(now=NOW + timedelta(seconds=2))
+    asset.select_available_rights(
+        rights_record_id=new_uuid7(),
+        now=NOW + timedelta(seconds=3),
+    )
+    asset.block(
+        reason_code=stronger_reason,
+        now=NOW + timedelta(seconds=4),
+    )
+    blocked_version = asset.version
+    replacement_record_id = new_uuid7()
+
+    if rights_transition == "revoke":
+        asset.select_revoked_rights(
+            rights_record_id=replacement_record_id,
+            now=NOW + timedelta(seconds=5),
+        )
+    else:
+        asset.select_unusable_rights(
+            rights_record_id=replacement_record_id,
+            reason_code="RIGHTS_PERMISSION_EMPTY",
+            expired=False,
+            now=NOW + timedelta(seconds=5),
+        )
+
+    assert asset.status == AssetState.BLOCKED
+    assert asset.block_reason == stronger_reason
+    assert asset.current_rights_record_id == replacement_record_id
+    assert asset.version == blocked_version + 1
+    with pytest.raises(InvalidTransitionError, match="non-rights block"):
+        asset.select_available_rights(
+            rights_record_id=new_uuid7(),
+            now=NOW + timedelta(seconds=6),
+        )
+
+
 def test_asset_validation_can_require_review_or_block_without_becoming_usable() -> None:
     review = _asset()
     review.begin_validation(now=NOW + timedelta(seconds=1))

@@ -195,16 +195,31 @@ Validation Result 是 append-only evidence：
 Validation Data Transfer Policy version/snapshot、purpose、provider 和 region 等 allowlisted
 身份，不保存签名 URL、对象 Key、Secret 或 Provider 原始响应。
 
-### `asset_rights`
+### `rights_records`
 
-- `asset_id`
-- `owner`
-- `source`
-- `license_type`
-- `allowed_uses_json`
-- `allowed_providers_json`
-- `valid_from`
-- `valid_until`
+Rights Record 是 Asset Aggregate 的不可变、append-only 使用权事实：
+
+- `workspace_id`、`asset_id`、可选的精确 `asset_version_id`
+- 每个 Asset 单调递增且唯一的 `version_number`
+- `decision`（`GRANT` 或 `REVOKE`）、权利人、来源、许可证和证据引用
+- 派生与公开演示开关、条款 SHA-256
+- `valid_from` 和 exclusive `valid_until`；永久权利必须显式设置 `perpetual`
+- `supersedes_record_id`、创建人、`DATETIME(6)` 创建时间和一次性
+  `permissions_sealed_at`
+
+`rights_record_uses` 和 `rights_record_providers` 分别保存规范化、可索引的用途和 Provider
+许可；空集合按默认拒绝解释，不能从 JSON、缓存或 Milvus 推导授权。应用在一个事务内写入
+父记录、全部许可行并封存，只有 `NULL -> permissions_sealed_at` 这一次且不改变其他字段的
+父记录更新被允许。封存后的许可 `INSERT` 以及 Rights Record/许可行的 `UPDATE`、`DELETE`
+均由数据库 trigger 拒绝，迁移降级在存在历史时关闭式拒绝。
+
+`assets.current_rights_record_id` 是同 Workspace、同 Asset 的复合外键。登记、替换、撤销、
+到期或管理员阻断会在同一事务内锁定 Asset、追加记录（适用时）、更新 current pointer 与
+Asset 状态，并写入 Audit 和 Durable Outbox。并发替换由聚合行锁、Asset optimistic version
+和 `(workspace_id, asset_id, version_number)` 唯一键共同保证不会产生重复版本。
+把 Asset 推进为 `AVAILABLE` 的事务在 `COMMIT` 前用最后一条、带
+`UTC_TIMESTAMP(6)` 条件的 DML 重新检查 retention、当前 Rights Record、有效期和非空许可
+集合；边界已跨越时整笔事务回滚。
 
 ### `asset_embeddings`
 

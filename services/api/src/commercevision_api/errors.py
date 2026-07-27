@@ -19,6 +19,7 @@ from commercevision_domain import (
     NotFoundError,
     ObjectMismatchError,
     ReferenceConstraintError,
+    RightsDeniedError,
     StorageUnavailableError,
     UniqueConstraintError,
     UnsupportedAssetKindError,
@@ -102,6 +103,8 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
         return 403, "WORKSPACE_ACCESS_DENIED", "authorization", False
     if isinstance(exc, AdminRequiredError):
         return 403, "ADMIN_REQUIRED", "authorization", False
+    if isinstance(exc, RightsDeniedError):
+        return 403, "RIGHTS_DENIED", "authorization", False
     if isinstance(exc, AuthorizationError):
         return 403, "AUTHORIZATION_DENIED", "authorization", False
     if isinstance(exc, NotFoundError):

@@ -401,8 +401,21 @@ class AssetModel(Base):
             "OR (status <> 'BLOCKED' AND block_reason IS NULL)",
             name="ck_assets_block_reason",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "current_rights_record_id", "id"],
+            ["rights_records.workspace_id", "rights_records.id", "rights_records.asset_id"],
+            name="fk_assets_current_rights_record",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
         Index("ix_assets_workspace_status", "workspace_id", "status", "updated_at", "id"),
         Index("ix_assets_retention_deadline", "status", "retention_deadline"),
+        Index(
+            "ix_assets_current_rights",
+            "workspace_id",
+            "current_rights_record_id",
+            "status",
+        ),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
@@ -416,6 +429,7 @@ class AssetModel(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     block_reason: Mapped[str | None] = mapped_column(String(64))
     current_version_id: Mapped[str | None] = mapped_column(String(36))
+    current_rights_record_id: Mapped[str | None] = mapped_column(String(36))
     retention_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
@@ -426,6 +440,12 @@ class AssetVersionModel(Base):
     __tablename__ = "asset_versions"
     __table_args__ = (
         UniqueConstraint("workspace_id", "id", name="uq_asset_version_workspace_id"),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            "asset_id",
+            name="uq_asset_versions_workspace_id_asset",
+        ),
         UniqueConstraint("upload_session_id", name="uq_asset_version_upload_session"),
         UniqueConstraint(
             "asset_id",
@@ -492,6 +512,169 @@ class AssetVersionModel(Base):
         exact_string_sql_type(64),
         nullable=False,
     )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class RightsRecordModel(Base):
+    __tablename__ = "rights_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_rights_records_workspace_id",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            "asset_id",
+            name="uq_rights_records_workspace_id_asset",
+        ),
+        UniqueConstraint(
+            "asset_id",
+            "version_number",
+            name="uq_rights_records_asset_version",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_id"],
+            ["assets.workspace_id", "assets.id"],
+            name="fk_rights_records_workspace_asset",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_version_id", "asset_id"],
+            [
+                "asset_versions.workspace_id",
+                "asset_versions.id",
+                "asset_versions.asset_id",
+            ],
+            name="fk_rights_records_workspace_asset_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "supersedes_record_id", "asset_id"],
+            ["rights_records.workspace_id", "rights_records.id", "rights_records.asset_id"],
+            name="fk_rights_records_supersedes",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("version_number > 0", name="ck_rights_records_version"),
+        CheckConstraint(
+            "decision IN ('GRANT', 'REVOKE')",
+            name="ck_rights_records_decision",
+        ),
+        CheckConstraint(
+            "(perpetual = 1 AND valid_until IS NULL) OR "
+            "(perpetual = 0 AND valid_until IS NOT NULL AND valid_until > valid_from)",
+            name="ck_rights_records_validity",
+        ),
+        CheckConstraint(
+            "terms_sha256 REGEXP '^[0-9a-f]{64}$'",
+            name="ck_rights_records_terms_sha256",
+        ),
+        Index(
+            "ix_rights_records_current_expiry",
+            "perpetual",
+            "valid_until",
+            "asset_id",
+            "id",
+        ),
+        Index(
+            "ix_rights_records_activation",
+            "decision",
+            "valid_from",
+            "valid_until",
+            "asset_id",
+            "id",
+        ),
+        Index(
+            "ix_rights_records_asset_created",
+            "workspace_id",
+            "asset_id",
+            "version_number",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_version_id: Mapped[str | None] = mapped_column(String(36))
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    owner_reference: Mapped[str] = mapped_column(String(256), nullable=False)
+    source: Mapped[str] = mapped_column(String(256), nullable=False)
+    license_reference: Mapped[str] = mapped_column(String(256), nullable=False)
+    derivative_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    public_demo_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    evidence_reference: Mapped[str] = mapped_column(String(512), nullable=False)
+    terms_sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    valid_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    perpetual: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    supersedes_record_id: Mapped[str | None] = mapped_column(String(36))
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    permissions_sealed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class RightsRecordUseModel(Base):
+    __tablename__ = "rights_record_uses"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "rights_record_id",
+            "allowed_use",
+            name="pk_rights_record_uses",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "rights_record_id", "asset_id"],
+            ["rights_records.workspace_id", "rights_records.id", "rights_records.asset_id"],
+            name="fk_rights_record_uses_rights_record",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_rights_record_uses_authorization",
+            "workspace_id",
+            "allowed_use",
+            "asset_id",
+            "rights_record_id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    rights_record_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    allowed_use: Mapped[str] = mapped_column(exact_string_sql_type(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class RightsRecordProviderModel(Base):
+    __tablename__ = "rights_record_providers"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "rights_record_id",
+            "allowed_provider",
+            name="pk_rights_record_providers",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "rights_record_id", "asset_id"],
+            ["rights_records.workspace_id", "rights_records.id", "rights_records.asset_id"],
+            name="fk_rights_record_providers_rights_record",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_rights_record_providers_authorization",
+            "workspace_id",
+            "allowed_provider",
+            "asset_id",
+            "rights_record_id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    rights_record_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    allowed_provider: Mapped[str] = mapped_column(exact_string_sql_type(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 

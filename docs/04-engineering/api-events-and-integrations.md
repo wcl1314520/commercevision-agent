@@ -111,8 +111,13 @@ GET  /api/v1/operator/legacy-dead-letters/{deadLetterId}
   授权和系统管理员声明。签名 Secret 缺失、签名无效、过期或授权缺失时 API 关闭式拒绝。
 - Web BFF 是公开 Demo 的受信入口 Adapter：它拒绝
   `CV_WEB_ALLOWED_WORKSPACE_IDS` 之外的 Workspace，覆盖浏览器传入的 Actor/Principal，
-  并用服务端 Current Key 为每个请求签发短期成员 Principal。企业部署必须由真实会话或
-  上游身份网关计算 Workspace 授权，不能把浏览器 Header 直接转换成成员关系。
+  并用服务端 Current Key 为每个请求签发短期成员 Principal。可选的
+  `CV_WEB_ADMIN_WORKSPACE_IDS` 必须是 Allowed 集合的严格子集；未配置时不签发任何管理员
+  权限。企业部署必须由真实会话或上游身份网关计算 Workspace 授权，不能把浏览器 Header
+  直接转换成成员或管理员关系。
+- Web 的 `/api/web-capabilities` 只从上述服务端 Allowed/Admin 集合返回当前 Workspace 的
+  展示能力，用于隐藏未授权的管理员控件；它不签发新权限，也不替代 API 对签名 Principal
+  的最终授权。
 - Upload Session 与 Asset 路由和 Operation 路由使用同一 Trusted Principal 边界。业务
   `actor_id` 只能来自签名 Claims；浏览器提供的 `X-Actor-Id` 和
   `X-Trusted-Principal` 会被 BFF 覆盖。BFF 对控制面请求体限制为 1 MiB、响应体限制为
@@ -127,6 +132,10 @@ GET  /api/v1/operator/legacy-dead-letters/{deadLetterId}
   空白、控制字符、非 ASCII 或超长值分别在路由校验或身份解析阶段稳定拒绝。系统不修剪、
   折叠大小写或规范化身份，授权、持久化和幂等范围使用完全相同的合法 Token。
 - 这是当前 Phase 2 身份 Adapter seam，不是完整认证系统；生产入口负责先完成真实身份认证。
+- `POST /api/v1/assets/{assetId}/usability:check` 在一个 MySQL 事务内共享锁定 Asset/current
+  Rights 快照并读取 `UTC_TIMESTAMP(6)`。请求中的 `decision_time` 是保守评估上界，实际
+  时间取 `max(decision_time, database_now)`；调用方可请求面向未来的关闭式判断，但不能
+  通过回填旧时间延长当前授权。
 - Operation 和死信查询在授权后按工作区限定；已授权工作区中的跨工作区 ID 与不存在 ID 均
   返回 `NOT_FOUND`，未加入请求工作区则返回 `WORKSPACE_ACCESS_DENIED`。
 - 重放要求 `Idempotency-Key`，返回 `202`，相同请求返回同一不可变重放记录。持久化 Scope

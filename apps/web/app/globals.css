@@ -478,6 +478,132 @@ textarea {
   padding-top: 18px;
 }
 
+.asset-rights {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+  padding-top: 18px;
+}
+
+.rights-form,
+.rights-actions,
+.rights-decision {
+  display: grid;
+  gap: 14px;
+}
+
+.rights-form fieldset {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0;
+  min-width: 0;
+  padding: 14px 0 0;
+}
+
+.rights-form legend {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 10px 0 0;
+}
+
+.rights-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.rights-options label,
+.rights-inline-option {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  flex-direction: row;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.rights-options input,
+.rights-inline-option input {
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+}
+
+.rights-actions,
+.rights-decision {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.rights-authorized,
+.rights-denied {
+  align-items: center;
+  border: 1px solid;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.rights-authorized {
+  background: #e8f5ed;
+  border-color: #a8d1b6;
+  color: var(--success);
+}
+
+.rights-denied {
+  background: var(--danger-soft);
+  border-color: #e6bbb6;
+  color: var(--danger);
+}
+
+.rights-authorized span,
+.rights-denied span {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.rights-history {
+  border-top: 1px solid var(--line);
+  display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rights-history li {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
+  padding: 14px 0;
+}
+
+.rights-history li > div {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.rights-history li > div span,
+.rights-history p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rights-history p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.rights-history .rights-evidence {
+  color: var(--ink);
+}
+
 .asset-validation-heading {
   align-items: baseline;
   display: flex;

@@ -94,6 +94,7 @@ scheduler_batch_size: 50
 scheduler_lease_seconds: 30
 scheduler_recovery_interval_seconds: 10
 scheduler_operation_recovery_interval_seconds: 10
+rights_expiry_scan_interval_seconds: 10
 scheduler_scanner_timeout_seconds: 30
 operation_retry_initial_seconds: 1
 operation_retry_max_seconds: 300

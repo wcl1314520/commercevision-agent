@@ -194,6 +194,7 @@ class AssetResponseV1(BaseModel):
     status: AssetState
     block_reason: str | None
     current_version_id: str
+    current_rights_record_id: str | None
     retention_deadline: datetime | None
     version: int
     created_at: datetime

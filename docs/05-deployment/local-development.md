@@ -251,7 +251,7 @@ uv run pytest tests/contract/test_object_storage_oss_live.py -m live_oss -q
 4. Secret file source。
 5. `config/base.yaml` 非敏感默认值。
 
-启动时由 Pydantic 校验类型和枚举，未知环境值会拒绝启动。Secret file 默认从容器内 `/run/secrets` 或项目本地 `secrets` 目录读取，也可通过 `CV_SECRETS_DIR` 指定；文件名使用完整 `CV_` 前缀，例如 `CV_OBJECT_STORE_SECRET_KEY`。Trusted Principal 轮换的 Current/Previous HMAC Secret 分别使用 `CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET` 和 `CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET`，Key ID 通过同名环境配置显式绑定；两个配置必须成对且 ID 不得相同。Web BFF 使用 Current Key 为 `CV_WEB_ALLOWED_WORKSPACE_IDS` 内的请求签发短期 Principal，并将 Actor 固定为 `CV_WEB_PRINCIPAL_ACTOR_ID`；本地 Compose 默认值只用于回环地址开发，生产必须由 Secret Manager 注入随机 Secret，并由真实身份会话决定 Workspace 成员关系。
+启动时由 Pydantic 校验类型和枚举，未知环境值会拒绝启动。Secret file 默认从容器内 `/run/secrets` 或项目本地 `secrets` 目录读取，也可通过 `CV_SECRETS_DIR` 指定；文件名使用完整 `CV_` 前缀，例如 `CV_OBJECT_STORE_SECRET_KEY`。Trusted Principal 轮换的 Current/Previous HMAC Secret 分别使用 `CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET` 和 `CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET`，Key ID 通过同名环境配置显式绑定；两个配置必须成对且 ID 不得相同。Web BFF 使用 Current Key 为 `CV_WEB_ALLOWED_WORKSPACE_IDS` 内的请求签发短期 Principal，并将 Actor 固定为 `CV_WEB_PRINCIPAL_ACTOR_ID`；`CV_WEB_ADMIN_WORKSPACE_IDS` 默认空且必须是 Allowed 集合的子集。公开 Demo 应保持管理员集合为空；生产必须由 Secret Manager 注入随机 Secret，并由真实身份会话决定 Workspace 成员与管理员关系。
 
 ## 故障排查
 

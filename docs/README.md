@@ -43,6 +43,7 @@
 - [可观测性与运行维护](05-deployment/observability-and-operations.md)
 - [CI/CD 与发布](05-deployment/ci-cd-and-release.md)
 - [Asset Validation Runbook](runbooks/asset-validation.md)
+- [Asset Rights Runbook](runbooks/asset-rights.md)
 
 ## 06 路线图
 

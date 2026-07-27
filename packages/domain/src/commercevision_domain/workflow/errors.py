@@ -57,6 +57,10 @@ class AuthorizationError(DomainError):
     """The current identity is not permitted to perform the requested action."""
 
 
+class RightsDeniedError(AuthorizationError):
+    """The authoritative current Rights Record denies the requested asset use."""
+
+
 class AuthenticationError(AuthorizationError):
     """No valid trusted principal was supplied."""
 

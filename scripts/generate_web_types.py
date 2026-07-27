@@ -9,6 +9,7 @@ from typing import Any
 
 SCHEMAS = (
     "AssetKind",
+    "AssetAdministratorBlockRequestV1",
     "AssetObjectState",
     "AssetResponseV1",
     "AssetState",
@@ -30,6 +31,15 @@ SCHEMAS = (
     "ProductUpdateRequestV1",
     "ReconciliationOutcome",
     "RetentionClass",
+    "RightsDecisionCode",
+    "RightsHistoryResponseV1",
+    "RightsMutationResponseV1",
+    "RightsRecordDecision",
+    "RightsRecordMutationRequestV1",
+    "RightsRecordResponseV1",
+    "RightsRecordRevokeRequestV1",
+    "RightsUsabilityRequestV1",
+    "RightsUsabilityResponseV1",
     "SKUCreateRequestV1",
     "SKUResponseV1",
     "SKUUpdateRequestV1",

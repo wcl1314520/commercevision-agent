@@ -4,6 +4,13 @@ import type {
   ErrorResponse,
   OperationResponseV1,
   PresignedUploadV1,
+  AssetAdministratorBlockRequestV1,
+  RightsHistoryResponseV1,
+  RightsMutationResponseV1,
+  RightsRecordMutationRequestV1,
+  RightsRecordRevokeRequestV1,
+  RightsUsabilityRequestV1,
+  RightsUsabilityResponseV1,
   UploadFinalizeResponseV1,
   UploadSessionCreateRequestV1,
   UploadSessionCreateResponseV1,
@@ -11,6 +18,9 @@ import type {
 } from "./generated/catalog-api";
 
 export type DurableOperationResponseV1 = OperationResponseV1;
+export type WorkspaceCapabilities = {
+  administrator: boolean;
+};
 
 export class AssetApiError extends Error {
   readonly status: number;
@@ -174,6 +184,101 @@ export class AssetApi {
   getAssetValidation(assetId: string): Promise<AssetValidationStatusResponseV1> {
     return this.request<AssetValidationStatusResponseV1>(
       `/api/v1/assets/${encodeURIComponent(assetId)}/validation`,
+    );
+  }
+
+  registerRights(
+    assetId: string,
+    payload: RightsRecordMutationRequestV1,
+    idempotencyKey: string,
+  ): Promise<RightsMutationResponseV1> {
+    return this.request<RightsMutationResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/rights`,
+      { method: "POST", body: JSON.stringify(payload) },
+      idempotencyKey,
+    );
+  }
+
+  replaceRights(
+    assetId: string,
+    payload: RightsRecordMutationRequestV1,
+    idempotencyKey: string,
+  ): Promise<RightsMutationResponseV1> {
+    return this.request<RightsMutationResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/rights:replace`,
+      { method: "POST", body: JSON.stringify(payload) },
+      idempotencyKey,
+    );
+  }
+
+  revokeRights(
+    assetId: string,
+    payload: RightsRecordRevokeRequestV1,
+    idempotencyKey: string,
+  ): Promise<RightsMutationResponseV1> {
+    return this.request<RightsMutationResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/rights:revoke`,
+      { method: "POST", body: JSON.stringify(payload) },
+      idempotencyKey,
+    );
+  }
+
+  administratorBlock(
+    assetId: string,
+    payload: AssetAdministratorBlockRequestV1,
+    idempotencyKey: string,
+  ): Promise<RightsMutationResponseV1> {
+    return this.request<RightsMutationResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}:block`,
+      { method: "POST", body: JSON.stringify(payload) },
+      idempotencyKey,
+    );
+  }
+
+  getRightsHistory(
+    assetId: string,
+    {
+      beforeVersion,
+      limit,
+    }: {
+      beforeVersion?: number;
+      limit?: number;
+    } = {},
+  ): Promise<RightsHistoryResponseV1> {
+    if (
+      beforeVersion !== undefined &&
+      (!Number.isSafeInteger(beforeVersion) || beforeVersion < 1)
+    ) {
+      throw new TypeError("beforeVersion must be a positive safe integer");
+    }
+    if (
+      limit !== undefined &&
+      (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+    ) {
+      throw new TypeError("limit must be a safe integer between 1 and 100");
+    }
+    const query = new URLSearchParams();
+    if (beforeVersion !== undefined) {
+      query.set("before_version", String(beforeVersion));
+    }
+    if (limit !== undefined) query.set("limit", String(limit));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.request<RightsHistoryResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/rights${suffix}`,
+    );
+  }
+
+  getWorkspaceCapabilities(): Promise<WorkspaceCapabilities> {
+    return this.request<WorkspaceCapabilities>("/api/web-capabilities");
+  }
+
+  checkUsability(
+    assetId: string,
+    payload: RightsUsabilityRequestV1,
+  ): Promise<RightsUsabilityResponseV1> {
+    return this.request<RightsUsabilityResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/usability:check`,
+      { method: "POST", body: JSON.stringify(payload) },
     );
   }
 

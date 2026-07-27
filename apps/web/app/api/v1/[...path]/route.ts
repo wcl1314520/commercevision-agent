@@ -26,7 +26,9 @@ class RequestBodyTooLargeError extends Error {}
 class UpstreamResponseTooLargeError extends Error {}
 
 function encodeApiPathSegment(segment: string): string {
-  const action = /^(.*):(abort|finalize)$/.exec(segment);
+  const action = /^(.*):(abort|block|check|finalize|replace|revoke)$/.exec(
+    segment,
+  );
   if (action) {
     return `${encodeURIComponent(action[1])}:${action[2]}`;
   }
@@ -149,8 +151,18 @@ function apiMethodAllowed(path: string, method: string): boolean {
   if (/^\/upload-sessions\/[^/:]+:(abort|finalize)$/.test(path)) {
     return method === "POST";
   }
-  if (/^\/assets\/[^/]+$/.test(path)) return method === "GET";
-  if (/^\/assets\/[^/]+\/validation$/.test(path)) return method === "GET";
+  if (/^\/assets\/[^/:]+$/.test(path)) return method === "GET";
+  if (/^\/assets\/[^/:]+\/validation$/.test(path)) return method === "GET";
+  if (/^\/assets\/[^/:]+\/rights$/.test(path)) {
+    return method === "GET" || method === "POST";
+  }
+  if (/^\/assets\/[^/:]+\/rights:(replace|revoke)$/.test(path)) {
+    return method === "POST";
+  }
+  if (/^\/assets\/[^/:]+\/usability:check$/.test(path)) {
+    return method === "POST";
+  }
+  if (/^\/assets\/[^/:]+:block$/.test(path)) return method === "POST";
   if (
     /^\/operations\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       path,

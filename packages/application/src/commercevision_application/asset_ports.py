@@ -12,6 +12,7 @@ from commercevision_domain import (
     AssetObject,
     AssetValidationResult,
     AssetVersion,
+    RightsRecord,
     UploadSession,
     ValidationStage,
 )
@@ -31,6 +32,20 @@ class IdempotencyRecordPort(Protocol):
 class WorkflowRetentionFacts:
     created_at: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentUsabilitySnapshot:
+    asset: Asset
+    rights_record: RightsRecord | None
+    database_now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RightsScanClaim:
+    asset: Asset
+    rights_record: RightsRecord
+    database_now: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +145,43 @@ class AssetRepositoryPort(Protocol):
         workspace_id: str,
         asset_version_id: str,
     ) -> list[AssetValidationResult]: ...
+
+    def add_rights_record(self, rights_record: RightsRecord) -> None: ...
+
+    def get_rights_record(
+        self,
+        *,
+        workspace_id: str,
+        rights_record_id: str,
+    ) -> RightsRecord | None: ...
+
+    def get_current_usability_snapshot(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+    ) -> CurrentUsabilitySnapshot | None: ...
+
+    def list_rights_records(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        before_version: int | None,
+        limit: int,
+    ) -> list[RightsRecord]: ...
+
+    def claim_expired_rights(
+        self,
+        *,
+        limit: int,
+    ) -> list[RightsScanClaim]: ...
+
+    def claim_activatable_rights(
+        self,
+        *,
+        limit: int,
+    ) -> list[RightsScanClaim]: ...
 
 
 class AssetAssociationPort(Protocol):
@@ -243,6 +295,16 @@ class AssetUnitOfWorkPort(Protocol):
         workspace_id: str,
         asset_id: str,
         retention_deadline: datetime,
+        clock: Callable[[], datetime],
+    ) -> None: ...
+
+    def commit_rights_mutation(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        retention_deadline: datetime | None,
+        available_rights_record_id: str | None,
         clock: Callable[[], datetime],
     ) -> None: ...
 

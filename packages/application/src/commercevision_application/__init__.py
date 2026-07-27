@@ -2,6 +2,7 @@
 
 from .asset_cleanup import UploadObjectCleaner
 from .asset_cleanup_dispatch import upload_cleanup_input_hash
+from .asset_rights import AssetRightsApplicationService
 from .asset_validation import (
     AssetValidationExecutor,
     AssetValidationExecutorPolicy,
@@ -64,6 +65,7 @@ __all__ = [
     "DeadLetterOperatorService",
     "AuthenticatedPrincipal",
     "AssetRegistryApplicationService",
+    "AssetRightsApplicationService",
     "AssetValidationExecutor",
     "AssetValidationExecutorPolicy",
     "AssetValidationObserver",

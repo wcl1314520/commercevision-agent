@@ -92,6 +92,7 @@ def asset_response(
         status=asset.status,
         block_reason=asset.block_reason,
         current_version_id=asset.current_version_id,
+        current_rights_record_id=asset.current_rights_record_id,
         retention_deadline=asset.retention_deadline,
         version=asset.version,
         created_at=asset.created_at,

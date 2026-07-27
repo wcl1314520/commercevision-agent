@@ -29,6 +29,13 @@ from .errors import (
     UploadExpiredError,
     UploadObjectMissingError,
 )
+from .rights import (
+    CurrentUsabilityDecision,
+    RightsDecisionCode,
+    RightsRecord,
+    RightsRecordDecision,
+    evaluate_current_usability,
+)
 
 __all__ = [
     "Asset",
@@ -38,9 +45,13 @@ __all__ = [
     "AssetState",
     "AssetValidationResult",
     "AssetVersion",
+    "CurrentUsabilityDecision",
     "ObjectMismatchError",
     "ProvenanceStatus",
     "RetentionClass",
+    "RightsDecisionCode",
+    "RightsRecord",
+    "RightsRecordDecision",
     "StorageBackend",
     "StorageLocationClass",
     "StoragePreconditionError",
@@ -54,4 +65,5 @@ __all__ = [
     "UploadSessionState",
     "ValidationStage",
     "ValidationVerdict",
+    "evaluate_current_usability",
 ]

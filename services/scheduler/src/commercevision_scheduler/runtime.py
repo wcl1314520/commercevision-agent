@@ -12,6 +12,7 @@ from threading import Event, Thread
 
 from celery import Celery
 from commercevision_application import (
+    AssetRightsApplicationService,
     EventRoutingError,
     OperationRecoveryService,
     OutboxDispatcher,
@@ -209,6 +210,8 @@ class SchedulerState:
     recovered_workflows_total: int = 0
     recovered_operations_total: int = 0
     expired_uploads_total: int = 0
+    expired_rights_total: int = 0
+    activated_rights_total: int = 0
     scanners: dict[str, ScannerStatus] | None = None
 
     @property
@@ -274,6 +277,9 @@ class SchedulerRuntime:
                 ),
             ),
         )
+        self.rights = AssetRightsApplicationService(
+            uow_factory=lambda: SqlAlchemyAssetUnitOfWork(self.database.session_factory)
+        )
         self.state = SchedulerState()
         self.orchestrator = IndependentScannerOrchestrator(
             scanners=(
@@ -296,6 +302,16 @@ class SchedulerRuntime:
                     "upload_session_expiry",
                     settings.scheduler_recovery_interval_seconds,
                     self._expire_upload_sessions_once,
+                ),
+                ScannerDefinition(
+                    "rights_activation",
+                    settings.rights_expiry_scan_interval_seconds,
+                    self._activate_rights_once,
+                ),
+                ScannerDefinition(
+                    "rights_expiry",
+                    settings.rights_expiry_scan_interval_seconds,
+                    self._expire_rights_once,
                 ),
             ),
             timeout_seconds=settings.scheduler_scanner_timeout_seconds,
@@ -330,6 +346,16 @@ class SchedulerRuntime:
         expired = self.upload_maintenance.expire_due_once()
         self.state.expired_uploads_total += expired
         return expired
+
+    def _expire_rights_once(self) -> int:
+        expired = self.rights.expire_due_once(limit=self.settings.scheduler_batch_size)
+        self.state.expired_rights_total += expired
+        return expired
+
+    def _activate_rights_once(self) -> int:
+        activated = self.rights.activate_due_once(limit=self.settings.scheduler_batch_size)
+        self.state.activated_rights_total += activated
+        return activated
 
     def close(self) -> None:
         self.database.dispose()

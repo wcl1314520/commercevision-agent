@@ -8,6 +8,8 @@ from types import TracebackType
 
 from commercevision_application.asset_ports import (
     AssetRetentionCommitExpiredError,
+    CurrentUsabilitySnapshot,
+    RightsScanClaim,
     WorkflowRetentionFacts,
 )
 from commercevision_domain import (
@@ -19,7 +21,10 @@ from commercevision_domain import (
     AssetValidationResult,
     AssetVersion,
     ConcurrencyError,
+    InvalidTransitionError,
     RetentionClass,
+    RightsRecord,
+    RightsRecordDecision,
     StorageBackend,
     StorageLocationClass,
     UploadSession,
@@ -43,6 +48,9 @@ from .models import (
     AssetValidationResultModel,
     AssetVersionModel,
     ProductModel,
+    RightsRecordModel,
+    RightsRecordProviderModel,
+    RightsRecordUseModel,
     SKUModel,
     UploadSessionModel,
     WorkflowModel,
@@ -165,6 +173,7 @@ def _asset_from_model(model: AssetModel) -> Asset:
         version=model.version,
         created_at=model.created_at,
         updated_at=model.updated_at,
+        current_rights_record_id=model.current_rights_record_id,
     )
 
 
@@ -192,6 +201,39 @@ def _asset_version_from_model(model: AssetVersionModel) -> AssetVersion:
         validation_transfer_policy_snapshot_sha256=(
             model.validation_transfer_policy_snapshot_sha256
         ),
+        created_at=model.created_at,
+    )
+
+
+def _rights_record_from_model(
+    model: RightsRecordModel,
+    *,
+    allowed_uses: frozenset[str],
+    allowed_providers: frozenset[str],
+) -> RightsRecord:
+    if model.permissions_sealed_at is None:
+        raise RuntimeError(f"Rights Record {model.id} has unsealed permissions")
+    return RightsRecord(
+        id=model.id,
+        workspace_id=model.workspace_id,
+        asset_id=model.asset_id,
+        asset_version_id=model.asset_version_id,
+        version_number=model.version_number,
+        decision=RightsRecordDecision(model.decision),
+        owner_reference=model.owner_reference,
+        source=model.source,
+        license_reference=model.license_reference,
+        allowed_uses=allowed_uses,
+        allowed_providers=allowed_providers,
+        derivative_allowed=model.derivative_allowed,
+        public_demo_allowed=model.public_demo_allowed,
+        evidence_reference=model.evidence_reference,
+        terms_sha256=model.terms_sha256,
+        valid_from=model.valid_from,
+        valid_until=model.valid_until,
+        perpetual=model.perpetual,
+        supersedes_record_id=model.supersedes_record_id,
+        created_by=model.created_by,
         created_at=model.created_at,
     )
 
@@ -394,6 +436,7 @@ class AssetRepository:
                 status=asset.status.value,
                 block_reason=asset.block_reason,
                 current_version_id=None,
+                current_rights_record_id=None,
                 retention_deadline=asset.retention_deadline,
                 version=asset.version,
                 created_at=asset.created_at,
@@ -501,6 +544,7 @@ class AssetRepository:
                 status=asset.status.value,
                 block_reason=asset.block_reason,
                 current_version_id=asset.current_version_id,
+                current_rights_record_id=asset.current_rights_record_id,
                 retention_deadline=asset.retention_deadline,
                 version=asset.version,
                 updated_at=asset.updated_at,
@@ -509,6 +553,324 @@ class AssetRepository:
         if result.rowcount != 1:
             raise ConcurrencyError(f"Asset {asset.id} was concurrently modified")
         self._loaded_asset_versions[asset.id] = asset.version
+
+    def add_rights_record(self, rights_record: RightsRecord) -> None:
+        model = RightsRecordModel(
+            id=rights_record.id,
+            workspace_id=rights_record.workspace_id,
+            asset_id=rights_record.asset_id,
+            asset_version_id=rights_record.asset_version_id,
+            version_number=rights_record.version_number,
+            decision=rights_record.decision.value,
+            owner_reference=rights_record.owner_reference,
+            source=rights_record.source,
+            license_reference=rights_record.license_reference,
+            derivative_allowed=rights_record.derivative_allowed,
+            public_demo_allowed=rights_record.public_demo_allowed,
+            evidence_reference=rights_record.evidence_reference,
+            terms_sha256=rights_record.terms_sha256,
+            valid_from=rights_record.valid_from,
+            valid_until=rights_record.valid_until,
+            perpetual=rights_record.perpetual,
+            supersedes_record_id=rights_record.supersedes_record_id,
+            created_by=rights_record.created_by,
+            created_at=rights_record.created_at,
+            permissions_sealed_at=None,
+        )
+        self._session.add(model)
+        flush_with_integrity_classification(self._session)
+        self._session.add_all(
+            [
+                RightsRecordUseModel(
+                    workspace_id=rights_record.workspace_id,
+                    asset_id=rights_record.asset_id,
+                    rights_record_id=rights_record.id,
+                    allowed_use=allowed_use,
+                    created_at=rights_record.created_at,
+                )
+                for allowed_use in sorted(rights_record.allowed_uses)
+            ]
+            + [
+                RightsRecordProviderModel(
+                    workspace_id=rights_record.workspace_id,
+                    asset_id=rights_record.asset_id,
+                    rights_record_id=rights_record.id,
+                    allowed_provider=allowed_provider,
+                    created_at=rights_record.created_at,
+                )
+                for allowed_provider in sorted(rights_record.allowed_providers)
+            ]
+        )
+        flush_with_integrity_classification(self._session)
+        model.permissions_sealed_at = rights_record.created_at
+        flush_with_integrity_classification(self._session)
+
+    def get_rights_record(
+        self,
+        *,
+        workspace_id: str,
+        rights_record_id: str,
+    ) -> RightsRecord | None:
+        model = self._session.scalar(
+            select(RightsRecordModel).where(
+                RightsRecordModel.workspace_id == workspace_id,
+                RightsRecordModel.id == rights_record_id,
+            )
+        )
+        if model is None:
+            return None
+        uses, providers = self._permission_sets([model.id])
+        return _rights_record_from_model(
+            model,
+            allowed_uses=uses.get(model.id, frozenset()),
+            allowed_providers=providers.get(model.id, frozenset()),
+        )
+
+    def get_current_usability_snapshot(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+    ) -> CurrentUsabilitySnapshot | None:
+        row = execute_with_integrity_classification(
+            self._session,
+            select(
+                AssetModel,
+                RightsRecordModel,
+                literal_column("UTC_TIMESTAMP(6)").label("database_now"),
+            )
+            .outerjoin(
+                RightsRecordModel,
+                and_(
+                    RightsRecordModel.workspace_id == AssetModel.workspace_id,
+                    RightsRecordModel.id == AssetModel.current_rights_record_id,
+                    RightsRecordModel.asset_id == AssetModel.id,
+                ),
+            )
+            .where(
+                AssetModel.workspace_id == workspace_id,
+                AssetModel.id == asset_id,
+            )
+            .with_for_update(read=True),
+        ).one_or_none()
+        if row is None:
+            return None
+        asset_model, rights_model, database_now = row
+        rights_record = None
+        if rights_model is not None:
+            uses, providers = self._permission_sets([rights_model.id])
+            rights_record = _rights_record_from_model(
+                rights_model,
+                allowed_uses=uses.get(rights_model.id, frozenset()),
+                allowed_providers=providers.get(rights_model.id, frozenset()),
+            )
+        if database_now.tzinfo is None:
+            database_now = database_now.replace(tzinfo=UTC)
+        return CurrentUsabilitySnapshot(
+            asset=_asset_from_model(asset_model),
+            rights_record=rights_record,
+            database_now=database_now,
+        )
+
+    def list_rights_records(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        before_version: int | None,
+        limit: int,
+    ) -> list[RightsRecord]:
+        if limit < 1 or limit > 101:
+            raise ValueError("Rights Record history limit must be between 1 and 101")
+        statement = select(RightsRecordModel).where(
+            RightsRecordModel.workspace_id == workspace_id,
+            RightsRecordModel.asset_id == asset_id,
+        )
+        if before_version is not None:
+            statement = statement.where(RightsRecordModel.version_number < before_version)
+        models = list(
+            self._session.scalars(
+                statement.order_by(RightsRecordModel.version_number.desc()).limit(limit)
+            )
+        )
+        uses, providers = self._permission_sets([model.id for model in models])
+        return [
+            _rights_record_from_model(
+                model,
+                allowed_uses=uses.get(model.id, frozenset()),
+                allowed_providers=providers.get(model.id, frozenset()),
+            )
+            for model in models
+        ]
+
+    def claim_expired_rights(
+        self,
+        *,
+        limit: int,
+    ) -> list[RightsScanClaim]:
+        if limit < 1:
+            raise ValueError("rights expiry scan limit must be positive")
+        database_now = literal_column("UTC_TIMESTAMP(6)")
+        rows = list(
+            self._session.execute(
+                select(
+                    AssetModel,
+                    RightsRecordModel,
+                    database_now.label("database_now"),
+                )
+                .join(
+                    RightsRecordModel,
+                    and_(
+                        RightsRecordModel.workspace_id == AssetModel.workspace_id,
+                        RightsRecordModel.id == AssetModel.current_rights_record_id,
+                        RightsRecordModel.asset_id == AssetModel.id,
+                    ),
+                )
+                .where(
+                    or_(
+                        AssetModel.status == AssetState.AVAILABLE.value,
+                        AssetModel.status == AssetState.PENDING_RIGHTS.value,
+                        and_(
+                            AssetModel.status == AssetState.BLOCKED.value,
+                            AssetModel.block_reason.in_(
+                                (
+                                    "RIGHTS_NOT_ACTIVE",
+                                    "RIGHTS_PERMISSION_EMPTY",
+                                )
+                            ),
+                        ),
+                    ),
+                    RightsRecordModel.perpetual.is_(False),
+                    RightsRecordModel.valid_until <= database_now,
+                )
+                .order_by(RightsRecordModel.valid_until, AssetModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        )
+        record_ids = [rights_model.id for _, rights_model, _ in rows]
+        uses, providers = self._permission_sets(record_ids)
+        claimed: list[RightsScanClaim] = []
+        for asset_model, rights_model, observed_database_now in rows:
+            self._loaded_asset_versions[asset_model.id] = asset_model.version
+            if observed_database_now.tzinfo is None:
+                observed_database_now = observed_database_now.replace(tzinfo=UTC)
+            claimed.append(
+                RightsScanClaim(
+                    asset=_asset_from_model(asset_model),
+                    rights_record=_rights_record_from_model(
+                        rights_model,
+                        allowed_uses=uses.get(rights_model.id, frozenset()),
+                        allowed_providers=providers.get(
+                            rights_model.id,
+                            frozenset(),
+                        ),
+                    ),
+                    database_now=observed_database_now,
+                )
+            )
+        return claimed
+
+    def claim_activatable_rights(
+        self,
+        *,
+        limit: int,
+    ) -> list[RightsScanClaim]:
+        if limit < 1:
+            raise ValueError("rights activation scan limit must be positive")
+        database_now = literal_column("UTC_TIMESTAMP(6)")
+        rows = list(
+            self._session.execute(
+                select(
+                    AssetModel,
+                    RightsRecordModel,
+                    database_now.label("database_now"),
+                )
+                .join(
+                    RightsRecordModel,
+                    and_(
+                        RightsRecordModel.workspace_id == AssetModel.workspace_id,
+                        RightsRecordModel.id == AssetModel.current_rights_record_id,
+                        RightsRecordModel.asset_id == AssetModel.id,
+                    ),
+                )
+                .where(
+                    or_(
+                        AssetModel.status == AssetState.PENDING_RIGHTS.value,
+                        and_(
+                            AssetModel.status == AssetState.BLOCKED.value,
+                            AssetModel.block_reason == "RIGHTS_NOT_ACTIVE",
+                        ),
+                    ),
+                    RightsRecordModel.decision == RightsRecordDecision.GRANT.value,
+                    RightsRecordModel.valid_from <= database_now,
+                    or_(
+                        RightsRecordModel.perpetual.is_(True),
+                        RightsRecordModel.valid_until > database_now,
+                    ),
+                    exists().where(RightsRecordUseModel.rights_record_id == RightsRecordModel.id),
+                    exists().where(
+                        RightsRecordProviderModel.rights_record_id == RightsRecordModel.id
+                    ),
+                    or_(
+                        AssetModel.retention_deadline.is_(None),
+                        AssetModel.retention_deadline > database_now,
+                    ),
+                )
+                .order_by(RightsRecordModel.valid_from, AssetModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        )
+        record_ids = [rights_model.id for _, rights_model, _ in rows]
+        uses, providers = self._permission_sets(record_ids)
+        claimed: list[RightsScanClaim] = []
+        for asset_model, rights_model, observed_database_now in rows:
+            self._loaded_asset_versions[asset_model.id] = asset_model.version
+            if observed_database_now.tzinfo is None:
+                observed_database_now = observed_database_now.replace(tzinfo=UTC)
+            claimed.append(
+                RightsScanClaim(
+                    asset=_asset_from_model(asset_model),
+                    rights_record=_rights_record_from_model(
+                        rights_model,
+                        allowed_uses=uses.get(rights_model.id, frozenset()),
+                        allowed_providers=providers.get(
+                            rights_model.id,
+                            frozenset(),
+                        ),
+                    ),
+                    database_now=observed_database_now,
+                )
+            )
+        return claimed
+
+    def _permission_sets(
+        self,
+        rights_record_ids: list[str],
+    ) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
+        if not rights_record_ids:
+            return {}, {}
+        use_values: dict[str, set[str]] = {}
+        for record_id, value in self._session.execute(
+            select(
+                RightsRecordUseModel.rights_record_id,
+                RightsRecordUseModel.allowed_use,
+            ).where(RightsRecordUseModel.rights_record_id.in_(rights_record_ids))
+        ):
+            use_values.setdefault(record_id, set()).add(value)
+        provider_values: dict[str, set[str]] = {}
+        for record_id, value in self._session.execute(
+            select(
+                RightsRecordProviderModel.rights_record_id,
+                RightsRecordProviderModel.allowed_provider,
+            ).where(RightsRecordProviderModel.rights_record_id.in_(rights_record_ids))
+        ):
+            provider_values.setdefault(record_id, set()).add(value)
+        return (
+            {key: frozenset(values) for key, values in use_values.items()},
+            {key: frozenset(values) for key, values in provider_values.items()},
+        )
 
     def get_version(
         self,
@@ -788,6 +1150,152 @@ class SqlAlchemyAssetUnitOfWork:
                 observed_at=max(observed_at, database_now),
                 retention_deadline=retention_deadline,
             )
+        self.commit()
+
+    def commit_rights_mutation(
+        self,
+        *,
+        workspace_id: str,
+        asset_id: str,
+        retention_deadline: datetime | None,
+        available_rights_record_id: str | None,
+        clock: Callable[[], datetime],
+    ) -> None:
+        if self._session is None:
+            raise RuntimeError("Asset Registry unit of work is not active")
+        for value, field_name in ((retention_deadline, "retention deadline"),):
+            if value is not None and (value.tzinfo is None or value.utcoffset() != timedelta(0)):
+                raise ValueError(f"{field_name} must be timezone-aware UTC")
+        observed_at = clock()
+        if observed_at.tzinfo is None or observed_at.utcoffset() != timedelta(0):
+            raise ValueError("rights commit clock must return timezone-aware UTC")
+
+        flush_with_integrity_classification(self._session)
+        asset_row = execute_with_integrity_classification(
+            self._session,
+            select(
+                AssetModel.status,
+                AssetModel.retention_deadline,
+                AssetModel.current_rights_record_id,
+                literal_column("UTC_TIMESTAMP(6)").label("database_now"),
+            )
+            .where(
+                AssetModel.workspace_id == workspace_id,
+                AssetModel.id == asset_id,
+            )
+            .with_for_update(),
+        ).one_or_none()
+        if asset_row is None:
+            self._session.rollback()
+            raise ConcurrencyError(f"Asset {asset_id} disappeared before rights commit")
+
+        persisted_retention = asset_row.retention_deadline
+        database_now = asset_row.database_now
+        if persisted_retention is not None and persisted_retention.tzinfo is None:
+            persisted_retention = persisted_retention.replace(tzinfo=UTC)
+        if database_now.tzinfo is None:
+            database_now = database_now.replace(tzinfo=UTC)
+        if persisted_retention != retention_deadline:
+            self._session.rollback()
+            raise ConcurrencyError(f"Asset {asset_id} retention deadline changed")
+        if retention_deadline is not None and (
+            observed_at >= retention_deadline or database_now >= retention_deadline
+        ):
+            self._session.rollback()
+            raise InvalidTransitionError(
+                "Task Asset retention expired at the database commit boundary"
+            )
+
+        if asset_row.status == AssetState.AVAILABLE.value:
+            if (
+                available_rights_record_id is None
+                or asset_row.current_rights_record_id != available_rights_record_id
+            ):
+                self._session.rollback()
+                raise ConcurrencyError(
+                    f"Asset {asset_id} available Rights Record changed before commit"
+                )
+            rights_row = execute_with_integrity_classification(
+                self._session,
+                select(
+                    RightsRecordModel.decision,
+                    RightsRecordModel.valid_from,
+                    RightsRecordModel.valid_until,
+                ).where(
+                    RightsRecordModel.workspace_id == workspace_id,
+                    RightsRecordModel.asset_id == asset_id,
+                    RightsRecordModel.id == available_rights_record_id,
+                ),
+            ).one_or_none()
+            if rights_row is None or rights_row.decision != RightsRecordDecision.GRANT.value:
+                self._session.rollback()
+                raise ConcurrencyError(f"Asset {asset_id} available Rights Record is incomplete")
+            valid_from = rights_row.valid_from
+            valid_until = rights_row.valid_until
+            if valid_from.tzinfo is None:
+                valid_from = valid_from.replace(tzinfo=UTC)
+            if valid_until is not None and valid_until.tzinfo is None:
+                valid_until = valid_until.replace(tzinfo=UTC)
+            if observed_at < valid_from or database_now < valid_from:
+                self._session.rollback()
+                raise InvalidTransitionError(
+                    "Asset rights are not active at the database commit boundary"
+                )
+            if valid_until is not None and (
+                observed_at >= valid_until or database_now >= valid_until
+            ):
+                self._session.rollback()
+                raise InvalidTransitionError("Asset rights expired at the database commit boundary")
+            final_database_now = literal_column("UTC_TIMESTAMP(6)")
+            active_rights = exists().where(
+                RightsRecordModel.workspace_id == workspace_id,
+                RightsRecordModel.asset_id == asset_id,
+                RightsRecordModel.id == available_rights_record_id,
+                RightsRecordModel.permissions_sealed_at.is_not(None),
+                RightsRecordModel.decision == RightsRecordDecision.GRANT.value,
+                RightsRecordModel.valid_from <= final_database_now,
+                or_(
+                    RightsRecordModel.perpetual.is_(True),
+                    RightsRecordModel.valid_until > final_database_now,
+                ),
+            )
+            has_use = exists().where(
+                RightsRecordUseModel.workspace_id == workspace_id,
+                RightsRecordUseModel.asset_id == asset_id,
+                RightsRecordUseModel.rights_record_id == available_rights_record_id,
+            )
+            has_provider = exists().where(
+                RightsRecordProviderModel.workspace_id == workspace_id,
+                RightsRecordProviderModel.asset_id == asset_id,
+                RightsRecordProviderModel.rights_record_id == available_rights_record_id,
+            )
+            final_guard = execute_with_integrity_classification(
+                self._session,
+                update(AssetModel)
+                .where(
+                    AssetModel.workspace_id == workspace_id,
+                    AssetModel.id == asset_id,
+                    AssetModel.status == AssetState.AVAILABLE.value,
+                    AssetModel.current_rights_record_id == available_rights_record_id,
+                    or_(
+                        AssetModel.retention_deadline.is_(None),
+                        AssetModel.retention_deadline > final_database_now,
+                    ),
+                    active_rights,
+                    has_use,
+                    has_provider,
+                )
+                .values(updated_at=AssetModel.updated_at)
+                .execution_options(synchronize_session=False),
+            )
+            if final_guard.rowcount != 1:
+                self._session.rollback()
+                raise InvalidTransitionError(
+                    "Asset rights crossed a usability boundary before commit"
+                )
+        elif available_rights_record_id is not None:
+            self._session.rollback()
+            raise ConcurrencyError(f"Asset {asset_id} is no longer available at rights commit")
         self.commit()
 
     def __exit__(
