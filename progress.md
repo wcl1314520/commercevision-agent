@@ -402,3 +402,8 @@
 - 数据库身份工程修复已提交为 `dbc8161`（`Separate migration and runtime database identities`）并推送到 `origin/main`；GitHub Actions 运行 `30225320445` 已启动，等待全部 Job 结束。
 - GitHub Actions `30225320445` 已完成并全绿：Python checks、Web checks、Container builds、Security and SBOM 均为 `success`；新增授权收敛、独立 Alembic 身份和运行时 DML-only 验证步骤均在真实 MySQL 8.4 服务上通过。
 - Ticket 05 已更新为 `complete`，11 项验收标准全部勾选，并记录业务提交 `77e5214`、CI 修复 `dbc8161` 与远程运行 `30225320445`；下一步提交独立验收记录。
+- Ticket 06 的 Rights Record、当前可用性决策、权限替换/撤销/到期/管理员阻断、HTTP/Web 工作台、Scheduler/Worker 收敛和 MySQL `DATETIME(6)` 迁移已作为单一业务提交 `2975fcf` 落地。
+- Ticket 06 最终聚焦门禁包括 Rights 公开接缝 `41 passed`、Operation migration `5 passed`、Web Proxy `14 passed`、Vitest `31 passed`、Playwright `29 passed`；Ruff、Alembic upgrade/check、OpenAPI 生成、Web 类型与 production build 均通过。
+- Ticket 06 最终全量 Python 本地运行的两个失败均为 Windows 高负载下的子进程时序波动，相关 Object Storage 与 C2PA 用例在隔离复跑中通过；远程 Linux CI `30319058792` 随后完整执行并确认 Python、Web/E2E、容器、安全/SBOM 全部 `success`。
+- 独立终审确认数据库权威时钟、浏览器授权时间快照、版本冲突草稿保护、错误优先级与 OpenAPI 错误集合均已关闭，无剩余阻断问题。
+- Ticket 06 已更新为 `complete`，11 项验收标准全部勾选；下一执行项为 Ticket 07 ProductBrief HITL。
