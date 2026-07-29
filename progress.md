@@ -407,3 +407,310 @@
 - Ticket 06 最终全量 Python 本地运行的两个失败均为 Windows 高负载下的子进程时序波动，相关 Object Storage 与 C2PA 用例在隔离复跑中通过；远程 Linux CI `30319058792` 随后完整执行并确认 Python、Web/E2E、容器、安全/SBOM 全部 `success`。
 - 独立终审确认数据库权威时钟、浏览器授权时间快照、版本冲突草稿保护、错误优先级与 OpenAPI 错误集合均已关闭，无剩余阻断问题。
 - Ticket 06 已更新为 `complete`，11 项验收标准全部勾选；下一执行项为 Ticket 07 ProductBrief HITL。
+- Ticket 07 已打通 ProductBrief 分析请求、Durable Operation/Event、确定性与 Alibaba Vision Adapter、不可变模型/人工版本、精确版本确认、Workflow Resume、HTTP/Web 工作台、审计与可观测性。
+- 首轮审查发现 Provider 实际身份、审核策略、并发幂等、过期读取、Provider Call 聚合归属、Provider 风险标志、同步超时线程和 Web 409 辅助投影八类问题；当前均已建立公开接缝回归并修复。
+- ProductBrief 分析请求现冻结 Provider 配置哈希、置信阈值、强制复核字段、敏感字段规则和审核策略哈希；Worker 在签发临时 URL 前校验实际 Adapter identity，并验证 Outcome 及每个 Provider Call 的完整来源身份。
+- Provider 返回的 `review_required/sensitive` 只能提高风险，不能降低服务端审核策略；医学类、美妆功效、汽车适配/安全/认证等配置字段由服务端从非空声明值派生敏感风险。
+- 分析、修订和确认统一使用 MySQL 原子 claim/complete 幂等协议；并发相同请求串行化，COMPLETED 重放返回首次保存的完整响应快照，不按当前聚合重新投影。
+- Task ProductBrief 的读取、版本列表、修订和确认均在 MySQL 权威时钟下拒绝过期数据；Provider Call 到 ProductBrief Version 的复合外键阻止跨聚合来源引用。
+- 本地主库和独立测试库均确认 8 张 ProductBrief 表为 0 行后，对同 revision 中间 schema 执行受控 downgrade/upgrade；主库 `alembic check` 无 drift，迁移测试通过。
+- Vision HTTP Adapter 已从不可取消的同步线程池改为独立异步运行时；绝对 deadline 覆盖容量等待、流式响应和 repair，取消时先关闭响应流并归还并发容量，关闭进程时先取消活动请求再关闭客户端。
+- Provider 与领域 JSON 采用迭代深度/节点/字符串/字节预算；超深结构统一归一为受控 malformed/domain error，不再泄漏 `RecursionError`。
+- Web 409 恢复采用核心 ProductBrief 与辅助版本历史/Operation 分离的部分成功语义；辅助接口 503 不再阻止载入最新版本和恢复本地草稿，并明确显示非阻断告警。
+- Ticket 07 聚焦门禁当前为 Python ProductBrief/Provider/MySQL `134 passed`，Web Unit `35 passed`、Proxy `15 passed`、Playwright `31 passed`，并通过 Ruff、ESLint、TypeScript、OpenAPI/Web 类型和 Next.js production build。
+- 固定差异 `51c8462..工作树` 已启动规格/正确性、架构/可维护性、安全/可靠性三路独立只读终审；审查期间业务代码冻结。
+- Ticket 07 第一轮固定差异后的顺序全量 Python 为 `888 passed, 3 skipped`；Web 为 Proxy `15 passed`、Unit `36 passed`、Playwright `37 passed`，并通过 lint、typecheck、API 类型、干净 production build 与双依赖漏洞审计。
+- 三路终审未批准第一轮快照，确认发布阻断包括：旧 Operation 恢复依赖可变 ProductBrief 头指针、Alibaba 未知结果被盲目重投、OSS 签名 Header 与 image_url 不兼容、取消后仍可外发、非有限 JSON、确认组合外键不足、租约未覆盖 preflight，以及 Web 商品/Operation 异步状态串扰。
+- Alibaba 官方 OpenAI-compatible Chat 文档未提供请求幂等键或按提交身份查询；Ticket 07 的生产策略固定为：确认 429/5xx 可重试，无法证明是否已执行的 read/write interruption、post-response artifact failure 和 intent-without-result 失败关闭到人工/DLQ，不伪装为安全自动重投。
+- 当前在两个新的独立实现上下文中按红绿 TDD 修复 Python/Provider/MySQL 与 Web/Playwright，写集互不重叠；修复、第二轮固定差异复审和完整门禁完成前不提交。
+- Ticket 07 第二轮修复已由三个互斥写集上下文完成：Web 隔离商品/Operation 异步状态并保护生产 `.next`；Provider 对未知提交结果失败关闭、按次轮换挂载凭证并签发无附加 Header 的精确对象 URL；后端以不可变 Analysis/Provider Attempt/Version 恢复旧 Operation，并加强租约、确认和迁移约束。
+- `ProductBriefProviderCallResponseV1` 的实际提交模型快照先通过 OpenAPI 合约红灯暴露遗漏；补齐 `submitted_model_snapshot` Contract 与投影后重新生成 OpenAPI/Web 类型，合约测试与 TypeScript 检查均通过。
+- 第二轮主控聚焦门禁：ProductBrief 真实 MySQL `27 passed`；ProductBrief/Operation migration、acceptance 和 runtime `90 passed`；Provider、配置、Worker、Object Storage、OpenAPI Unit/Contract `212 passed, 1 skipped`，唯一跳过项为无真实凭证的 OSS live contract。
+- Web 第二轮完整门禁通过 ESLint、TypeScript、API 类型漂移、production build、Proxy `15 passed`、Unit `36 passed` 和 Playwright `41 passed`；E2E 使用隔离的 production artifact 副本，不重建或修改生产 `.next`。
+- 全仓 Ruff 初检仅发现 4 个文件需要机械格式化；统一格式化后 `ruff format --check .` 与 `ruff check .` 均通过。
+- 固定基线 `51c8462..工作树` 的第二轮三路全新只读复审已启动，分别覆盖后端状态/迁移、Provider 安全/可靠性、Web 契约/竞态/可访问性；复审完成前业务代码继续冻结。
+- 第二轮三路复审均返回 `REQUEST_CHANGES`，无 P0；P1/P2 集中在旧 Worker 越权发布、取消与 Provider submission 竞态、UNKNOWN 自动重试、响应体中断分类、Provider 输入/输出预算、Provider Artifact readiness、同 ProductBrief 迟到响应、跨商品 source 污染、浏览器过宽 Workflow/Operation 契约和结构化字段可访问性。
+- 三个全新互斥写集上下文已按 TDD 分别修复后端 fencing、Provider/配置/readiness 与 Web 状态隔离；主控独立负责 ProductBrief 专用最小权限浏览器投影和稳定 5xx 错误信封。
+- 浏览器投影红灯证明现有 BFF 只能读取完整 Workflow/Operation；新增 Contract/API 后，Workflow 仅返回 `id/version`，Operation 必须精确绑定 ProductBrief 且只返回状态、尝试计数、脱敏错误与版本。跨类型或跨 ProductBrief Operation 统一隐藏为 404。
+- 未捕获异常现在返回固定 `INTERNAL_ERROR` 信封和关联 ID Header，响应与日志结构字段均不包含原始异常文本；API 投影与错误边界 Unit 当前 `6 passed`。
+- 第二轮修复后的浏览器聚焦门禁通过：ProductBrief API/OpenAPI `7 passed`、BFF Proxy `15 passed`、Web Unit `38 passed`、ProductBrief Playwright `14 passed`，以及 Asset validation 安全投影恢复回归 `2 passed`；ESLint、TypeScript 与 production build 同步通过。
+- 后端聚焦回归首次暴露跨上下文集成缺陷：API 冻结策略与 Adapter 分别维护 Provider 配置哈希，新增输出/输入预算后字段集合漂移，导致 ProductBrief MySQL 套件 `23 failed, 8 passed`，统一失败为 `VISION_PROVIDER_IDENTITY_MISMATCH`。
+- 以公开配置身份接缝新增两个红绿测试，并建立 `commercevision_contracts.vision_configuration` 共享快照函数；确定性 scenario 明确为测试结果注入，Alibaba 完整 endpoint、模型、response/output/repair 与 Product facts 预算统一冻结。Worker 同时传递全部预算。
+- Compose Contract 进一步检出 API/Worker 未共享 mandatory/sensitive review paths 及 response/repair 上限；四项现已进入共同 policy anchor，避免生产覆盖默认值后才在执行期发生 identity mismatch。
+- 修复后 Provider/Settings/Worker/Object Storage 聚焦套件 `236 passed`，ProductBrief 真实 MySQL HITL/恢复套件 `31 passed`；共享身份与 Worker 组合的三个新增回归测试均通过。
+- 第三轮后端审查的取消竞态红灯准确复现：Provider 提交意图已经持久化且 Adapter 已进入调用边界时，旧取消接口仍返回 `200 CANCELLED`。
+- Workflow 行锁现同时串行化取消与 ProductBrief Provider 提交意图；对应 Operation 仍为 `RUNNING` 且尚无持久 Provider Call 时，取消以稳定 `409 WORKFLOW_CANCELLATION_REFUSED` 失败关闭。提交先发生、取消先发生及消费前取消三项真实 MySQL/HTTP 回归全部通过。
+- Ticket 07 上下文恢复确认：版本化 ProductBrief 字段值的后端 Contract、OpenAPI 扩展与 Web 状态层补丁已落盘；工作台组件、Vitest 和 Playwright 仍使用旧通用 JSON 值，当前按既定 HTTP/Web 公开接缝完成迁移。
+- Web 工作台旧实现的具体漂移已定位：`FieldDraft.valueKind`、字符串专用 `<input>`、无 path 的 `structuredValueError`、`JsonValue` 返回类型及 stale draft 恢复共同绕过了新 schema；本轮统一改为 path 判别的 `ProductBriefFieldValueV1` JSON 对象。
+- Web 测试审计确认 Vitest 的结构化值用例仍只验证“可解析 JSON”，Playwright 的 ProductBrief 夹具仍大量返回裸字符串/数组；这些夹具将改为 `TEXT`、`TEXT_LIST`、`FLAG_LIST` 判别联合，并增加错误 kind、额外属性和非法 dimension 类型拒绝用例。
+- ProductBrief Playwright 结构化字段场景将继续验证逐字段 `aria-invalid`、独立错误关联和首个非法字段聚焦，同时把第二个错误改为“JSON 可解析但违反 FLAG_LIST schema”，覆盖解析错误与 Contract 错误两类用户反馈。
+- 版本化 ProductBrief 字段值完成 Web 第一轮绿色验证：Vitest `42 passed`（含 path/kind、额外属性、dimension 类型和持久命令拒绝），TypeScript `tsc --noEmit` 通过。
+- Web production build 通过；按 `build -> e2e` 顺序运行 ProductBrief Playwright `16 passed`。结构化字段的 JSON 解析错误、schema 错误、ARIA 关联、焦点顺序和最终修订提交均在当前构建产物上验证通过。
+- OpenAPI 门禁的目标 schema 已核对为 Provider `ProductBriefFieldOutput`、读取 `ProductBriefFieldResponseV1` 和修订 `ProductBriefFieldRevisionV1`；三者都必须携带相同 31 路径映射和七分支 `kind` discriminator。
+- ProductBrief OpenAPI Contract 门禁现锁定七分支 discriminator、31 条字面 path/kind 映射、所有值对象禁止额外属性，并反解析生成 TypeScript 常量验证一致性；专项 pytest 通过，目标文件 Ruff format/check 通过。
+- Ticket 07 固定基线差异当前覆盖 87 个文件、约 2.98 万新增行；工单 11 项仍保持未勾选，必须在 Provider/storage/readiness、完整测试、独立终审及文档边界全部通过后一次性更新为 complete。
+- S3/MinIO artifact 写入路径已人工核对：重放会对长度、SHA、Content-Type、全部 metadata 和实际加密状态做完整匹配；竞态胜者同样复验；新写入必须返回精确 Version ID 并在 HEAD 后验证实际加密，否则失败关闭。
+- OSS artifact 路径采用同一完整匹配/加密/Version ID 不变量；Worker 启动、Celery readiness marker 与容器 healthcheck 都读取同一 mounted credential source，API 环境不接收 key/path，Compose Contract 明确验证 secret 仅挂载给 Worker。
+- Provider/storage/readiness 完整专项组合 `242 passed, 1 skipped`，唯一跳过项为未提供真实阿里云凭证的 OSS live contract；ProductBrief 真实 MySQL 集成文件 `35 passed`，覆盖取消线性化、跨 Workspace 二进制隔离、Outbox 驱动的 Workflow 继续、HITL 幂等和恢复。
+- Durable Operation 90 项组合首轮为 `89 passed, 1 failed`；失败定位为 ProductBrief 专属 readiness 误用 Asset queue 判定。修复将保留 readiness 稳定字段（非相关进程返回 `not_required`），同时按 required Operation kind 决定是否探测凭证和 Provider Result bucket。
+- 后续完整 Worker 回归纠正了上述初判：共享 Asset queue 上的 optional ProductBrief 仍是可执行能力，必须探测凭证和 Provider Result storage。将恢复 queue-based readiness，并让纯注册测试通过 monkeypatch 注入 ReadyStorage，以隔离 `minio` 容器 DNS。
+- Queue-based ProductBrief readiness 已恢复；纯 Executor 注册测试注入 ReadyStorage，既有 optional-Alibaba credential 安全回归与完整 Worker 套件 `35 passed`。ProductBrief/Operation migration、acceptance、recovery 组合重跑 `90 passed`。
+- ProductBrief Runbook 已补齐版本化字段值、取消不可逆临界点、配置身份 v2、Provider Call/Model Version 原子提交、MySQL current-node Workflow continuation，以及 Ticket 13 负责物理删除/对账的明确边界；固定基线 `git diff --check` 通过。
+- 全仓 Ruff format/check 通过（245 files）；OpenAPI 与 Web 类型已从当前源码重新生成，ProductBrief OpenAPI Contract `1 passed`，生成后 TypeScript `tsc --noEmit` 通过。
+- 完整 Web 门禁通过：BFF Proxy `15 passed`、Vitest `42 passed`、ESLint、TypeScript、production build，以及 build 后全量 Playwright `47 passed`（Catalog/Asset/ProductBrief）。
+- 完整 Python 测试套件通过：`979 passed, 3 skipped`，耗时约 18 分 55 秒；跳过项为无真实 OSS 凭证和当前宿主未暴露真实 ClamAV 两类显式 live contract。
+- 本地主库与独立 `commercevision_test` 均通过 Alembic `upgrade head/current/check`：revision 为 `d9e4f7a2b610 (head)`，无 schema drift。
+- Compose config 通过；Python `pip-audit` 与 `pnpm audit --audit-level=moderate` 均无已知漏洞。固定基线新增行和全部 untracked 文件的高置信凭证前缀扫描无候选，远程 Gitleaks 留作最终全仓证据。
+- Docker 基础依赖当前 healthy，但 app services 未运行；固定 Compose project name 仍关联此前从 `mine` 路径创建的基础容器。下一步从当前源码重建 migrate/API/Worker/Scheduler/MCP/Web，并由 Compose 受控重建相同项目服务。
+- 当前源码应用镜像全部构建成功；Web build context 传输了约 578 MiB，诊断发现 `.dockerignore` 未排除 Playwright `test-results`（其中隔离 Next artifact 约 140 MiB）和 report。新增部署 Contract 后排除这些生成物，再重建验证。
+- `.dockerignore` 部署 Contract 红绿通过并排除两类浏览器生成物；Web BuildKit context 从约 578 MiB 降至 3.21 MiB，当前源码镜像重建成功。
+- 当前源码 Compose 栈 `up -d --wait` 成功：API/Worker/Scheduler/MCP/Web 及全部依赖 healthy，mysql-permissions/migrate/object-storage-init 均 `Exited (0)`；`scripts/verify_phase0.py` 全项通过，近 10 分钟应用日志无 ERROR/Traceback/CRITICAL。
+- 固定基线 `51c8462..工作树` 的第三轮三路全新只读终审已启动：后端状态/迁移、Provider/存储安全、Web/API Contract；只接收 P0-P2，并显式复核全部既有 P1 与 Ticket 13 物理删除延期边界。
+- 容器 HTTP smoke 确认 Web 首页 200；生产 API 正确隐藏 OpenAPI；补齐 Workspace scope 但不提供签名 principal 的 ProductBrief GET 返回稳定 `401 AUTHENTICATION_REQUIRED`，路由和认证边界均已装载。
+- API/Worker/Scheduler/MCP 均以非 root `commercevision` 用户运行，Web 以 `nextjs` 运行；五个应用容器均 healthy 且 restart policy 为 `unless-stopped`。
+- Ticket 07 第三轮三路固定基线终审均返回 `REQUEST_CHANGES`，无 P0；去重后确认八项实现阻断：成功 Provider Call 与 Model Version 原子性、HTTP 响应证据中断的不确定态、零未解决字段的人工版本确认、ProductBrief 专用投影 retention 拒绝、生成 TS 字面量关联、409 草稿持久恢复、浏览器 72 小时保留边界、外部 evidence 引用信任边界，以及一项 422 输入回显 P2。
+- “普通 diff 未包含未跟踪生产依赖”不是运行时实现缺陷，但属于发布完整性阻断；最终提交前必须 `git add -A` 后从 staged snapshot 验证所有导入目标、生成文件、构建和凭证扫描，不能以当前脏工作树测试代替 clean snapshot 证据。
+- 当前修复策略固定为三个既有公开接缝的纵向红绿循环：真实 MySQL/HTTP 验证状态与 retention；Provider Adapter 验证 UNKNOWN 且不自动重投；Web/生成器验证 path-kind 编译约束、冲突草稿和 retention 到期清除。任何实现修改后重新运行受影响全量套件并启动全新固定基线终审。
+- Provider 不确定态红绿完成：400/429/503 在 body read、close 或 response artifact 写入不完整时均返回非重试 `UNKNOWN`；完整 Adapter 文件 `63 passed`，不再让 HTTP 状态覆盖证据完整性事实。
+- 成功结果原子性红绿完成：lease recovery、current-operation 漂移、Workflow 取消和注入事务失败均断言 Provider Attempt 保留、`SUCCEEDED` Call 与 Model Version 同时不存在；成功路径仍断言两者同事务存在，聚焦 MySQL `4 passed`。
+- 人工版本的 `confirmation_required` 与 `unresolved_field_count` 已解耦，awaiting-confirmation Event 允许精确计数 0；对应 Domain/Event 测试通过。
+- 422 公共错误信封仅投影 `type/loc/msg`，不再回显 Pydantic `input/ctx`；完整 API Error Unit `4 passed`。
+- Evidence reference 现只允许固定内部 scheme 加 64 位小写 hex opaque token；应用忽略 Provider 自报 token，并根据授权 Asset Version、字段路径、类型、区域和摘要服务端重建。Domain/Contract/Provider Unit `90 passed`，真实 MySQL HITL 场景确认 Provider token 未进入 Web 投影。
+- ProductBrief current、versions、Workflow context 和专用 Operation 四个读取面现共同在 72 小时 deadline 后返回 `410 PRODUCT_BRIEF_RETENTION_EXPIRED`；真实 MySQL retention 回归与路由 Unit 均通过。Workflow 最小投影增加精确 `retention_deadline`，供浏览器持久状态执行同一边界。
+# 2026-07-28 Ticket 07 第三轮审查修复（Web 持久命令）
+
+- 所有 ProductBrief Playwright 夹具已继承服务端 `retention_deadline`；V3 命令记录显式区分 `pending` 与 `version-conflict`。
+- 新增浏览器公开接缝回归：修订返回 409 后，首次读取服务器当前版本返回 503，浏览器仍完整保存原命令；连续刷新只执行 GET 恢复、不重放 POST，并在人工“恢复/放弃”前持续显示冲突草稿。
+- 新增过期清理回归：达到任务保留期限的本地命令在加载时删除，不发出 ProductBrief 请求，不恢复字段或修订原因。
+- 清理 ProductBrief Workbench 已失效导入，并修正持久化结算与草稿恢复代码排版。
+- 验证：
+  - `pnpm --dir apps/web lint`：通过，0 warning。
+  - `pnpm --dir apps/web typecheck`：通过。
+  - `pnpm --dir apps/web test:unit`：46 passed。
+  - `pnpm --dir apps/web build`：通过。
+  - `pnpm --dir apps/web e2e e2e/product-brief-workbench.spec.ts`：18 passed。
+
+# 2026-07-29 Ticket 07 第三轮审查修复（全量回归）
+
+- OpenAPI 重导出前后 SHA-256 一致，生成 Web 类型 `--check` 通过。
+- Ruff format：245 files already formatted；Ruff lint：通过。
+- ProductBrief 单元/合约：104 passed。
+- ProductBrief 真实 MySQL HITL：35 passed。
+- ProductBrief/Operation 迁移往返：7 passed。
+- Web 完整 Playwright：49 passed；BFF 代理合约：15 passed。
+- 首轮全仓 pytest 暴露旧商品 API 测试仍依赖 422 `ctx`；已改为验证响应只含
+  `type/loc/msg` 且不泄露 `ctx/input`，聚焦回归通过。
+- 最终全仓 pytest：984 passed，3 skipped，2 个第三方 deprecation warnings；耗时
+  18 分 25 秒。跳过项为显式 opt-in 的真实 Alibaba OSS 和 ClamAV 接缝。
+- 主库 Alembic 位于 `d9e4f7a2b610 (head)`，`alembic check` 报告无新升级操作。
+- 使用当前 Ticket 07 源码完成 `docker compose up -d --build --wait`；API、Worker、
+  Scheduler、Web、MCP 与全部基础设施容器健康。
+- API `/health/ready`、Web `/`、Scheduler `/health/live`、MCP `/health/live` 均返回 200。
+- 从 Git index 导出独立快照，确认 12 个原未跟踪文件均进入提交树；在快照内重新执行
+  `uv sync --frozen --all-packages`、`pnpm install --frozen-lockfile`、Python 包导入、
+  Ruff、生成类型检查、Web TypeScript 与生产构建，全部通过。快照验证后已清理。
+
+# 2026-07-29 Ticket 07 第四轮终审
+
+- 三路全新独立终审均返回 `CHANGES REQUIRED`，无 Critical，共 12 个 Required：
+  - repair 请求发出前 deadline 分类、每个 repair call 的独立 durable intent、MySQL 锁顺序、
+    重分析期间 confirmed version 投影。
+  - Transport cancellation/close deadline、压缩响应上限、API 进程 Secret 隔离、SSE 验证失败
+    的精确版本清理、Provider request ID 遥测脱敏。
+  - 浏览器恢复命令严格校验、专用最小权限 Workflow/Operation 投影与状态、mutation/BFF
+    真实取消传播。
+- 两个 Optional：version history N+1 与 1,900 行 Workbench 组件拆分；不替代上述正确性修复。
+- 当前开始第四轮 TDD 修复，完成后重新执行全量门禁和全新独立终审。
+
+# 2026-07-29 Ticket 07 第四轮审查修复
+
+- 后端四项阻断已完成：deadline 分类只依据当前调用事实；每个 Vision repair call 拥有独立
+  `(Operation ID, operation attempt, call_index)` 提交意图；行锁顺序固定为
+  `Workflow -> ProductBrief -> Operation`；重分析期间已确认版本继续投影为 `CONFIRMED`。
+- Provider/安全五项阻断已完成：Transport 的取消、响应读取/关闭和 shutdown 均受绝对截止
+  时间约束；拒绝压缩响应；API 进程拒绝 Worker Vision Secret；对象写入后加密复验失败会按
+  精确 Version ID 清理并证明不存在；不可信 Provider request ID 只以安全 token 进入遥测。
+- Web/API 三项阻断已完成：持久化命令执行严格 canonical validation；Workflow/Operation
+  读取改为 ProductBrief 专用最小权限投影并携带 Workflow 状态；组件、客户端和 BFF 全链路
+  传播 AbortSignal，商品切换会真实取消在途 mutation 和上游请求。
+- ProductBrief、Provider、Settings 和对象存储聚焦 Python 组合 `271 passed`；真实 MySQL
+  ProductBrief 与迁移 `41 passed`；Vision Adapter/Transport `72 passed`。
+- Web 门禁通过：ESLint、TypeScript、生成类型 `--check`、Vitest `59 passed`、BFF Proxy
+  `16 passed`、production build 和完整 Playwright `51 passed`。
+- 全仓 Ruff format/check 通过；主库与测试库均位于 `d9e4f7a2b610 (head)`，Alembic
+  `check` 均无新升级操作。下一步执行全仓 pytest、当前源码 Compose 和第五轮终审。
+
+# 2026-07-29 Ticket 07 全量测试环境诊断
+
+- 首次全仓运行得到 `929 passed, 82 failed, 8 errors`，失败集中在共享 MySQL 集成夹具的
+  `TRUNCATE`、并发状态与后续级联，不符合本轮业务修改的局部回归形态。
+- 根因已由独立日志证实：此前用于轮询的隐藏 pytest 子进程没有随 `Start-Process` 宿主退出，
+  从 06:09 持续运行至 06:30；新的全量套件在 06:10 启动。两者并发清理
+  `commercevision_test`，后台套件也得到 `863 passed, 97 failed, 59 errors`。
+- 两个进程退出后，测试库无活动事务；按相同排序执行 `--maxfail=1` 持续 15 分钟未复现失败，
+  但被诊断命令自身的短工具窗口终止。下一次仅保留一个前台进程，并使用 33 分钟上限。
+- 唯一干净全量进程最终通过：`1019 passed, 3 skipped, 2 warnings`，耗时 18 分 53 秒。
+  三个 skip 仍为显式 opt-in 的真实 OSS/ClamAV 接缝；两条 warning 来自第三方
+  Starlette TestClient 与 oss2 的弃用提示。相较此前 984 项，新增 35 项回归全部纳入。
+- 后续发布门禁通过：Ruff format `248 files`、Ruff lint、生成 Web 类型 `--check`、
+  Compose config 和 `git diff --check` 均绿色；Python 与 pnpm 漏洞审计均报告
+  `No known vulnerabilities found`。生成文件仅有现存 CRLF/LF 工作区提示。
+- 当前工作树完成 `docker compose up -d --build --wait`，API、Worker、Scheduler、MCP、
+  Web 及全部基础设施服务 healthy；权限收敛、迁移和对象存储初始化任务均 `Exited (0)`。
+- `scripts/verify_phase0.py` 全项通过；API `/health/ready`、Web `/`、Scheduler 与 MCP
+  `/health/live` 均返回 200；最近 15 分钟应用日志无 `ERROR/Traceback/CRITICAL`。
+- 提交边界共扫描 104 个 tracked diff/untracked 文件，高置信 GitHub/OpenAI/AWS/
+  Private Key 前缀候选为 0；最终推送后仍由远程 Gitleaks 执行全仓门禁。
+
+# 2026-07-29 Ticket 07 第五轮终审
+
+- 三路全新只读审查均返回 `CHANGES_REQUIRED`，去重后 11 项：
+  - repair 取消查询未按 `call_index` 关联；Workflow 投影未绑定 ProductBrief/SQL retention；
+    版本历史无界且 N+1。
+  - post-write 复验异常可能遗留精确对象版本；外部 request ID 的凭证形状仍可进入遥测；
+    exact source object 完整性异常未归一为稳定终态。
+  - raw provider artifact 在 durable ledger 之前写入；ProductBrief 读取暴露内部 Provider 拓扑；
+    外部 UUID 非规范形式破坏幂等 scope。
+  - Web 持久 revision 接受空 evidence；冲突恢复显示的 evidence 与最终提交值不同。
+- 当前先在三个互不重叠写入域执行 TDD；artifact ledger 单独做跨层设计核对，避免把
+  Ticket 13 的物理删除延期误用为 Ticket 07 可发现性/可对账缺口的豁免。
+- Provider/存储域完成：S3/MinIO 与 OSS 的 post-PUT 复验异常均执行精确版本清理和不存在
+  证明；外部 Provider request ID 在日志/指标/span 前统一 token 化。聚焦组合 `136 passed`。
+- Web 恢复域完成：持久 revision evidence 强制 `1..32` 并在网络前失败关闭；生成器保留
+  `minItems` 非空 tuple；冲突恢复展示与提交相同 draft evidence。Web unit `64 passed`、
+  proxy `16 passed`、build 与定向 Playwright 通过。
+- 取消/投影域完成：Provider Attempt/Call 按 `call_index` 相关；repair call 1 在途时取消
+  返回 409；绑定投影在 SQL 中约束 Workspace/ProductBrief/Workflow/Operation kind/target/
+  retention，过期仅做字面探针。真实 MySQL `40 passed`，路由 Unit `3 passed`。
+- 投影变更同时揭示首次分析尚无 ProductBrief 可绑定；新增独立 worker 将实现仅允许活动
+  `UNDERSTANDING` Workflow 的 pre-analysis 最小投影，已存在 brief 的确认/重分析仍走精确绑定。
+- artifact ledger 设计确认必须在 Ticket 07 落地：独立 child aggregate 在写前冻结物理目标，
+  写后立即结算 exact Version ID，歧义按持久 key 对账且绝不调用 Provider。实现 worker 已启动。
+- 构建上下文审计发现本地 `.mypy_cache` 约 124 MiB 未被 Git/Docker 忽略；已增加两层忽略
+  规则和部署 Contract，`test_worker_deployment.py` `15 passed`，Compose config 通过。
+- Artifact Ledger 合并后的首轮 ProductBrief HITL 回归发现 4 个旧接缝不一致：两个测试仍用
+  “进入 Analyzer 函数”代替“越过 durable submission intent”，成功场景仍断言零字节 artifact，
+  同一 attempt 重放则在 submission fence 前先碰到临时 URL 导致的 artifact 内容漂移。
+- Executor 已在任何新 source URL 或 artifact 写入前拒绝已有 Provider Attempt 的同 attempt
+  重放；测试改为观察 durable submission 边界和真实字节证据。高风险子集 `11 passed`，
+  完整 `test_product_brief_hitl_mysql.py` `43 passed`。
+- 首轮全仓回归为 `1080 passed / 3 skipped / 1 failed`：迁移总账的
+  `WORKSPACE_ID_TABLES` 未登记新表 `product_brief_provider_artifacts`，数据库实际 collation
+  已正确。补齐总账后精确迁移测试通过。
+- 第二轮全仓回归暴露 Phase 1 冻结时钟测试的 1 秒竞态：Worker 初始化慢于 1 秒时，新建
+  Outbox 相对冻结 Dispatcher 时钟落在未来。冻结时间改为在 Workflow 创建后推进；参数化
+  场景连续 6 轮、共 12 项通过。
+- 高系统负载下，两个既有进程测试把 Python import/subprocess 启动延迟误判为线程或容量
+  泄漏。凭证测试现独立测量刷新后的退出时长；C2PA 测试允许明确的 bounded transient，
+  但同一 Adapter 最多 3 次内必须恢复 EVIDENCE。两项连续 5 轮通过。
+- 资源审计发现本项目旧 Worker 容器约占 31% CPU；停止不参与 pytest 的应用容器、保留
+  MySQL/MinIO/RabbitMQ/ClamAV 等基础设施后，唯一最终全仓进程通过：
+  `1081 passed, 3 skipped, 2 warnings`，耗时 21 分 46 秒。两条 warning 仍来自第三方
+  Starlette TestClient 与 oss2。
+
+# 2026-07-29 Ticket 07 第六轮终审与分段全量证据
+
+- 分段 integration 首轮为 `368 passed, 2 skipped, 1 failed`；唯一失败来自旧上传夹具在宿主机
+  使用容器 DNS `rabbitmq:5672`。夹具改用可配置宿主机 AMQP 地址，远程 CI 增加真实 RabbitMQ
+  service 后，失败用例通过，完整上传集成文件重跑为 `90 passed, 1 skipped`。
+- 第六轮三路全新独立审查均返回阻断合入，无 P0；去重后共 13 个 P1/P2：
+  - continuation 未以 MySQL 权威时间和 retention 状态拒绝过期 Workflow/ProductBrief；
+    已被重分析取代的迟到人工或 policy continuation 会进入重试/DLQ。
+  - ProductBrief 未在服务、投影和 Worker 三层严格限定
+    `COMMERCE_IMAGE_GENERATION` 及冻结 `product_id`。
+  - Web 未在权威 410 后立即清理内存/sessionStorage；恢复记录未把 Workspace 纳入 schema、
+    key 和解析；Operation 终态分类在组件与 Controller 重复分叉。
+  - Provider Artifact Ledger 迁移在 MySQL DDL 隐式提交下缺少 trigger 恢复栅栏，降级会丢失
+    `INTENDED/UNKNOWN` 等未结算事实；ProductBrief 历史只禁 UPDATE、仍可被 DELETE 擦除。
+  - Vision Adapter 反向依赖 Domain；Transport 取消后未有界等待任务/连接清理；Worker 聚合
+    close 不是逐项 best-effort。
+  - ProductBrief Repository Port 聚合二十余方法，未按 Brief/Version、Analysis/Call、
+    Artifact Ledger、Confirmation 形成窄 seam。
+  - 正式 Workflow 状态机文档未记录 `RETRIEVING -> UNDERSTANDING` 和
+    `RETRIEVING -> AWAITING_PRODUCT_CONFIRMATION`。
+- 四个新鲜独立上下文已按后端 continuation、Web、MySQL 迁移、Provider/持久化 seam
+  分配互斥写入范围，全部要求先红测、后实现、聚焦回归和自审；主控负责文档、集成、
+  Compose 验收、最终复审与 Ticket 07 单一提交。
+
+# 2026-07-29 Ticket 07 第十轮后端红绿修复
+
+- 已确认测试 seam：真实 MySQL Recovery/Worker Event、ProductBrief HTTP/Service、Durable
+  Provider Executor、Agent Runtime/Checkpointer 与 Contracts。
+- 已固定六项成功标准：MySQL 权威时间、recovery fence、Commerce no-generation 可执行收敛、
+  三层 Workflow/Product binding、Checkpoint 零 raw lease token、完整聚焦门禁。
+- 当前开始 B10-1；尚未修改生产实现。
+- B10-1 RED：`test_recovery_uses_mysql_time_instead_of_the_scheduler_clock` 在真实 MySQL 下按预期
+  失败，Worker clock 比 DB 快 2 小时时错误回收了 DB 仍有效的 Step，实际 `(1, 0)`、期望
+  `(0, 0)`。
+- B10-1 GREEN：`RecoveryService.recover_once` 进入同一 UoW 后只采样一次
+  `uow.database_now()`；目标真实 MySQL 用例 `1 passed`，lease query、retention、stale threshold
+  与 recovery event 共用该时间。
+- B10-2 RED：真实 MySQL 中首次 recovery event 标记 published、但暂不消费后，再次
+  `recover_once()` 仍返回 `(0, 1)` 并生成重复事件。
+- B10-2 GREEN：recovery event 与 `record_recovery_observation`/Workflow save 同事务提交；
+  `test_published_recovery_event_advances_scanner_freshness` 为 `1 passed`，第二次扫描稳定 `(0, 0)`。
+- B10-3a RED：pre-ProductBrief Commerce Workflow 的 scanner 仍写出无 ProductBrief identity 的
+  generic Graph event，目标用例捕获到 1 条 `stale_workflow`。
+- B10-3a GREEN：Commerce `none` 只推进 recovery observation，不创建 Graph event；
+  `test_stale_commerce_workflow_before_product_brief_is_observed_without_graph_recovery` 为 `1 passed`。
+- B10-3b RED：policy-confirmed ProductBrief 在首个 retrieval Step claim 前丢失原 continuation 后，
+  scanner 虽返回 `(0, 1)`，但没有生成任何带当前 Version identity 的 `stale_workflow` recovery
+  event；真实 Worker/Event 用例在 `len(recovery_events) == 1` 处按预期失败。
+- B10-3b GREEN：Generation resolver 会从当前 confirmed Brief/Version/Confirmation 重建 recovery
+  identity；retrieval gate 在无旧 Step 时允许首次创建 generation。真实 Scanner → Outbox →
+  Worker → Graph 用例 `1 passed`，Workflow 到达 `AWAITING_PLAN_APPROVAL/approve_plan`。
+- B10-4a RED：Workflow type 在 revise/confirm 加锁前无版本漂移篡改后，两条 HTTP 命令都错误
+  返回 `200`；真实 MySQL 用例分别捕获确认和修订跨越了 Commerce Workflow 绑定。
+- B10-4a GREEN：revise/confirm 在同一锁内用 `uow.database_now()` 验证 Workflow type、冻结
+  `product_id`、Workflow retention 状态/deadline 与 ProductBrief deadline；type/product/retention
+  参数化回归 `6 passed`。
+- B10-4b RED：`product-brief.requested` 已持久化但 Worker 尚未消费时篡改 Workflow type，
+  `CountingAnalyzer.call_count` 错误成为 `1`。
+- B10-4b GREEN：Executor 初始门禁及 artifact/submission lifecycle 的每次锁内复验均验证同一
+  authority；消费前零调用参数化回归 `3 passed`，analyzer 已进入但 provider 尚未提交的并发
+  漂移回归 `3 passed`，均稳定报 `PRODUCT_BRIEF_WORKFLOW_NOT_EXECUTABLE`。
+- B10-5 RED：InMemory Saver 的 START/loop 历史可从 `channel_values` 直接解码出 live
+  `initial_step_lease_token`；新增公开历史断言按预期失败并显示原始 token。
+- B10-5 GREEN：Agent State 删除 raw token 字段，checkpoint namespace 只接受已持久的不可逆
+  generation hash；`FixtureAgentRuntime.run` 用 `ContextVar` 在调用栈内交付 Step/Lease，
+  `finally` 重置。真实 MySQL history 同时检查 config、metadata、parent config、checkpoint 与
+  pending writes，lease-expiry crash recovery、DB-ahead/checkpoint-behind 与首次 claim 前恢复
+  均保持可执行。
+- B10-5 metadata RED/GREEN：`ProductBriefGenerationAuthority.from_step()` 原先会接受
+  `initial_step_lease_token` 或任意未知额外键；参数化用例 `2 failed` 后改为 exact-key schema，
+  `approval_id` 必须存在但允许 `null`，目标 Unit `5 passed`、三条真实 crash/recovery
+  MySQL 回归 `3 passed`。
+- B10-6 完整聚焦门禁：ProductBrief HITL + Reliability MySQL `89 passed`；Runtime/API
+  Workflows/Contracts/Graph `51 passed`；最终 Agent/Completion Unit `17 passed`（其中完整
+  Agent + Completion 组合在 metadata 收紧前为 `16 passed`，新增 nullable approval 用例单独
+  转绿）。目标文件 Ruff format/check 全绿，`git diff --check` 仅报告两个既有 Web/OpenAPI
+  CRLF 提示、无 whitespace error。
+
+# 2026-07-29 Ticket 07 最终生产验收
+
+- 第六轮 13 个 P1/P2 已全部按独立写入域完成红绿修复：过期/stale continuation、
+  Commerce Workflow/Product 绑定、Web 410/Workspace 恢复、Provider Artifact 迁移与
+  append-only、Provider seam、Transport cancellation、best-effort close 和窄 Repository ports。
+- 三路全新终审及其第二次独立复核继续发现并关闭了提交前边界：
+  - Commerce Task 的公开入口、legacy 168 小时 Workflow、ProductBrief/Analysis/Provider
+    artifact/call/continuation 与 pre-analysis 投影统一使用
+    `min(workflow.expires_at, workflow.created_at + 72h)`；非 ACTIVE retention 立即 410。
+  - Web 在任何 revise/confirm POST 前要求 exact durable command，核心回包同时绑定
+    Workspace、Product、ProductBrief、Workflow 和 Operation；Storage getter 拒绝也会
+    fail-closed，而不会绕过恢复 UI。
+  - 默认 deterministic Compose 使用仓库内受控空白 credential fixture，干净 clone 可启动；
+    Alibaba 未显式挂载真实 Secret 时在消费任务前失败关闭。
+- 最终 Python 门禁：unit `668 passed`；contract `165 passed, 1 skipped`；28 个 integration
+  文件按四个互斥组得到 `27 + 111 + 124 + 178 = 440 passed, 2 skipped`。显式 skip 仅为需要
+  外部真实 OSS/ClamAV host 的 opt-in 接缝；Compose 内 ClamAV readiness 实测为 `ok`。
+- 最终 Web 门禁：unit `122 passed`、BFF proxy `18 passed`、Playwright `71 passed`；
+  TypeScript、ESLint、生成 API 类型和 Next production build 全部通过。
+- Alembic 主库位于 `a4c8e7f3b219 (head)` 且 `check` 无漂移；隔离库完整
+  upgrade/downgrade/re-upgrade 和 runtime DML-only 权限测试通过。
+- Ruff format/check、OpenAPI 重导出哈希、Compose config、`git diff --check`、Python/pnpm
+  漏洞审计全部通过，均无已知漏洞。
+- 最新源码执行 `docker compose up -d --build --wait` 后全部服务 healthy；API、Web、
+  Scheduler、MCP 均 HTTP 200，Worker marker 新鲜且所有依赖为 `ok`，本次启动日志
+  `ERROR/CRITICAL/Traceback/RuntimeWarning` 为 0，`scripts/verify_phase0.py` 全项通过。
+- 最终只读闭环结论：Ops 与 Web 为 `APPROVE`，后端无 Required/P0/P1；最后一个短于 72 小时
+  deadline 的 P2 测试覆盖已补齐。Ticket 07 本地验收完成，Ticket 08 未启动。

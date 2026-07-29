@@ -950,6 +950,15 @@ class ApprovalModel(Base):
             "expected_workflow_version",
             name="uq_workflow_approvals_replay",
         ),
+        UniqueConstraint(
+            "id",
+            "workflow_id",
+            "subject_id",
+            "subject_version",
+            "approval_type",
+            "decision",
+            name="uq_workflow_approvals_confirmation_subject",
+        ),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
@@ -1372,6 +1381,9 @@ class AuditEventModel(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+from . import product_brief_models as _product_brief_models  # noqa: E402, F401, I001
 
 
 # Reserved for Phase 4 cost accounting without a destructive type migration.

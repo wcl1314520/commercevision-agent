@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  outputDir: "./test-results/playwright",
   fullyParallel: true,
   forbidOnly: true,
   workers: 1,
@@ -12,7 +13,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm exec next dev --hostname 127.0.0.1 --port 3100",
+    command: "node tests/start-e2e-server.mjs",
     reuseExistingServer: false,
     url: "http://127.0.0.1:3100",
     timeout: 120000,

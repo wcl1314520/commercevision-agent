@@ -234,3 +234,118 @@
 - 部署环境的 fail-closed 判断必须读取与服务相同的 validated Settings 来源。只检查 `os.environ` 会让 YAML、dotenv 或 Secret Provider 中的 `production` 环境绕过独立迁移身份要求。
 - `mysqladmin ping` 证明的是 mysqld 进程响应，不证明凭证有效、目标 schema 已初始化或 SQL 可执行。数据库 readiness 应使用目标网络路径和认证身份执行有确定结果的 TCP 查询。
 - 基础设施集成门禁只有在“目标被显式配置或处于 CI”时失败关闭才有意义；连接/认证错误若被归类为 skip，会把生产权限回归伪装成环境缺失。
+- ProductBrief 的 Provider 授权身份必须在任何临时 URL 签发前由实际 Adapter 暴露，并与请求时冻结的 provider、region、endpoint host、requested model、prompt version 和 configuration snapshot 全量相等；仅根据 Settings 复制一份预期配置不能证明执行时 Adapter 未漂移。
+- Human-in-the-loop 判定属于不可变业务事实。置信阈值、强制复核字段、敏感字段规则和 policy version 必须共同生成 snapshot hash 并随分析请求持久化；重试或配置热更新只能使用该冻结策略，不能改变同一 Operation 是否需要人工确认。
+- Provider 的 `review_required` 与 `sensitive` 是不可信输入，只能作为风险加法。服务端策略必须对强制字段直接要求复核，并从配置敏感字段的非空声明值推导敏感状态，避免模型通过返回 `false` 绕过 HITL。
+- ProductBrief 幂等记录需要原子 `INSERT ... ON DUPLICATE KEY` claim、行锁读取和同事务 complete；COMPLETED 响应必须保存完整首次响应，否则并发同键可能暴露 409，后续重放也会因聚合继续演进而返回不同事实。
+- ProductBrief 的 Provider Call 复合身份不仅是 Workspace；Version 的 `provider_call_id` 必须同时绑定同一 ProductBrief，数据库外键与应用投影检查共同阻止跨聚合来源拼接。
+- 同步 Worker 接口不要求同步网络 I/O。可取消的异步 HTTP 运行时可以在不改变 Operation Executor seam 的前提下，让绝对 deadline 覆盖并发容量、连接、流读取和 bounded repair；超时必须等待取消清理完成，进程关闭必须先取消活动任务再关闭客户端。
+- Web 冲突恢复的核心事实是最新 ProductBrief，版本历史和 Operation 是可独立失败的辅助投影。核心 GET 成功后应立即更新当前版本和草稿基线，辅助接口用部分成功语义更新；把三者放在 `Promise.all` 会让一次 503 破坏 409 草稿恢复。
+- 原始 Vision request/response 的最终删除与对账属于 Ticket 13，但 Ticket 07 必须为每个对象持久化 storage backend/location/key/provider version/etag/hash/size、Retention Class 和精确 deadline；否则后续 Durable Deletion 无法安全条件删除。
+- ProductBrief 自动确认事务与通用 Durable Operation 成功事务之间存在必然的 crash window。恢复不能通过 ProductBrief 的可变“当前 Operation”指针判断旧 Operation，而必须沿不可变 Analysis、Provider Call 和输出 Version 事实收敛；否则确认后立即重新分析会让旧成功 Operation 被错误终态化。
+- Alibaba Model Studio 公开的 OpenAI-compatible Chat Completions Contract 只定义普通 `POST /chat/completions` 和返回 response ID，没有客户端幂等键或按提交身份查询接口。对于已记录 submission intent、但没有持久 response/call 的结果，系统不能声称可安全自动重投；确认的 429/5xx 可重试，read/write interruption 与 post-response artifact failure 必须进入失败关闭的人工/DLQ 对账。来源：https://www.alibabacloud.com/help/en/model-studio/text-generation
+- 视觉 Provider 只消费 `image_url`，不能携带对象存储签名所要求的自定义 `If-Match` Header。生产路径必须先对精确 Version ID 做 `stat` 并复验 ETag/长度/身份，再签发不要求额外 Header 的精确版本 URL；版本不可变性关闭检查后的替换窗口。
+- ProductBrief confirmation 的数据库完整性必须同时证明 Version ID、Version Number、ProductBrief、Workspace、Workflow、Approval Type 与 APPROVE Decision 属于同一个精确事实。只把 approval subject 与 confirmation 自身的重复字段相连，无法阻止二者共同写入一个错误版本号。
+- ProductBrief Web 的异步事实必须按 Product、ProductBrief、Operation 和请求代次共同分区。仅保存最后一个 operation state 会把旧终态/暂停状态泄漏到新 Operation；页面级商品详情与并发 Operation GET 同样需要 abort/generation/sequence guard。
+- Next production build 与 Playwright `next dev` 不能共享同一个 `.next` 产物目录。连续执行时两种编译模式会产生 manifest/module 缓存竞争；发布门禁需要独立 dist directory，并显式验证 `build -> e2e` 顺序。
+- ProductBrief Web 工作台不能再通过 `typeof value === "string"` 推断编辑器或接受任意合法 JSON。字段 `path` 是值 schema 的判别依据；草稿恢复、提交前校验和丢失响应重放都必须复用由 OpenAPI 生成的 path-to-kind 映射，并始终持久化带 `kind` 判别器的版本化值对象。
+- ProductBrief 的 OpenAPI 契约由两层共同表达：`value.oneOf + discriminator(kind)` 固定七种对象形状，Field schema 上的 `x-commercevision-field-value-kinds` 固定 31 个 path 对应哪一种形状。Contract test 必须同时锁定两层及每个对象的 `additionalProperties: false`，否则客户端生成仍可能接受错误 path/kind 组合。
+- ProductBrief Provider 组合现集中在 Worker `build_product_brief_executor`：同一 builder 负责 Credential Provider、Adapter、Artifact Sink、Policy、Transfer Policy 和 lease reserve。挂载凭证在每次提交前以 bounded/stable file read 读取，readiness 复用同一来源；原始 artifact 写入后还会独立复验服务端加密和 Version ID，避免仅信任 write request 的加密意图。
+- Worker 的“required Operation kinds”只定义启动时必须具备的 Executor，不会限制共享队列中实际可能到达的事件。只要进程消费 Asset queue 且内置 ProductBrief 能力可执行，Alibaba credential 与 Provider Result storage 就必须在 readiness 阶段验证；纯 Executor 注册测试应注入 ReadyStorage，而不能通过关闭生产依赖探针来适配宿主机 DNS。
+- Ticket 07 的 retention 完成定义是持久化精确 deadline/对象身份、过期后拒绝业务访问并为后续删除提供条件删除证据；对象的 Durable 物理删除、重试与对账属于已批准的 Ticket 13。Runbook 必须明确该边界，不能把“有 deadline”描述成“物理删除已上线”。
+- Playwright 的隔离 production artifact 位于 `apps/web/test-results/next`，本地约 140 MiB；若 `.dockerignore` 只排除 `.next` 而不排除 `test-results/playwright-report`，源码镜像构建会把测试产物发送到 BuildKit context，造成数百 MiB 无效传输。发布构建上下文必须排除两类测试输出。
+- Ticket 07 形成了几个大型深模块：Application ProductBrief 约 3004 行（主要为 Application Service 与 Analysis Executor 两个类），Web Workbench 约 1868 行，Vision Provider 约 1350 行。它们的公共接口集中，但文件体量超过常规审查阈值；终审需判断是否存在真实跨职责耦合再决定拆分，不能仅按行数做高风险机械搬迁。
+- 成功 Vision 结果只有在 Provider Call 与对应 Model Version 同一事务提交时才是可恢复事实。任何 authority drift、取消、lease 失效或 evidence 校验失败都不得通过异常补偿单独写入 `SUCCEEDED` Call；否则恢复端无法区分可发布结果与永久丢失结果。
+- Provider 已收到 HTTP 状态后，如果响应读取/关闭或 response artifact 持久化不完整，是否拥有可对账证据已经不确定。该事实优先于 429/5xx 的通常重试分类，必须统一进入非自动重试的 `UNKNOWN`；只有完整持久化响应证据后，明确的 429/5xx 才可自动重试。
+- 人工修订版本始终需要用户显式确认，即使修订已把所有风险字段解决为零；因此“是否需要确认”和“未解决字段数”是两个独立事实，awaiting-confirmation 事件不能把后者错误约束为至少一。
+- ProductBrief 专用 Workflow/Operation 浏览器投影虽然来自通用持久对象，但仍属于 72 小时业务读取面；deadline 到期后必须与 current/version 投影一样返回 `410`，物理删除继续由 Ticket 13 负责。
+- OpenAPI 的 `const` 若被生成器降级为 `string`，运行时 validator 再严格也无法为 TypeScript 调用方提供判别联合。生成层必须保留 literal `kind/path`，并用 path-to-value 关联联合表达 31 个字段的合法组合。
+- 409 版本冲突不是命令已安全结算：在用户明确恢复或丢弃前，完整 revise 草稿必须继续持久化；同时浏览器存储的商品字段、evidence 与 revision reason 必须携带服务端 retention deadline，并在读、写、恢复三处到期失败关闭。
+- Provider 输出中的 evidence reference 不能作为受信任的内部 URI。服务端应只接受可由本次授权 source 和受控 evidence 结构导出的 opaque 引用，拒绝 URL 包裹、编码后的对象位置和其他可被 Web 原样投影的外部位置。
+- FastAPI 422 错误的稳定公共详情只应包含 `loc/type/msg` 等结构信息；Pydantic `input`、`ctx` 和原始请求值可能包含商品正文、对象位置或证据引用，不应进入响应或外围错误采集。
+- Vision repair 不是首个 Provider 调用的内部细节；每次实际网络提交都必须先持久化独立 `call_index` 意图。恢复时只要存在没有对应完成 Call 的任一索引，就必须进入结果不确定态，不能因为较早调用已有失败证据而自动重投较晚调用。
+- ProductBrief 浏览器读取面需要专用投影，而不是复用通用 Workflow/Operation 读取后在路由层过滤。Workspace、目标聚合、Operation kind、retention 和允许字段必须在 SQL 查询中共同收窄，才能同时实现最小权限、二进制租户隔离和过期拒绝。
+- Provider 取消必须从 React mutation 贯穿 API client、BFF 和上游 fetch；仅忽略迟到响应仍会让服务端继续产生昂贵或不可逆副作用。商品上下文切换应无条件 abort 当前代次，即使目标商品没有本地持久命令。
+- Provider Attempt 与 Provider Call 的取消围栏必须按 `(operation_id, operation_attempt, call_index)` 精确相关。只按 attempt 相关会让已完成的 malformed call 0 错误覆盖正在提交的 repair call 1，从而允许虚假取消。
+- 原始 Provider artifact 的物理删除可以由 Ticket 13 实现，但写入前的 durable discoverability 不能延期。每个 request/response 写入必须先有 MySQL artifact intent，至少冻结确定性 key、期望 hash/size、retention 和所属 call；exact Version ID 在写入后立即补全，未知写入由后续按精确 key 枚举对账。
+- ProductBrief 版本历史必须采用有硬上限的 keyset 分页，且一页版本的字段、evidence 与公开 Provider 摘要要批量加载。无界历史加每版本多次查询既是 DoS 面，也是长期人工修订后的确定性性能退化。
+- 浏览器只需要 Provider、请求/解析模型和 latency 等公开摘要。Operation ID/attempt/call index、endpoint host、配置 hash、Provider request ID 和内部 error metadata 属于受控 provenance，不应因版本读取而暴露。
+- Provider request artifact 必须先完成自身的 MySQL intent 和对象写入，再记录紧邻外部调用的
+  submission intent，才能让提交前存储故障保持可安全重试。与此同时，Executor 必须在签发新
+  临时 URL 或构造新 artifact 前检查同一 Operation Attempt 是否已有 Provider Attempt；否则
+  重放会先因短期签名内容漂移被误报为 artifact integrity conflict，而不是稳定的 submission
+  fence。
+- 时间冻结测试必须在被测事实创建后推进控制时钟，不能在不可控的 Worker/SDK 初始化之前
+  假设固定 1 秒裕量。进程退出测试也必须从目标边界开始计时，不能把模块导入和操作系统调度
+  时间混入泄漏断言；外部 subprocess 的短暂启动失败应保持 retryable，但容量回收测试仍需在
+  同一 Adapter 的有界重试内证明最终成功。
+- ProductBrief continuation 的授权不是“事件曾经有效”，而是消费和每个节点 claim 时仍有效。
+  Worker 必须以 MySQL 当前时间、Workflow retention 状态、Workflow deadline、ProductBrief
+  deadline 和精确 confirmed version 共同判定；过期或已被重分析取代的事件是可审计 stale
+  no-op，不能启动 Graph、产生副作用、消耗 retry 或进入 DLQ。
+- ProductBrief 与 Commerce Workflow 的绑定必须在命令服务、只读投影和异步 Worker 三层保持
+  同一不变量：Workflow 类型严格为 `COMMERCE_IMAGE_GENERATION`，冻结输入中的
+  `product_id` 与目标 Product 完全相等。仅对 Commerce 类型执行条件校验等同于允许其他类型
+  绕过绑定。
+- 浏览器本地持久化属于租户数据边界。ProductBrief 恢复记录必须同时绑定 Workspace 和
+  Product，旧 schema、缺失或损坏的 active identity marker 都必须 fail closed 清理；服务端
+  返回权威 `410 PRODUCT_BRIEF_RETENTION_EXPIRED` 时，即使客户端时钟落后也要立即 abort、
+  清内存和 sessionStorage，并停止恢复。
+- MySQL 的 append-only 事实需要同时禁止 UPDATE 和普通 DELETE。迁移中临时移除 immutable
+  trigger 时必须把可行预检前置，并在 MySQL DDL 隐式提交语义下以 `try/finally` 恢复；
+  downgrade 不能删除尚未映射的 Artifact intent/unknown ledger。到期物理删除只能经 Ticket
+  13 的受控 durable 清理能力，不得通过可由普通连接伪造的 session variable 绕过。
+- Vision Transport 的取消只有在后台读/关任务被有界回收后才算完成；若底层客户端抑制取消，
+  必须淘汰客户端并失败关闭 Worker readiness/进程，且在清理完成前不能返还并发容量。聚合
+  shutdown 应逐项 best-effort 释放并汇总异常，不能让首个 close 失败阻断其他资源回收。
+- Provider-neutral 输出 schema、错误和字段目录属于 Contracts 或 Application 注入 seam，
+  Provider Adapter 不应直接导入 Domain 实现。ProductBrief 持久化也应按
+  Brief/Version、Analysis/Call、Artifact Ledger、Confirmation 拆成窄端口，再由同一 UoW
+  组合以保留事务一致性；一个二十余方法的 Repository Port 会把所有子域变化耦合到同一接口。
+
+## Ticket 07 第十轮后端修复不变量
+
+- Recovery 的单次扫描必须只采样一次同事务 MySQL 当前时间；Host clock 不能参与 Lease、
+  retention、stale threshold 或 recovery event 时间的业务判定。
+- 发布 recovery event 与推进 scanner freshness 必须属于同一事务；Outbox 已发布但尚未消费时，
+  Scheduler 不能为同一 stale observation 持续制造新消息。
+- Commerce Workflow 的 `none` 不能等同于通用 Graph recovery：pre-ProductBrief 没有可恢复
+  Graph entry；confirmed-before-first-claim 则必须由当前 confirmed ProductBrief 重建 continuation
+  intent，两者都不能制造 retry/DLQ。
+- revise、confirm 和 Vision submission 的最后授权点都必须锁定 Workflow，并验证
+  `COMMERCE_IMAGE_GENERATION`、冻结 Product、Workflow ACTIVE/deadline 与 ProductBrief deadline。
+- Lease token 只能存在于权威 Workflow Step 行和当前进程内存；LangGraph state/checkpoint、
+  event、step generation metadata 和历史 checkpoint 都不得保存可逆 token。
+- Commerce `none` 需要分成两个公开结果：没有 confirmed ProductBrief 时只推进 scanner
+  observation，不启动 Graph；存在当前 confirmed ProductBrief 但尚无 retrieval step 时，Recovery
+  必须从 Brief/Version/Confirmation 重建精确 event identity，并允许 Worker 首次创建 generation。
+- `recover_product_brief_continuation` 的 retrieval 分支本身已能通过 `_begin_node_locked` 创建 Step；
+  当前提前的 `retrieval_step is None` 拒绝位于该分支之前，是 confirmed-before-first-claim
+  无法恢复的直接阻断。
+- ProductBrief command 与 executor 可共用同一纯验证函数：输入已锁定 Workflow、ProductBrief
+  和 `uow.database_now()`；它必须同时校验 Commerce 类型、冻结 Product、Workflow ACTIVE、
+  两个 deadline 未到且 ProductBrief deadline 与 Workflow deadline 相同。命令映射为
+  `ConcurrencyError`/retention error，Executor 映射为稳定 `PRODUCT_BRIEF_WORKFLOW_NOT_EXECUTABLE`。
+- 现有公开 Provider seam 已有 `CountingAnalyzer` 与 cancellation-before-consumption 测试模式；
+  binding drift 可在 `product-brief.requested` 入 Outbox 后、Worker 消费前通过同样路径验证
+  Analyzer 调用数保持 0、Operation 收敛为稳定失败。
+
+## Ticket 07 最终验收不变量
+
+- Task-scoped 事实不能直接信任可配置的 Workflow `expires_at`。唯一权威截止时间是
+  `min(expires_at, created_at + 72h)`；公开 Commerce 创建、legacy Workflow、ProductBrief、
+  Analysis、Provider artifact/call、continuation 和 pre-analysis 投影必须共用这一 domain seam。
+  显式更短的 Workflow deadline 必须原样保留，不能被 72 小时上限反向延长。
+- Retention deadline 与 Retention status 是两个独立栅栏。即使 deadline 尚未来临，
+  `EXPIRING`、`DELETING` 或 `EXPIRED` 的 pre-analysis Workflow 投影也必须返回 410，不能让
+  Web 建立新的持久命令。
+- 浏览器中的“安全重试”只有在 exact schema-3 durable command 仍存在、未过期且与内存命令
+  完全一致时才可发出 revise/confirm POST。响应结算必须再次验证同一命令，并同时绑定
+  Workspace、Product、ProductBrief、Workflow 与 Operation；人工修订切换到新 Operation 只能
+  经显式、可证明的 confirmed-base reopen 转换。
+- `window.localStorage/sessionStorage` getter 本身也可能同步抛出 `SecurityError`。localStorage
+  不可用只允许跳过 legacy purge；sessionStorage 不可用必须 abort 当前代次、清除内存恢复态并
+  显示 fail-closed 错误，不能继续发送没有 durable replay identity 的 mutation。
+- 默认 deterministic Compose 不能依赖 Git 外的 Secret 文件。仓库内空白 fixture 只保证
+  clean clone 的 bind source 存在，不是凭据；切换 Alibaba 时必须显式挂载真实只读 Secret，
+  缺失或空白在 Worker 接收任务前失败关闭。

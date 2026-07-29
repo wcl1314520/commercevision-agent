@@ -24,10 +24,12 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    ConditionalWriteRequest,
     DeleteMarkerRequest,
     ObjectReference,
     ObjectVersionListRequest,
     PresignPutRequest,
+    ServerSideEncryptionState,
     TemporaryReadRequest,
 )
 from commercevision_domain import (
@@ -36,6 +38,7 @@ from commercevision_domain import (
     StorageLocationClass,
     StoragePreconditionError,
     StorageUnavailableError,
+    StorageWriteSafeToRetryError,
     UploadObjectMissingError,
 )
 from commercevision_object_storage import (
@@ -45,6 +48,7 @@ from commercevision_object_storage import (
     OssObjectStorage,
     build_object_storage,
 )
+from commercevision_object_storage import object_storage as minio_storage_module
 from commercevision_object_storage.credentials import create_oss_credentials_provider
 from Tea.exceptions import TeaException
 
@@ -111,6 +115,7 @@ class _StoredObject:
     etag: str
     metadata: dict[str, str]
     version_id: str | None = None
+    server_side_encryption: str | None = None
 
 
 class _S3Body:
@@ -145,6 +150,17 @@ class _S3Client:
         self.version_listing_pages: list[dict[str, object]] = []
         self.version_listing_requests: list[dict[str, object]] = []
         self.deleted_markers: list[tuple[str, str, str]] = []
+        self.deleted_versions: list[tuple[str, str, str]] = []
+        self.version_delete_attempts: list[tuple[str, str, str]] = []
+        self.version_delete_if_matches: list[str | None] = []
+        self.fail_version_delete = False
+        self.fail_missing_version_head = False
+        self.write_count = 0
+        self.write_collision: _StoredObject | None = None
+        self.omit_write_encryption = False
+        self.write_verification_failure: str | None = None
+        self.last_write: dict[str, object] | None = None
+        self.presign_requests: list[tuple[str, dict[str, object], str]] = []
 
     @staticmethod
     def _missing(operation: str) -> ClientError:
@@ -175,6 +191,7 @@ class _S3Client:
     ) -> str:
         assert ExpiresIn > 0
         assert HttpMethod in {"GET", "PUT"}
+        self.presign_requests.append((operation, dict(Params), HttpMethod))
         version = f"&versionId={Params['VersionId']}" if Params.get("VersionId") else ""
         return f"https://signed.invalid/{Params['Bucket']}/{Params['Key']}?op={operation}{version}"
 
@@ -188,17 +205,31 @@ class _S3Client:
         self.head_version_ids.append(VersionId)
         stored = self.objects.get((Bucket, Key))
         if stored is None:
+            if VersionId is not None and self.fail_missing_version_head:
+                raise ReadTimeoutError(endpoint_url="https://storage.invalid")
             raise self._missing("HeadObject")
+        verification_failure = self.write_verification_failure if VersionId is not None else None
+        self.write_verification_failure = None
+        if verification_failure == "timeout":
+            raise ReadTimeoutError(endpoint_url="https://storage.invalid")
         if VersionId is not None:
             assert VersionId == stored.version_id
-        return {
+        response: dict[str, object] = {
             "ContentLength": len(stored.body),
             "ContentType": stored.content_type,
             "ETag": stored.etag,
             "VersionId": stored.version_id,
+            "ServerSideEncryption": stored.server_side_encryption,
             "Metadata": stored.metadata,
             "LastModified": datetime(2026, 7, 21, 12, tzinfo=UTC),
         }
+        if verification_failure == "wrong-version":
+            response["VersionId"] = "different-write-version"
+        elif verification_failure == "malformed-facts":
+            response["ContentLength"] = "not-an-integer"
+        elif verification_failure == "mismatched-facts":
+            response["Metadata"] = {**stored.metadata, "sha256": "0" * 64}
+        return response
 
     def get_object(
         self,
@@ -243,11 +274,43 @@ class _S3Client:
             etag='"opaque-copy-etag"',
             metadata={str(name): str(value) for name, value in metadata.items()},
             version_id="copy-version-1",
+            server_side_encryption=(
+                str(params["ServerSideEncryption"])
+                if params.get("ServerSideEncryption") is not None
+                else None
+            ),
         )
         return {
             "CopyObjectResult": {"ETag": '"opaque-copy-etag"'},
             "VersionId": "copy-version-1",
         }
+
+    def put_object(self, **params: object) -> dict[str, object]:
+        self.last_write = params
+        bucket = str(params["Bucket"])
+        key = str(params["Key"])
+        if self.write_collision is not None:
+            self.objects[(bucket, key)] = self.write_collision
+            self.write_collision = None
+        if params.get("IfNoneMatch") == "*" and (bucket, key) in self.objects:
+            raise self._precondition("PutObject")
+        self.write_count += 1
+        metadata = params["Metadata"]
+        assert isinstance(metadata, dict)
+        stored = _StoredObject(
+            body=bytes(params["Body"]),
+            content_type=str(params["ContentType"]),
+            etag=f'"write-etag-{self.write_count}"',
+            metadata={str(name): str(value) for name, value in metadata.items()},
+            version_id=f"write-version-{self.write_count}",
+            server_side_encryption=(
+                str(params["ServerSideEncryption"])
+                if not self.omit_write_encryption and params.get("ServerSideEncryption") is not None
+                else None
+            ),
+        )
+        self.objects[(bucket, key)] = stored
+        return {"VersionId": stored.version_id, "ETag": stored.etag}
 
     def delete_object(self, **params: object) -> dict[str, object]:
         bucket = str(params["Bucket"])
@@ -259,8 +322,15 @@ class _S3Client:
         if stored is None:
             raise self._missing("DeleteObject")
         assert params.get("VersionId") == stored.version_id
+        self.version_delete_attempts.append((bucket, key, str(params["VersionId"])))
+        self.version_delete_if_matches.append(
+            str(params["IfMatch"]) if params.get("IfMatch") is not None else None
+        )
+        if self.fail_version_delete:
+            raise ReadTimeoutError(endpoint_url="https://storage.invalid")
         if params.get("IfMatch") != stored.etag:
             raise self._precondition("DeleteObject")
+        self.deleted_versions.append((bucket, key, str(params["VersionId"])))
         del self.objects[(bucket, key)]
         return {}
 
@@ -296,6 +366,228 @@ class _S3Client:
         }
 
 
+def _provider_write_request(
+    reference: ObjectReference,
+    payload: bytes,
+) -> ConditionalWriteRequest:
+    return ConditionalWriteRequest(
+        reference=reference,
+        payload=payload,
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+        content_type="application/json",
+        metadata={"retention-class": "TASK"},
+        require_encryption=True,
+    )
+
+
+def _minio_provider_storage(client: _S3Client) -> MinioObjectStorage:
+    return MinioObjectStorage(
+        endpoint="https://minio.internal.invalid",
+        presign_endpoint="https://minio.invalid",
+        access_key="access-key",
+        secret_key="secret-key",
+        session_token=None,
+        region="us-east-1",
+        buckets={StorageLocationClass.PROVIDER_RESULT: "provider"},
+        verify_tls=True,
+        force_path_style=True,
+        require_encryption=False,
+        connect_timeout=1,
+        read_timeout=1,
+        client=client,
+        signer=client,
+    )
+
+
+def test_minio_conditional_write_classifies_preflight_outage_as_safe_to_retry() -> None:
+    class PreflightUnavailableClient(_S3Client):
+        def head_object(self, **kwargs: object) -> dict[str, object]:
+            del kwargs
+            raise ReadTimeoutError(endpoint_url="https://storage.invalid")
+
+    storage = _minio_provider_storage(PreflightUnavailableClient({}))
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/preflight-unavailable.json",
+    )
+
+    with pytest.raises(StorageWriteSafeToRetryError, match="before conditional write"):
+        storage.write_if_absent(_provider_write_request(reference, b'{"provider":"raw"}'))
+
+
+def test_minio_encrypted_conditional_write_rejects_matching_plaintext_replay() -> None:
+    payload = b'{"provider":"raw"}'
+    digest = hashlib.sha256(payload).hexdigest()
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/plaintext.json",
+    )
+    objects = {
+        ("provider", reference.key): _StoredObject(
+            body=payload,
+            content_type="application/json",
+            etag='"plaintext-etag"',
+            metadata={
+                "sha256": digest,
+                "retention-class": "TASK",
+                "server-side-encryption": "AES256",
+            },
+            version_id="plaintext-version",
+        )
+    }
+    client = _S3Client(objects)
+    storage = _minio_provider_storage(client)
+    request = _provider_write_request(reference, payload)
+
+    with pytest.raises(StoragePreconditionError, match="encryption"):
+        storage.write_if_absent(request)
+    assert storage.stat(reference).server_side_encryption == ServerSideEncryptionState.NONE
+
+    ordinary_replay = storage.write_if_absent(
+        request.model_copy(update={"require_encryption": False})
+    )
+    assert ordinary_replay.reference.version_id == "plaintext-version"
+
+
+@pytest.mark.parametrize(
+    ("server_side_encryption", "accepted"),
+    [("aws:kms", True), (None, False)],
+    ids=["encrypted", "plaintext"],
+)
+def test_minio_encrypted_conditional_write_conflict_recovery_requires_stat_evidence(
+    server_side_encryption: str | None,
+    accepted: bool,
+) -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/race.json",
+    )
+    client = _S3Client({})
+    client.write_collision = _StoredObject(
+        body=payload,
+        content_type="application/json",
+        etag='"race-etag"',
+        metadata={
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "retention-class": "TASK",
+        },
+        version_id="race-version",
+        server_side_encryption=server_side_encryption,
+    )
+    storage = _minio_provider_storage(client)
+    request = _provider_write_request(reference, payload)
+
+    if accepted:
+        recovered = storage.write_if_absent(request)
+        assert recovered.reference.version_id == "race-version"
+        assert recovered.server_side_encryption == ServerSideEncryptionState.KMS
+    else:
+        with pytest.raises(StoragePreconditionError):
+            storage.write_if_absent(request)
+
+
+def test_minio_encrypted_conditional_write_cleans_failed_exact_plaintext_version() -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/new-plaintext.json",
+    )
+    client = _S3Client({})
+    client.omit_write_encryption = True
+    storage = _minio_provider_storage(client)
+
+    with pytest.raises(StoragePreconditionError, match="encryption requirement"):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+    assert client.write_count == 1
+    assert client.deleted_versions == [
+        ("provider", reference.key, "write-version-1"),
+    ]
+    with pytest.raises(UploadObjectMissingError):
+        storage.stat(reference.model_copy(update={"version_id": "write-version-1"}))
+
+
+@pytest.mark.parametrize(
+    ("verification_failure", "expected_error"),
+    [
+        ("timeout", StorageUnavailableError),
+        ("wrong-version", StoragePreconditionError),
+        ("malformed-facts", StoragePreconditionError),
+        ("mismatched-facts", StoragePreconditionError),
+    ],
+)
+def test_minio_post_write_verification_failure_cleans_exact_version(
+    verification_failure: str,
+    expected_error: type[Exception],
+) -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key=f"product-brief/op/{verification_failure}.json",
+    )
+    client = _S3Client({})
+    client.write_verification_failure = verification_failure
+    storage = _minio_provider_storage(client)
+
+    with pytest.raises(expected_error):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+
+    assert client.version_delete_attempts == [
+        ("provider", reference.key, "write-version-1"),
+    ]
+    assert client.version_delete_if_matches == ['"write-etag-1"']
+    assert client.deleted_versions == [
+        ("provider", reference.key, "write-version-1"),
+    ]
+
+
+def test_minio_verification_failure_fails_closed_when_cleanup_proof_errors() -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/verification-and-proof-timeout.json",
+    )
+    client = _S3Client({})
+    client.write_verification_failure = "timeout"
+    client.fail_missing_version_head = True
+    storage = _minio_provider_storage(client)
+
+    with pytest.raises(
+        StoragePreconditionError,
+        match="exact-version cleanup could not be proven",
+    ):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+
+    assert client.version_delete_attempts == [
+        ("provider", reference.key, "write-version-1"),
+    ]
+    assert client.deleted_versions == [
+        ("provider", reference.key, "write-version-1"),
+    ]
+
+
+def test_minio_failed_write_fails_closed_when_exact_cleanup_is_unproven() -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/unproven-cleanup.json",
+    )
+    client = _S3Client({})
+    client.omit_write_encryption = True
+    client.fail_version_delete = True
+    storage = _minio_provider_storage(client)
+
+    with pytest.raises(
+        StoragePreconditionError,
+        match="exact-version cleanup could not be proven",
+    ):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+
+    assert client.version_delete_attempts == [
+        ("provider", reference.key, "write-version-1"),
+    ]
+
+
 def test_minio_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read() -> None:
     payload = b"adapter-contract-payload"
     sha256 = hashlib.sha256(payload).hexdigest()
@@ -325,12 +617,42 @@ def test_minio_adapter_contract_covers_bounded_read_copy_delete_and_temporary_re
         buckets=names,
         verify_tls=True,
         force_path_style=True,
-        require_encryption=True,
+        require_encryption=False,
         connect_timeout=1,
         read_timeout=1,
         client=client,
         signer=client,
     )
+    artifact_payload = b'{"provider":"raw"}'
+    artifact_request = ConditionalWriteRequest(
+        reference=ObjectReference(
+            location=StorageLocationClass.PROVIDER_RESULT,
+            key="product-brief/op/request.json",
+        ),
+        payload=artifact_payload,
+        expected_sha256=hashlib.sha256(artifact_payload).hexdigest(),
+        content_type="application/json",
+        metadata={"retention-class": "TASK"},
+        require_encryption=True,
+    )
+    written = storage.write_if_absent(artifact_request)
+    replayed_write = storage.write_if_absent(artifact_request)
+    assert written.reference.version_id == "write-version-1"
+    assert replayed_write.reference == written.reference
+    assert written.server_side_encryption == ServerSideEncryptionState.AES256
+    assert replayed_write.server_side_encryption == ServerSideEncryptionState.AES256
+    assert client.last_write is not None
+    assert client.last_write["ServerSideEncryption"] == "AES256"
+    assert written.metadata["retention-class"] == "TASK"
+    with pytest.raises(StoragePreconditionError):
+        storage.write_if_absent(
+            artifact_request.model_copy(
+                update={
+                    "payload": b"different",
+                    "expected_sha256": hashlib.sha256(b"different").hexdigest(),
+                }
+            )
+        )
     source = ObjectReference(location=StorageLocationClass.QUARANTINE, key="q/source")
     destination = ObjectReference(location=StorageLocationClass.TASK, key="task/destination")
     source_stat = storage.stat(source)
@@ -376,15 +698,27 @@ def test_minio_adapter_contract_covers_bounded_read_copy_delete_and_temporary_re
         )
     assert objects[("task", "task/collision")].body == b"different"
 
-    temporary = storage.temporary_read(
-        TemporaryReadRequest(
-            reference=first_copy.reference,
-            expires_at=datetime.now(UTC) + timedelta(seconds=30),
-            expected_etag=first_copy.etag,
-        )
+    heads_before_temporary_read = len(client.head_version_ids)
+    temporary_request = TemporaryReadRequest(
+        reference=first_copy.reference,
+        expires_at=datetime.now(UTC) + timedelta(seconds=30),
+        expected_etag=first_copy.etag,
+        expected_sha256=sha256,
     )
-    assert temporary.required_headers == {"If-Match": first_copy.etag}
+    temporary = storage.temporary_read(temporary_request)
+    assert len(client.head_version_ids) == heads_before_temporary_read + 1
+    assert client.head_version_ids[-1] == first_copy.reference.version_id
+    assert client.presign_requests[-1][1]["VersionId"] == first_copy.reference.version_id
+    assert temporary.required_headers == {}
     assert "copy-version-1" in temporary.url
+    presigns_before_mismatch = len(client.presign_requests)
+    with pytest.raises(StoragePreconditionError, match="ETag"):
+        storage.temporary_read(
+            temporary_request.model_copy(update={"expected_etag": '"wrong-etag"'})
+        )
+    with pytest.raises(StoragePreconditionError, match="content identity"):
+        storage.temporary_read(temporary_request.model_copy(update={"expected_sha256": "0" * 64}))
+    assert len(client.presign_requests) == presigns_before_mismatch
     with pytest.raises(StoragePreconditionError):
         storage.delete_if_match(
             ConditionalDeleteRequest(
@@ -554,6 +888,97 @@ def test_minio_adapter_does_not_misclassify_a_missing_bucket_as_a_missing_object
                 key="q/source",
             )
         )
+
+
+def test_minio_readiness_client_disables_sdk_retries_for_a_bounded_probe_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_configs: list[object] = []
+
+    class CapturedClient:
+        @staticmethod
+        def close() -> None:
+            return None
+
+    def build_client(**kwargs: object) -> CapturedClient:
+        client_configs.append(kwargs["config"])
+        return CapturedClient()
+
+    monkeypatch.setattr(minio_storage_module.boto3, "client", build_client)
+    storage = MinioObjectStorage(
+        endpoint="https://minio.internal.invalid",
+        presign_endpoint="https://minio.invalid",
+        access_key="access-key",
+        secret_key="secret-key",
+        session_token=None,
+        region="us-east-1",
+        buckets={StorageLocationClass.PROVIDER_RESULT: "provider"},
+        verify_tls=True,
+        force_path_style=True,
+        require_encryption=True,
+        connect_timeout=3,
+        read_timeout=5,
+        readiness_timeout=2,
+    )
+
+    try:
+        readiness_config = client_configs[-1]
+        assert readiness_config.connect_timeout == 2
+        assert readiness_config.read_timeout == 2
+        assert readiness_config.retries == {
+            "total_max_attempts": 1,
+            "mode": "standard",
+        }
+    finally:
+        storage.close()
+
+
+def test_minio_close_is_best_effort_and_closes_shared_sdk_clients_once() -> None:
+    close_order: list[str] = []
+
+    class ClosingClient:
+        def __init__(self, name: str, *, failure: Exception | None = None) -> None:
+            self.name = name
+            self.failure = failure
+            self.close_count = 0
+
+        def close(self) -> None:
+            self.close_count += 1
+            close_order.append(self.name)
+            if self.failure is not None:
+                raise self.failure
+
+    shared_client_and_signer = ClosingClient(
+        "client-and-signer",
+        failure=RuntimeError("shared MinIO client close failed"),
+    )
+    readiness_client = ClosingClient("readiness-client")
+    storage = MinioObjectStorage(
+        endpoint="https://minio.internal.invalid",
+        presign_endpoint="https://minio.invalid",
+        access_key="access-key",
+        secret_key="secret-key",
+        session_token=None,
+        region="us-east-1",
+        buckets={StorageLocationClass.PROVIDER_RESULT: "provider"},
+        verify_tls=True,
+        force_path_style=True,
+        require_encryption=True,
+        connect_timeout=3,
+        read_timeout=5,
+        readiness_timeout=2,
+        client=shared_client_and_signer,
+        signer=shared_client_and_signer,
+        readiness_client=readiness_client,
+    )
+
+    with pytest.raises(ExceptionGroup, match="object storage client shutdown failed") as raised:
+        storage.close()
+
+    assert close_order == ["client-and-signer", "readiness-client"]
+    assert shared_client_and_signer.close_count == 1
+    assert readiness_client.close_count == 1
+    assert [str(error) for error in raised.value.exceptions] == ["shared MinIO client close failed"]
 
 
 def test_minio_readiness_requires_all_unique_buckets_versioned_and_encrypted() -> None:
@@ -740,6 +1165,20 @@ class _OssBucket:
         self.version_listing_pages: list[SimpleNamespace] = []
         self.version_listing_requests: list[dict[str, object]] = []
         self.deleted_markers: list[tuple[str, str]] = []
+        self.deleted_versions: list[tuple[str, str]] = []
+        self.version_delete_attempts: list[tuple[str, str]] = []
+        self.version_delete_if_matches: list[str | None] = []
+        self.fail_version_delete = False
+        self.fail_missing_version_head = False
+        self.write_count = 0
+        self.write_collision: _StoredObject | None = None
+        self.omit_write_encryption = False
+        self.write_verification_failure: str | None = None
+        self.last_write_headers: dict[str, str] | None = None
+        self.head_version_ids: list[str | None] = []
+        self.signed_requests: list[
+            tuple[str, str, dict[str, str] | None, dict[str, str] | None]
+        ] = []
 
     def get_bucket_versioning(self) -> SimpleNamespace:
         self.readiness_calls.append("versioning")
@@ -759,6 +1198,14 @@ class _OssBucket:
         **_: Any,
     ) -> str:
         assert expires > 0
+        self.signed_requests.append(
+            (
+                method,
+                key,
+                dict(headers) if headers is not None else None,
+                dict(params) if params is not None else None,
+            )
+        )
         suffix = f"?versionId={params['versionId']}" if params else ""
         return f"https://signed.invalid/{self.name}/{key}{suffix}"
 
@@ -770,13 +1217,20 @@ class _OssBucket:
     ) -> SimpleNamespace:
         del headers
         version_id = params.get("versionId") if params is not None else None
+        self.head_version_ids.append(version_id)
         stored = (
             self.versions.get((self.name, key, version_id))
             if version_id is not None
             else self.objects.get((self.name, key))
         )
         if stored is None:
+            if version_id is not None and self.fail_missing_version_head:
+                raise oss2.exceptions.RequestError(TimeoutError("head timed out"))
             raise oss2.exceptions.NoSuchKey(404, {}, b"", {})
+        verification_failure = self.write_verification_failure if version_id is not None else None
+        self.write_verification_failure = None
+        if verification_failure == "timeout":
+            raise oss2.exceptions.RequestError(TimeoutError("head timed out"))
         response_headers = {
             "content-length": str(len(stored.body)),
             "content-type": stored.content_type,
@@ -784,15 +1238,24 @@ class _OssBucket:
             "last-modified": "Tue, 21 Jul 2026 12:00:00 GMT",
             **{f"x-oss-meta-{name}": value for name, value in stored.metadata.items()},
         }
+        if stored.server_side_encryption is not None:
+            response_headers["x-oss-server-side-encryption"] = stored.server_side_encryption
         if stored.version_id is not None and stored.version_id not in self.omit_version_headers:
             response_headers["x-oss-version-id"] = stored.version_id
-        return SimpleNamespace(
+        if verification_failure == "wrong-version":
+            response_headers["x-oss-version-id"] = "different-write-version"
+        elif verification_failure == "mismatched-facts":
+            response_headers["x-oss-meta-sha256"] = "0" * 64
+        result = SimpleNamespace(
             headers=response_headers,
             etag=stored.etag,
             content_length=len(stored.body),
             content_type=stored.content_type,
             last_modified=1784635200,
         )
+        if verification_failure == "malformed-facts":
+            result.content_length = "not-an-integer"
+        return result
 
     def get_object(
         self,
@@ -861,6 +1324,7 @@ class _OssBucket:
                 "upload-session-id": headers["x-oss-meta-upload-session-id"],
             },
             version_id=version_id,
+            server_side_encryption=headers.get("x-oss-server-side-encryption"),
         )
         self.objects[(self.name, target_key)] = copied
         self.versions[(self.name, target_key, version_id)] = copied
@@ -870,6 +1334,49 @@ class _OssBucket:
             else self.copy_result_version_override
         )
         return SimpleNamespace(etag=copied.etag, versionid=result_version_id)
+
+    def put_object(
+        self,
+        key: str,
+        data: bytes,
+        headers: dict[str, str],
+    ) -> SimpleNamespace:
+        self.last_write_headers = headers
+        if self.write_collision is not None:
+            self.objects[(self.name, key)] = self.write_collision
+            if self.write_collision.version_id is not None:
+                self.versions[(self.name, key, self.write_collision.version_id)] = (
+                    self.write_collision
+                )
+            self.write_collision = None
+        if headers.get("x-oss-forbid-overwrite") == "true" and (self.name, key) in self.objects:
+            raise oss2.exceptions.OssError(
+                409,
+                {},
+                b"",
+                {"Code": "FileAlreadyExists", "Message": "destination exists"},
+            )
+        self.write_count += 1
+        version_id = f"write-version-{self.write_count}"
+        stored = _StoredObject(
+            body=data,
+            content_type=headers["Content-Type"],
+            etag=f'"write-etag-{self.write_count}"',
+            metadata={
+                name.removeprefix("x-oss-meta-"): value
+                for name, value in headers.items()
+                if name.startswith("x-oss-meta-")
+            },
+            version_id=version_id,
+            server_side_encryption=(
+                headers.get("x-oss-server-side-encryption")
+                if not self.omit_write_encryption
+                else None
+            ),
+        )
+        self.objects[(self.name, key)] = stored
+        self.versions[(self.name, key, version_id)] = stored
+        return SimpleNamespace(etag=stored.etag, versionid=version_id)
 
     def delete_object(
         self,
@@ -893,6 +1400,13 @@ class _OssBucket:
         if headers and headers.get("If-Match") != stored.etag:
             raise oss2.exceptions.PreconditionFailed(412, {}, b"", {})
         if version_id is not None:
+            self.version_delete_attempts.append((key, version_id))
+            self.version_delete_if_matches.append(
+                headers.get("If-Match") if headers is not None else None
+            )
+            if self.fail_version_delete:
+                raise oss2.exceptions.RequestError(TimeoutError("delete timed out"))
+            self.deleted_versions.append((key, version_id))
             del self.versions[(self.name, key, version_id)]
             if self.objects.get((self.name, key)) is stored:
                 del self.objects[(self.name, key)]
@@ -911,6 +1425,217 @@ class _OssBucket:
             next_key_marker="",
             next_versionid_marker="",
         )
+
+
+def _oss_provider_storage(client: _OssBucket) -> OssObjectStorage:
+    return OssObjectStorage(
+        endpoint="https://oss.internal.invalid",
+        presign_endpoint="https://oss.invalid",
+        access_key="access-key",
+        secret_key="secret-key",
+        session_token=None,
+        region="cn-hangzhou",
+        buckets={StorageLocationClass.PROVIDER_RESULT: "provider"},
+        force_path_style=False,
+        require_encryption=False,
+        connect_timeout=1,
+        clients={StorageLocationClass.PROVIDER_RESULT: client},
+        signers={StorageLocationClass.PROVIDER_RESULT: client},
+    )
+
+
+def test_oss_conditional_write_classifies_preflight_outage_as_safe_to_retry() -> None:
+    class PreflightUnavailableBucket(_OssBucket):
+        def head_object(
+            self,
+            key: str,
+            headers: dict[str, str] | None = None,
+            params: dict[str, str] | None = None,
+        ) -> SimpleNamespace:
+            del key, headers, params
+            raise oss2.exceptions.RequestError(TimeoutError("head timed out"))
+
+    storage = _oss_provider_storage(PreflightUnavailableBucket("provider", {}))
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/preflight-unavailable.json",
+    )
+
+    with pytest.raises(StorageWriteSafeToRetryError, match="before conditional write"):
+        storage.write_if_absent(_provider_write_request(reference, b'{"provider":"raw"}'))
+
+
+def test_oss_encrypted_conditional_write_rejects_matching_plaintext_replay() -> None:
+    payload = b'{"provider":"raw"}'
+    digest = hashlib.sha256(payload).hexdigest()
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/plaintext.json",
+    )
+    objects = {
+        ("provider", reference.key): _StoredObject(
+            body=payload,
+            content_type="application/json",
+            etag='"plaintext-etag"',
+            metadata={
+                "sha256": digest,
+                "retention-class": "TASK",
+                "server-side-encryption": "AES256",
+            },
+            version_id="plaintext-version",
+        )
+    }
+    client = _OssBucket("provider", objects)
+    storage = _oss_provider_storage(client)
+    request = _provider_write_request(reference, payload)
+
+    with pytest.raises(StoragePreconditionError, match="encryption"):
+        storage.write_if_absent(request)
+    assert storage.stat(reference).server_side_encryption == ServerSideEncryptionState.NONE
+
+    ordinary_replay = storage.write_if_absent(
+        request.model_copy(update={"require_encryption": False})
+    )
+    assert ordinary_replay.reference.version_id == "plaintext-version"
+
+
+@pytest.mark.parametrize(
+    ("server_side_encryption", "accepted"),
+    [("KMS", True), (None, False)],
+    ids=["encrypted", "plaintext"],
+)
+def test_oss_encrypted_conditional_write_conflict_recovery_requires_stat_evidence(
+    server_side_encryption: str | None,
+    accepted: bool,
+) -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/race.json",
+    )
+    client = _OssBucket("provider", {})
+    client.write_collision = _StoredObject(
+        body=payload,
+        content_type="application/json",
+        etag='"race-etag"',
+        metadata={
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "retention-class": "TASK",
+        },
+        version_id="race-version",
+        server_side_encryption=server_side_encryption,
+    )
+    storage = _oss_provider_storage(client)
+    request = _provider_write_request(reference, payload)
+
+    if accepted:
+        recovered = storage.write_if_absent(request)
+        assert recovered.reference.version_id == "race-version"
+        assert recovered.server_side_encryption == ServerSideEncryptionState.KMS
+    else:
+        with pytest.raises(StoragePreconditionError):
+            storage.write_if_absent(request)
+
+
+def test_oss_encrypted_conditional_write_cleans_failed_exact_plaintext_version() -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/new-plaintext.json",
+    )
+    client = _OssBucket("provider", {})
+    client.omit_write_encryption = True
+    storage = _oss_provider_storage(client)
+
+    with pytest.raises(StoragePreconditionError, match="encryption requirement"):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+    assert client.write_count == 1
+    assert client.deleted_versions == [
+        (reference.key, "write-version-1"),
+    ]
+    with pytest.raises(UploadObjectMissingError):
+        storage.stat(reference.model_copy(update={"version_id": "write-version-1"}))
+
+
+@pytest.mark.parametrize(
+    ("verification_failure", "expected_error"),
+    [
+        ("timeout", StorageUnavailableError),
+        ("wrong-version", StoragePreconditionError),
+        ("malformed-facts", StoragePreconditionError),
+        ("mismatched-facts", StoragePreconditionError),
+    ],
+)
+def test_oss_post_write_verification_failure_cleans_exact_version(
+    verification_failure: str,
+    expected_error: type[Exception],
+) -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key=f"product-brief/op/{verification_failure}.json",
+    )
+    client = _OssBucket("provider", {})
+    client.write_verification_failure = verification_failure
+    storage = _oss_provider_storage(client)
+
+    with pytest.raises(expected_error):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+
+    assert client.version_delete_attempts == [
+        (reference.key, "write-version-1"),
+    ]
+    assert client.version_delete_if_matches == ['"write-etag-1"']
+    assert client.deleted_versions == [
+        (reference.key, "write-version-1"),
+    ]
+
+
+def test_oss_verification_failure_fails_closed_when_cleanup_proof_errors() -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/verification-and-proof-timeout.json",
+    )
+    client = _OssBucket("provider", {})
+    client.write_verification_failure = "timeout"
+    client.fail_missing_version_head = True
+    storage = _oss_provider_storage(client)
+
+    with pytest.raises(
+        StoragePreconditionError,
+        match="exact-version cleanup could not be proven",
+    ):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+
+    assert client.version_delete_attempts == [
+        (reference.key, "write-version-1"),
+    ]
+    assert client.deleted_versions == [
+        (reference.key, "write-version-1"),
+    ]
+
+
+def test_oss_failed_write_fails_closed_when_exact_cleanup_is_unproven() -> None:
+    payload = b'{"provider":"raw"}'
+    reference = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key="product-brief/op/unproven-cleanup.json",
+    )
+    client = _OssBucket("provider", {})
+    client.omit_write_encryption = True
+    client.fail_version_delete = True
+    storage = _oss_provider_storage(client)
+
+    with pytest.raises(
+        StoragePreconditionError,
+        match="exact-version cleanup could not be proven",
+    ):
+        storage.write_if_absent(_provider_write_request(reference, payload))
+
+    assert client.version_delete_attempts == [
+        (reference.key, "write-version-1"),
+    ]
 
 
 def test_oss_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read() -> None:
@@ -941,11 +1666,42 @@ def test_oss_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read
         region="cn-hangzhou",
         buckets=names,
         force_path_style=False,
-        require_encryption=True,
+        require_encryption=False,
         connect_timeout=1,
         clients=clients,
         signers=clients,
     )
+    artifact_payload = b'{"provider":"raw"}'
+    artifact_request = ConditionalWriteRequest(
+        reference=ObjectReference(
+            location=StorageLocationClass.PROVIDER_RESULT,
+            key="product-brief/op/request.json",
+        ),
+        payload=artifact_payload,
+        expected_sha256=hashlib.sha256(artifact_payload).hexdigest(),
+        content_type="application/json",
+        metadata={"retention-class": "FOUNDATION"},
+        require_encryption=True,
+    )
+    written = storage.write_if_absent(artifact_request)
+    replayed_write = storage.write_if_absent(artifact_request)
+    assert written.reference.version_id == "write-version-1"
+    assert replayed_write.reference == written.reference
+    assert written.server_side_encryption == ServerSideEncryptionState.AES256
+    assert replayed_write.server_side_encryption == ServerSideEncryptionState.AES256
+    provider_client = clients[StorageLocationClass.PROVIDER_RESULT]
+    assert provider_client.last_write_headers is not None
+    assert provider_client.last_write_headers["x-oss-server-side-encryption"] == "AES256"
+    assert written.metadata["retention-class"] == "FOUNDATION"
+    with pytest.raises(StoragePreconditionError):
+        storage.write_if_absent(
+            artifact_request.model_copy(
+                update={
+                    "payload": b"different",
+                    "expected_sha256": hashlib.sha256(b"different").hexdigest(),
+                }
+            )
+        )
     source = ObjectReference(
         location=StorageLocationClass.QUARANTINE,
         key="q/source",
@@ -1039,16 +1795,30 @@ def test_oss_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read
     assert matching_race.reference.version_id == "matching-concurrent-version"
     assert clients[StorageLocationClass.TASK].copy_count == 1
 
-    temporary = storage.temporary_read(
-        TemporaryReadRequest(
-            reference=first_copy.reference,
-            expires_at=datetime.now(UTC) + timedelta(seconds=30),
-            expected_etag=first_copy.etag,
-        )
+    temporary_request = TemporaryReadRequest(
+        reference=first_copy.reference,
+        expires_at=datetime.now(UTC) + timedelta(seconds=30),
+        expected_etag=first_copy.etag,
+        expected_sha256=sha256,
     )
+    task_client = clients[StorageLocationClass.TASK]
+    heads_before_temporary_read = len(task_client.head_version_ids)
+    temporary = storage.temporary_read(temporary_request)
+    assert len(task_client.head_version_ids) == heads_before_temporary_read + 1
+    assert task_client.head_version_ids[-1] == first_copy.reference.version_id
+    assert task_client.signed_requests[-1][2] is None
+    assert task_client.signed_requests[-1][3] == {"versionId": first_copy.reference.version_id}
     assert temporary.method == "GET"
-    assert temporary.required_headers == {"If-Match": first_copy.etag}
+    assert temporary.required_headers == {}
     assert "versionId=copy-version-1" in temporary.url
+    signs_before_mismatch = len(task_client.signed_requests)
+    with pytest.raises(StoragePreconditionError, match="ETag"):
+        storage.temporary_read(
+            temporary_request.model_copy(update={"expected_etag": '"wrong-etag"'})
+        )
+    with pytest.raises(StoragePreconditionError, match="content identity"):
+        storage.temporary_read(temporary_request.model_copy(update={"expected_sha256": "0" * 64}))
+    assert len(task_client.signed_requests) == signs_before_mismatch
 
     with pytest.raises(StoragePreconditionError):
         storage.delete_if_match(
@@ -1069,7 +1839,6 @@ def test_oss_adapter_contract_covers_bounded_read_copy_delete_and_temporary_read
             expected_etag=first_copy.etag,
         )
     )
-    task_client = clients[StorageLocationClass.TASK]
     task_client.version_listing_pages = [
         SimpleNamespace(
             versions=[
@@ -1241,6 +2010,92 @@ def test_oss_copy_rejects_a_post_copy_head_without_the_exact_version() -> None:
 
     with pytest.raises(StoragePreconditionError, match="copied object version"):
         storage.copy_if_absent(request)
+
+
+def test_oss_readiness_client_has_a_single_attempt_request_transport() -> None:
+    location = StorageLocationClass.PROVIDER_RESULT
+    storage = OssObjectStorage(
+        endpoint="https://oss-cn-hangzhou.aliyuncs.com",
+        presign_endpoint="https://oss-cn-hangzhou.aliyuncs.com",
+        access_key="access-key",
+        secret_key="secret-key",
+        session_token=None,
+        region="cn-hangzhou",
+        buckets={location: "provider"},
+        force_path_style=False,
+        require_encryption=True,
+        connect_timeout=3,
+        read_timeout=5,
+        readiness_timeout=2,
+    )
+
+    try:
+        readiness_client = storage._readiness_clients[location]
+        assert readiness_client.timeout == (2, 2)
+        request_session = readiness_client.session.session
+        assert request_session.get_adapter("http://").max_retries.total == 0
+        assert request_session.get_adapter("https://").max_retries.total == 0
+    finally:
+        storage.close()
+
+
+def test_oss_close_reaches_requests_sessions_once_and_is_best_effort() -> None:
+    close_order: list[str] = []
+
+    class ClosingRequestsSession:
+        def __init__(self, name: str, *, failure: Exception | None = None) -> None:
+            self.name = name
+            self.failure = failure
+            self.close_count = 0
+
+        def close(self) -> None:
+            self.close_count += 1
+            close_order.append(self.name)
+            if self.failure is not None:
+                raise self.failure
+
+    class OssSession:
+        def __init__(self, request_session: ClosingRequestsSession) -> None:
+            self.session = request_session
+
+    class Bucket:
+        def __init__(self, session: OssSession) -> None:
+            self.session = session
+
+    location = StorageLocationClass.PROVIDER_RESULT
+    shared_client_and_signer_session = ClosingRequestsSession(
+        "client-and-signer-session",
+        failure=RuntimeError("shared OSS requests session close failed"),
+    )
+    readiness_session = ClosingRequestsSession("readiness-session")
+    shared_oss_session = OssSession(shared_client_and_signer_session)
+    storage = OssObjectStorage(
+        endpoint="https://oss-cn-hangzhou.aliyuncs.com",
+        presign_endpoint="https://oss-cn-hangzhou.aliyuncs.com",
+        access_key="access-key",
+        secret_key="secret-key",
+        session_token=None,
+        region="cn-hangzhou",
+        buckets={location: "provider"},
+        force_path_style=False,
+        require_encryption=True,
+        connect_timeout=3,
+        read_timeout=5,
+        readiness_timeout=2,
+        clients={location: Bucket(shared_oss_session)},
+        signers={location: Bucket(shared_oss_session)},
+        readiness_clients={location: Bucket(OssSession(readiness_session))},
+    )
+
+    with pytest.raises(ExceptionGroup, match="object storage client shutdown failed") as raised:
+        storage.close()
+
+    assert close_order == ["client-and-signer-session", "readiness-session"]
+    assert shared_client_and_signer_session.close_count == 1
+    assert readiness_session.close_count == 1
+    assert [str(error) for error in raised.value.exceptions] == [
+        "shared OSS requests session close failed"
+    ]
 
 
 def test_oss_readiness_requires_all_unique_buckets_versioned_and_encrypted() -> None:
@@ -1610,6 +2465,7 @@ def test_timed_out_credential_refresh_does_not_block_process_exit() -> None:
     script = textwrap.dedent(
         """
         from threading import Event
+        from time import monotonic
 
         from commercevision_domain import StorageUnavailableError
         from commercevision_object_storage.credentials import (
@@ -1624,12 +2480,14 @@ def test_timed_out_credential_refresh_does_not_block_process_exit() -> None:
             BlockingClient(),
             refresh_timeout_seconds=0.01,
         )
+        started = monotonic()
         try:
             provider.get_credentials()
         except StorageUnavailableError:
             pass
         finally:
             provider.close()
+        print(monotonic() - started)
         """
     )
 
@@ -1638,10 +2496,11 @@ def test_timed_out_credential_refresh_does_not_block_process_exit() -> None:
         capture_output=True,
         check=False,
         text=True,
-        timeout=5,
+        timeout=15,
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert float(completed.stdout.strip()) < 5
 
 
 @pytest.mark.parametrize(

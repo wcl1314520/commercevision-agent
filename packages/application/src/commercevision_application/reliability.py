@@ -4,12 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from commercevision_contracts.events import EventType, WorkflowRunRequestedPayload
-from commercevision_domain import LeaseConflictError, NotFoundError
+from commercevision_domain import (
+    LeaseConflictError,
+    NotFoundError,
+    ProductBriefState,
+)
 from commercevision_domain.messaging import DeadLetterMessage, EventEnvelope, OutboxEvent
 
+from .execution import ProductBriefGenerationAuthority
 from .ports import MessagePublisher, UnitOfWorkFactory
+from .product_brief_authority import (
+    ProductBriefWorkflowAuthorityState,
+    evaluate_product_brief_workflow_authority,
+    has_active_product_brief_workflow_retention,
+)
 from .routing import EventRoutingError
 
 
@@ -21,6 +32,15 @@ class MessageClaim:
     retry_not_ready: bool
     lease_token: str | None
     delivery_attempt: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProductBriefGenerationResolution:
+    state: Literal["none", "active", "stale", "binding_mismatch"]
+    generation: ProductBriefGenerationAuthority | None
+    product_brief_version_id: str | None = None
+    product_brief_version_number: int | None = None
+    trace_id: str | None = None
 
 
 class OutboxDispatcher:
@@ -269,14 +289,30 @@ class RecoveryService:
         self._stale_after = stale_after
 
     def recover_once(self) -> tuple[int, int]:
-        now = datetime.now(UTC)
         recovered_steps = 0
         recovered_workflows = 0
         with self._uow_factory() as uow:
+            now = uow.database_now()
             for step in uow.steps.list_expired_leases(now=now, limit=self._batch_size):
                 workflow = uow.workflows.get(step.workflow_id)
                 if workflow is None:
                     raise NotFoundError(f"workflow {step.workflow_id} was not found")
+                step_generation = (
+                    ProductBriefGenerationAuthority.from_step(step)
+                    if workflow.workflow_type == "COMMERCE_IMAGE_GENERATION"
+                    else None
+                )
+                generation_resolution = self._resolve_product_brief_generation(
+                    uow=uow,
+                    workflow=workflow,
+                    now=now,
+                    preferred=step_generation,
+                )
+                if generation_resolution.state in {"stale", "binding_mismatch"}:
+                    step.cancel(now=now)
+                    uow.steps.save(step)
+                    recovered_steps += 1
+                    continue
                 step.recover_expired_lease(retry_at=now, now=now)
                 uow.steps.save(step)
                 if not uow.outbox.has_unpublished(
@@ -290,6 +326,16 @@ class RecoveryService:
                             workflow_version=step.expected_workflow_version,
                             reason="expired_step_lease",
                             now=now,
+                            trace_id=self._recovery_trace_id(
+                                workflow_id=workflow.id,
+                                generation_resolution=generation_resolution,
+                            ),
+                            product_brief_version_id=(
+                                generation_resolution.product_brief_version_id
+                            ),
+                            product_brief_version_number=(
+                                generation_resolution.product_brief_version_number
+                            ),
                         )
                     )
                 recovered_steps += 1
@@ -299,6 +345,29 @@ class RecoveryService:
                 stale_before=stale_before,
                 limit=self._batch_size,
             ):
+                generation_resolution = self._resolve_product_brief_generation(
+                    uow=uow,
+                    workflow=workflow,
+                    now=now,
+                )
+                if generation_resolution.state in {"stale", "binding_mismatch"}:
+                    self._cancel_nonterminal_steps(
+                        uow=uow,
+                        workflow_id=workflow.id,
+                        now=now,
+                    )
+                    workflow.record_recovery_observation(observed_at=now)
+                    uow.workflows.save(workflow)
+                    recovered_workflows += 1
+                    continue
+                if (
+                    workflow.workflow_type == "COMMERCE_IMAGE_GENERATION"
+                    and generation_resolution.state == "none"
+                ):
+                    workflow.record_recovery_observation(observed_at=now)
+                    uow.workflows.save(workflow)
+                    recovered_workflows += 1
+                    continue
                 if not uow.outbox.has_unpublished(
                     aggregate_id=workflow.id,
                     event_type=EventType.WORKFLOW_RUN_REQUESTED.value,
@@ -310,8 +379,20 @@ class RecoveryService:
                             workflow_version=workflow.version,
                             reason="stale_workflow",
                             now=now,
+                            trace_id=self._recovery_trace_id(
+                                workflow_id=workflow.id,
+                                generation_resolution=generation_resolution,
+                            ),
+                            product_brief_version_id=(
+                                generation_resolution.product_brief_version_id
+                            ),
+                            product_brief_version_number=(
+                                generation_resolution.product_brief_version_number
+                            ),
                         )
                     )
+                    workflow.record_recovery_observation(observed_at=now)
+                    uow.workflows.save(workflow)
                     recovered_workflows += 1
             uow.commit()
         return recovered_steps, recovered_workflows
@@ -324,6 +405,9 @@ class RecoveryService:
         workflow_version: int,
         reason: str,
         now: datetime,
+        trace_id: str,
+        product_brief_version_id: str | None = None,
+        product_brief_version_number: int | None = None,
     ) -> OutboxEvent:
         return OutboxEvent(
             envelope=EventEnvelope.create(
@@ -331,14 +415,210 @@ class RecoveryService:
                 aggregate_type="workflow",
                 aggregate_id=workflow_id,
                 aggregate_version=workflow_version,
-                trace_id=f"recovery:{workflow_id}",
+                trace_id=trace_id,
                 payload=WorkflowRunRequestedPayload(
                     workflow_id=workflow_id,
                     action="recover",
                     reason=reason,
+                    product_brief_version_id=product_brief_version_id,
+                    product_brief_version_number=product_brief_version_number,
                 ).model_dump(mode="json"),
                 now=now,
             ),
             available_at=now,
             workspace_id=workspace_id,
         )
+
+    @staticmethod
+    def _recovery_trace_id(
+        *,
+        workflow_id: str,
+        generation_resolution: ProductBriefGenerationResolution,
+    ) -> str:
+        if generation_resolution.state == "active":
+            if not generation_resolution.trace_id:
+                raise RuntimeError("active ProductBrief recovery trace lineage is unavailable")
+            return generation_resolution.trace_id
+        return f"recovery:{workflow_id}"
+
+    @staticmethod
+    def _resolve_product_brief_generation(
+        *,
+        uow,
+        workflow,
+        now: datetime,
+        preferred: ProductBriefGenerationAuthority | None = None,
+    ) -> ProductBriefGenerationResolution:
+        if workflow.workflow_type != "COMMERCE_IMAGE_GENERATION":
+            return ProductBriefGenerationResolution(state="none", generation=None)
+        product_id = workflow.input_data.get("product_id")
+        if not isinstance(product_id, str) or not product_id:
+            return ProductBriefGenerationResolution(state="none", generation=None)
+        if not has_active_product_brief_workflow_retention(
+            workflow=workflow,
+            now=now,
+        ):
+            return ProductBriefGenerationResolution(state="stale", generation=None)
+        candidates = (
+            [preferred]
+            if preferred is not None
+            else [
+                authority
+                for step in uow.steps.list_for_workflow(workflow.id)
+                if (authority := ProductBriefGenerationAuthority.from_step(step)) is not None
+            ]
+        )
+        for authority in reversed(candidates):
+            if (
+                authority.workspace_id != workflow.workspace_id
+                or authority.workflow_id != workflow.id
+                or authority.product_id != product_id
+            ):
+                continue
+            product_brief = uow.product_briefs.get(
+                workspace_id=workflow.workspace_id,
+                product_brief_id=authority.product_brief_id,
+            )
+            if (
+                product_brief is None
+                or product_brief.state != ProductBriefState.CONFIRMED
+                or product_brief.current_version_id != authority.product_brief_version_id
+                or product_brief.confirmed_version_id != authority.product_brief_version_id
+            ):
+                continue
+            workflow_authority = evaluate_product_brief_workflow_authority(
+                workflow=workflow,
+                product_brief=product_brief,
+                now=now,
+            )
+            if workflow_authority.state == ProductBriefWorkflowAuthorityState.BINDING_MISMATCH:
+                return ProductBriefGenerationResolution(
+                    state="binding_mismatch",
+                    generation=None,
+                )
+            if workflow_authority.state == ProductBriefWorkflowAuthorityState.EXPIRED:
+                return ProductBriefGenerationResolution(state="stale", generation=None)
+            stored_version = uow.product_briefs.get_version(
+                workspace_id=workflow.workspace_id,
+                product_brief_version_id=authority.product_brief_version_id,
+            )
+            if (
+                stored_version is None
+                or stored_version.version.version_number != authority.product_brief_version_number
+                or stored_version.version.product_brief_id != authority.product_brief_id
+            ):
+                continue
+            if stored_version.version.confirmation_required:
+                confirmation = uow.product_brief_confirmations.get_confirmation(
+                    workspace_id=workflow.workspace_id,
+                    product_brief_id=authority.product_brief_id,
+                    product_brief_version_id=authority.product_brief_version_id,
+                )
+                if (
+                    confirmation is None
+                    or confirmation.workflow_id != workflow.id
+                    or confirmation.product_brief_version_number
+                    != authority.product_brief_version_number
+                    or confirmation.approval_id != authority.approval_id
+                ):
+                    continue
+            elif authority.approval_id is not None:
+                continue
+            trace_id = uow.product_brief_lineage.analysis_trace_id(
+                workspace_id=workflow.workspace_id,
+                product_brief_id=product_brief.id,
+            )
+            if not trace_id:
+                return ProductBriefGenerationResolution(
+                    state="binding_mismatch",
+                    generation=None,
+                )
+            return ProductBriefGenerationResolution(
+                state="active",
+                generation=authority,
+                product_brief_version_id=authority.product_brief_version_id,
+                product_brief_version_number=authority.product_brief_version_number,
+                trace_id=trace_id,
+            )
+        if preferred is not None:
+            return ProductBriefGenerationResolution(state="stale", generation=None)
+
+        product_brief = uow.product_briefs.get_by_workflow_product(
+            workspace_id=workflow.workspace_id,
+            workflow_id=workflow.id,
+            product_id=product_id,
+        )
+        if product_brief is None:
+            return ProductBriefGenerationResolution(
+                state="stale" if candidates else "none",
+                generation=None,
+            )
+        if (
+            product_brief.state != ProductBriefState.CONFIRMED
+            or product_brief.current_version_id is None
+            or product_brief.confirmed_version_id != product_brief.current_version_id
+        ):
+            return ProductBriefGenerationResolution(
+                state="stale" if candidates else "none",
+                generation=None,
+            )
+        workflow_authority = evaluate_product_brief_workflow_authority(
+            workflow=workflow,
+            product_brief=product_brief,
+            now=now,
+        )
+        if workflow_authority.state == ProductBriefWorkflowAuthorityState.BINDING_MISMATCH:
+            return ProductBriefGenerationResolution(
+                state="binding_mismatch",
+                generation=None,
+            )
+        if workflow_authority.state == ProductBriefWorkflowAuthorityState.EXPIRED:
+            return ProductBriefGenerationResolution(state="stale", generation=None)
+        stored_version = uow.product_briefs.get_version(
+            workspace_id=workflow.workspace_id,
+            product_brief_version_id=product_brief.current_version_id,
+        )
+        if stored_version is None or stored_version.version.product_brief_id != product_brief.id:
+            return ProductBriefGenerationResolution(state="stale", generation=None)
+        if stored_version.version.confirmation_required:
+            confirmation = uow.product_brief_confirmations.get_confirmation(
+                workspace_id=workflow.workspace_id,
+                product_brief_id=product_brief.id,
+                product_brief_version_id=product_brief.current_version_id,
+            )
+            if (
+                confirmation is None
+                or confirmation.workflow_id != workflow.id
+                or confirmation.product_brief_version_number
+                != stored_version.version.version_number
+            ):
+                return ProductBriefGenerationResolution(state="stale", generation=None)
+        trace_id = uow.product_brief_lineage.analysis_trace_id(
+            workspace_id=workflow.workspace_id,
+            product_brief_id=product_brief.id,
+        )
+        if not trace_id:
+            return ProductBriefGenerationResolution(
+                state="binding_mismatch",
+                generation=None,
+            )
+        return ProductBriefGenerationResolution(
+            state="active",
+            generation=None,
+            product_brief_version_id=stored_version.version.id,
+            product_brief_version_number=stored_version.version.version_number,
+            trace_id=trace_id,
+        )
+
+    @staticmethod
+    def _cancel_nonterminal_steps(
+        *,
+        uow,
+        workflow_id: str,
+        now: datetime,
+    ) -> None:
+        for step in uow.steps.list_for_workflow(workflow_id):
+            if step.status.terminal:
+                continue
+            step.cancel(now=now)
+            uow.steps.save(step)

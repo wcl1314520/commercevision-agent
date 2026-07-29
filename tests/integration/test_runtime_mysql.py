@@ -648,6 +648,7 @@ def test_phase1_durable_failure_does_not_create_second_worker_retry_schedule(
         idempotency_key=f"{failure_mode}-failure-create-0001",
         trace_id=f"{failure_mode}-failure-trace",
     )
+    current_time = datetime.now(UTC) + timedelta(seconds=1)
     assert set(dispatch_all_ready()) == {"processed"}
     awaiting_plan = service.get(
         workflow_id=created.id,

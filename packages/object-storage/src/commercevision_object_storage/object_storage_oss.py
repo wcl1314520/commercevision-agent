@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -13,6 +14,7 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    ConditionalWriteRequest,
     DeleteMarkerRequest,
     ObjectReference,
     ObjectStat,
@@ -29,17 +31,21 @@ from commercevision_domain import (
     StorageLocationClass,
     StoragePreconditionError,
     StorageUnavailableError,
+    StorageWriteSafeToRetryError,
     UploadObjectMissingError,
 )
 
 from .object_storage_common import (
     READ_CHUNK_BYTES,
+    close_resources_best_effort,
     decode_version_cursor,
     encode_version_cursor,
     metadata_matches,
+    normalize_server_side_encryption,
     seconds_until,
     select_storage_locations,
     validated_response_version,
+    written_object_matches,
 )
 from .readiness import ObjectStorageReadinessError
 
@@ -66,6 +72,14 @@ def _raise_oss_error(exc: Exception) -> None:
     ) or (isinstance(exc, oss2.exceptions.OssError) and exc.code == "FileAlreadyExists"):
         raise StoragePreconditionError("object storage precondition failed") from exc
     raise StorageUnavailableError("object storage request failed") from exc
+
+
+def _oss_adapter_resources(adapters: Iterable[object | None]) -> Iterator[object | None]:
+    for adapter in adapters:
+        yield adapter
+        session = getattr(adapter, "session", None)
+        yield session
+        yield getattr(session, "session", None)
 
 
 class OssObjectStorage:
@@ -166,22 +180,16 @@ class OssObjectStorage:
             list(executor.map(lambda item: self._assert_bucket_ready(*item), items))
 
     def close(self) -> None:
-        seen: set[int] = set()
         adapters = (
             *self._clients.values(),
             *self._signers.values(),
             *self._readiness_clients.values(),
             self._credential_provider,
         )
-        for adapter in adapters:
-            session = getattr(adapter, "session", None)
-            for resource in (adapter, session):
-                if resource is None or id(resource) in seen:
-                    continue
-                seen.add(id(resource))
-                close = getattr(resource, "close", None)
-                if callable(close):
-                    close()
+        close_resources_best_effort(
+            _oss_adapter_resources(adapters),
+            message="object storage client shutdown failed",
+        )
 
     def presign_put(self, request: PresignPutRequest) -> PresignedRequest:
         headers = {
@@ -242,6 +250,9 @@ class OssObjectStorage:
                 datetime.fromtimestamp(result.last_modified, tz=UTC)
                 if result.last_modified is not None
                 else None
+            ),
+            server_side_encryption=normalize_server_side_encryption(
+                headers.get("x-oss-server-side-encryption")
             ),
         )
 
@@ -353,6 +364,134 @@ class OssObjectStorage:
             raise StoragePreconditionError("copied object did not match the expected facts")
         return copied
 
+    def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat:
+        try:
+            existing = self._stat_if_present(request.reference)
+        except StorageUnavailableError as exc:
+            raise StorageWriteSafeToRetryError(
+                "object storage became unavailable before conditional write"
+            ) from exc
+        metadata = {**request.metadata, "sha256": request.expected_sha256}
+        require_encryption = self._require_encryption or request.require_encryption
+        if existing is not None:
+            if not written_object_matches(
+                existing,
+                expected_length=len(request.payload),
+                expected_sha256=request.expected_sha256,
+                expected_content_type=request.content_type,
+                expected_metadata=metadata,
+                require_encryption=require_encryption,
+            ):
+                raise StoragePreconditionError(
+                    "write destination already contains another object "
+                    "or lacks required server-side encryption"
+                )
+            _require_copy_version_id(existing.reference.version_id, role="written object")
+            return existing
+        if hashlib.sha256(request.payload).hexdigest() != request.expected_sha256:
+            raise ObjectMismatchError("conditional write payload SHA-256 does not match")
+        headers = {
+            "Content-Type": request.content_type,
+            "x-oss-forbid-overwrite": "true",
+            **{f"x-oss-meta-{name}": value for name, value in metadata.items()},
+        }
+        if require_encryption:
+            headers["x-oss-server-side-encryption"] = "AES256"
+        try:
+            result = self._client(request.reference.location).put_object(
+                request.reference.key,
+                request.payload,
+                headers=headers,
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            existing = self._stat_if_present(request.reference)
+            if existing is not None and written_object_matches(
+                existing,
+                expected_length=len(request.payload),
+                expected_sha256=request.expected_sha256,
+                expected_content_type=request.content_type,
+                expected_metadata=metadata,
+                require_encryption=require_encryption,
+            ):
+                _require_copy_version_id(existing.reference.version_id, role="written object")
+                return existing
+            _raise_oss_error(exc)
+        version_id = _require_copy_version_id(
+            getattr(result, "versionid", None),
+            role="result",
+        )
+        exact_reference = request.reference.model_copy(update={"version_id": version_id})
+        cleanup_etag = "*"
+        try:
+            result_etag = getattr(result, "etag", None)
+            if isinstance(result_etag, str) and result_etag:
+                cleanup_etag = result_etag
+            written = self.stat(exact_reference)
+            if not written_object_matches(
+                written,
+                expected_length=len(request.payload),
+                expected_sha256=request.expected_sha256,
+                expected_content_type=request.content_type,
+                expected_metadata=metadata,
+                require_encryption=require_encryption,
+            ):
+                raise StoragePreconditionError(
+                    "written object did not match expected facts or encryption requirement"
+                )
+        except Exception as exc:
+            self._cleanup_failed_write(
+                reference=exact_reference,
+                expected_etag=cleanup_etag,
+            )
+            if isinstance(
+                exc,
+                (
+                    StoragePreconditionError,
+                    StorageUnavailableError,
+                    UploadObjectMissingError,
+                ),
+            ):
+                raise
+            raise StoragePreconditionError("written object verification failed") from exc
+        return written
+
+    def _cleanup_failed_write(
+        self,
+        *,
+        reference: ObjectReference,
+        expected_etag: str,
+    ) -> None:
+        if reference.version_id is None:
+            raise StoragePreconditionError("failed write exact-version cleanup could not be proven")
+        try:
+            self._client(reference.location).delete_object(
+                reference.key,
+                params={"versionId": reference.version_id},
+                headers={"If-Match": expected_etag},
+            )
+        except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
+            try:
+                _raise_oss_error(exc)
+            except UploadObjectMissingError:
+                pass
+            except (StoragePreconditionError, StorageUnavailableError) as cleanup_exc:
+                raise StoragePreconditionError(
+                    "failed write exact-version cleanup could not be proven"
+                ) from cleanup_exc
+        except Exception as exc:
+            raise StoragePreconditionError(
+                "failed write exact-version cleanup could not be proven"
+            ) from exc
+        try:
+            self.stat(reference)
+        except UploadObjectMissingError:
+            return
+        except Exception as exc:
+            raise StoragePreconditionError(
+                "failed write exact-version cleanup could not be proven"
+            ) from exc
+        raise StoragePreconditionError("failed write exact version remains readable")
+
     def delete_if_match(self, request: ConditionalDeleteRequest) -> bool:
         try:
             current = self.stat(request.reference)
@@ -443,25 +582,30 @@ class OssObjectStorage:
         return True
 
     def temporary_read(self, request: TemporaryReadRequest) -> PresignedRequest:
-        headers = {"If-Match": request.expected_etag} if request.expected_etag else {}
+        current = self.stat(request.reference)
+        if request.expected_etag is not None and current.etag != request.expected_etag:
+            raise StoragePreconditionError("temporary read ETag does not match")
+        if (
+            request.expected_sha256 is not None
+            and current.metadata.get("sha256") != request.expected_sha256
+        ):
+            raise StoragePreconditionError("temporary read content identity does not match")
         params = (
-            {"versionId": request.reference.version_id} if request.reference.version_id else None
+            {"versionId": current.reference.version_id} if current.reference.version_id else None
         )
         try:
-            url = self._signer(request.reference.location).sign_url(
+            url = self._signer(current.reference.location).sign_url(
                 "GET",
-                request.reference.key,
+                current.reference.key,
                 seconds_until(request.expires_at),
-                headers=headers,
                 params=params,
-                additional_headers=list(headers),
             )
         except (oss2.exceptions.OssError, oss2.exceptions.RequestError, ValueError) as exc:
             _raise_oss_error(exc)
         return PresignedRequest(
             method="GET",
             url=url,
-            required_headers=headers,
+            required_headers={},
             expires_at=request.expires_at,
         )
 
@@ -497,6 +641,12 @@ class OssObjectStorage:
             raise ObjectStorageReadinessError(
                 f"object storage bucket {bucket_name} encryption is not configured"
             )
+
+    def configured_bucket(self, location: StorageLocationClass) -> str:
+        try:
+            return self._bucket_names[location]
+        except KeyError as exc:
+            raise ValueError(f"storage location {location.value} is not configured") from exc
 
     def _client(self, location: StorageLocationClass) -> Any:
         try:

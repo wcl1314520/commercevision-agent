@@ -104,64 +104,229 @@ export interface ErrorResponse {
   trace_id: string;
 }
 
-export interface OperationErrorResponseV1 {
-  code: string;
-  category: string;
-  message: string;
-  retryable: boolean;
-  provider_request_id: string | null;
-}
-
-export type OperationKind = "ASSET_VALIDATION" | "PRODUCT_BRIEF_ANALYSIS" | "ASSET_INDEXING" | "ASSET_DELETION" | "RECONCILIATION" | "COLLECTION_REBUILD";
-
-export interface OperationResponseV1 {
-  id: string;
-  workspace_id: string;
-  kind: OperationKind;
-  target_type: string;
-  target_id: string;
-  target_version: number;
-  input_hash: string;
-  input_ref: string | null;
-  output_ref: string | null;
-  provider_request_id: string | null;
-  state: OperationState;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  attempt_count: number;
-  max_attempts: number;
-  next_attempt_at: string | null;
-  execution_deadline_at: string;
-  reconciliation_attempt_count: number;
-  max_reconciliation_attempts: number;
-  next_reconciliation_at: string | null;
-  reconciliation_started_at: string | null;
-  reconciliation_deadline_at: string | null;
-  reconciliation_required: boolean;
-  reconciliation_outcome: ReconciliationOutcome;
-  dead_letter_id: string | null;
-  replay_source_dead_letter_id: string | null;
-  replay_attempt: number;
-  recovery_generation: number;
-  recovery_consumed_generation: number;
-  error: OperationErrorResponseV1 | null;
-  created_at: string;
-  updated_at: string;
-  last_attempt_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  version: number;
-}
+export type JsonValue = null | boolean | number | string | Array<JsonValue> | { [key: string]: JsonValue };
 
 export type OperationState = "PENDING" | "CLAIMED" | "RUNNING" | "RECONCILING" | "WAITING_HUMAN" | "RETRYABLE_FAILED" | "SUCCEEDED" | "FAILED" | "CANCELLED";
 
 export interface PresignedUploadV1 {
-  method: string;
+  method: "PUT";
   url: string;
   required_headers: Record<string, unknown>;
   maximum_bytes: number;
-  checksum_algorithm: string;
+  checksum_algorithm: "SHA-256";
   expires_at: string;
+}
+
+export interface ProductBriefAnalysisAcceptedV1 {
+  product_brief: ProductBriefResponseV1;
+  operation_id: string;
+  operation_state: string;
+}
+
+export interface ProductBriefAnalysisRequestV1 {
+  workflow_id: string;
+  product_id: string;
+  asset_version_ids: [string, ...Array<string>];
+  expected_workflow_version: number;
+}
+
+export type ProductBriefCategory = "BEAUTY" | "AUTOMOTIVE";
+
+export interface ProductBriefConfirmationRequestV1 {
+  expected_product_brief_version: number;
+  product_brief_version_id: string;
+  expected_workflow_version: number;
+  reason_code?: string | null;
+  comment_ref?: string | null;
+}
+
+export interface ProductBriefConfirmationResponseV1 {
+  product_brief: ProductBriefResponseV1;
+  workflow_id: string;
+  workflow_status: string;
+  workflow_version: number;
+  confirmation_id: string;
+}
+
+export type ProductBriefEvidenceKind = "IMAGE_REGION" | "VISIBLE_TEXT" | "PRODUCT_DATA" | "HUMAN_NOTE";
+
+export interface ProductBriefEvidenceResponseV1 {
+  id: string;
+  source_asset_version_id: string;
+  kind: ProductBriefEvidenceKind;
+  reference: string;
+  region: [number, number, number, number] | null;
+  excerpt_sha256: string | null;
+}
+
+export interface ProductBriefEvidenceRevisionV1 {
+  source_asset_version_id: string;
+  kind: ProductBriefEvidenceKind;
+  reference: string;
+  region?: [number, number, number, number] | null;
+  excerpt_sha256?: string | null;
+}
+
+export type ProductBriefFieldConflict = "NONE" | "CONFLICTING" | "RESOLVED";
+
+export interface ProductBriefIdentityValueV1 {
+  kind: "IDENTITY";
+  display_name: string;
+  model_number?: string | null;
+  variant?: string | null;
+}
+
+export interface ProductBriefCategoryValueV1 {
+  kind: "CATEGORY";
+  code: string;
+  label: string;
+}
+
+export interface ProductBriefTextValueV1 {
+  kind: "TEXT";
+  text: string;
+}
+
+export interface ProductBriefTextListValueV1 {
+  kind: "TEXT_LIST";
+  items: Array<string>;
+}
+
+export interface ProductBriefStatementListValueV1 {
+  kind: "STATEMENT_LIST";
+  statements: Array<string>;
+}
+
+export interface ProductBriefFlagListValueV1 {
+  kind: "FLAG_LIST";
+  flags: Array<string>;
+}
+
+export interface ProductBriefDimensionValueItemV1 {
+  name: string;
+  value: string;
+  unit?: string | null;
+  raw_text?: string | null;
+}
+
+export interface ProductBriefDimensionListValueV1 {
+  kind: "DIMENSION_LIST";
+  dimensions: Array<ProductBriefDimensionValueItemV1>;
+}
+
+export type ProductBriefFieldSource = "MODEL" | "HUMAN" | "PRODUCT_DATA";
+
+export interface ProductBriefOperationErrorResponseV1 {
+  code: string;
+  category: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface ProductBriefOperationStatusResponseV1 {
+  id: string;
+  state: OperationState;
+  attempt_count: number;
+  max_attempts: number;
+  error: ProductBriefOperationErrorResponseV1 | null;
+  version: number;
+}
+
+export interface ProductBriefProviderCallResponseV1 {
+  provider: string;
+  requested_model: string;
+  resolved_model: string | null;
+  latency_ms: number;
+}
+
+export interface ProductBriefResponseV1 {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  product_id: string;
+  operation_id: string;
+  state: ProductBriefState;
+  current_version_id: string | null;
+  confirmed_version_id: string | null;
+  version: number;
+  retention_class: RetentionClass;
+  retention_deadline: string | null;
+  created_at: string;
+  updated_at: string;
+  current_version: ProductBriefVersionResponseV1 | null;
+  confirmed_version: ProductBriefVersionResponseV1 | null;
+}
+
+export interface ProductBriefRevisionRequestV1 {
+  expected_product_brief_version: number;
+  base_version_id: string;
+  reason: string;
+  fields: [ProductBriefFieldRevisionV1, ...Array<ProductBriefFieldRevisionV1>];
+}
+
+export type ProductBriefState = "DRAFT" | "AWAITING_CONFIRMATION" | "CONFIRMED" | "ARCHIVED";
+
+export interface ProductBriefVersionListResponseV1 {
+  items: Array<ProductBriefVersionSummaryResponseV1>;
+  next_cursor: number | null;
+}
+
+export interface ProductBriefVersionResponseV1 {
+  id: string;
+  product_brief_id: string;
+  version_number: number;
+  supersedes_version_id: string | null;
+  effective_state: ProductBriefState;
+  category: ProductBriefCategory;
+  common_schema_version: string;
+  category_schema_version: string;
+  payload_sha256: string;
+  changed_field_paths: [string, ...Array<string>];
+  confirmation_required: boolean;
+  unresolved_field_count: number;
+  review_policy_version: string;
+  source: ProductBriefVersionSource;
+  prompt_version: string | null;
+  provider_call: ProductBriefProviderCallResponseV1 | null;
+  actor_id: string;
+  revision_reason: string | null;
+  retention_class: RetentionClass;
+  retention_deadline: string | null;
+  created_at: string;
+  fields: [ProductBriefFieldResponseV1, ...Array<ProductBriefFieldResponseV1>];
+}
+
+export interface ProductBriefVersionSummaryResponseV1 {
+  id: string;
+  product_brief_id: string;
+  version_number: number;
+  supersedes_version_id: string | null;
+  effective_state: ProductBriefState;
+  category: ProductBriefCategory;
+  common_schema_version: string;
+  category_schema_version: string;
+  payload_sha256: string;
+  changed_field_paths: [string, ...Array<string>];
+  confirmation_required: boolean;
+  unresolved_field_count: number;
+  review_policy_version: string;
+  source: ProductBriefVersionSource;
+  prompt_version: string | null;
+  provider_call: ProductBriefProviderCallResponseV1 | null;
+  actor_id: string;
+  revision_reason: string | null;
+  retention_class: RetentionClass;
+  retention_deadline: string | null;
+  created_at: string;
+}
+
+export type ProductBriefVersionSource = "MODEL" | "HUMAN";
+
+export interface ProductBriefWorkflowContextResponseV1 {
+  id: string;
+  status: WorkflowStatus;
+  version: number;
+  retention_deadline: string;
 }
 
 export interface ProductCreateRequestV1 {
@@ -222,8 +387,6 @@ export interface ProductUpdateRequestV1 {
   attributes?: Record<string, unknown>;
   expires_at?: string | null;
 }
-
-export type ReconciliationOutcome = "NOT_REQUIRED" | "PENDING" | "CONFIRMED_SUCCESS" | "CONFIRMED_FAILURE" | "NOT_FOUND";
 
 export type RetentionClass = "TASK" | "FOUNDATION";
 
@@ -449,3 +612,87 @@ export interface ValidationOperationSummaryV1 {
 export type ValidationStage = "LOCAL_FORMAT" | "MALWARE" | "CONTENT_SAFETY" | "PROVENANCE" | "PROMOTION";
 
 export type ValidationVerdict = "PASS" | "REVIEW" | "BLOCK" | "RETRYABLE_FAILURE" | "TERMINAL_FAILURE" | "NOT_APPLICABLE";
+
+export type WorkflowStatus = "DRAFT" | "INGESTING" | "UNDERSTANDING" | "AWAITING_PRODUCT_CONFIRMATION" | "RETRIEVING" | "PLANNING" | "AWAITING_PLAN_APPROVAL" | "GENERATING" | "EVALUATING" | "REPAIRING" | "AWAITING_RESULT_APPROVAL" | "EXPORTING" | "COMPLETED" | "FAILED" | "CANCELLED";
+
+export const PRODUCT_BRIEF_FIELD_VALUE_KIND_BY_PATH = {
+  "automotive.certification_marks": "STATEMENT_LIST",
+  "automotive.compatibility_evidence": "STATEMENT_LIST",
+  "automotive.dimensions_evidence": "DIMENSION_LIST",
+  "automotive.finish": "TEXT",
+  "automotive.installation_evidence": "STATEMENT_LIST",
+  "automotive.material": "TEXT",
+  "automotive.part_type": "TEXT",
+  "automotive.placement": "TEXT",
+  "automotive.safety_critical_claim_flags": "FLAG_LIST",
+  "beauty.cosmetic_form": "TEXT",
+  "beauty.finish": "TEXT",
+  "beauty.ingredient_claim_evidence": "STATEMENT_LIST",
+  "beauty.medical_like_claim_flags": "FLAG_LIST",
+  "beauty.package_type": "TEXT",
+  "beauty.packaging_compliance_notes": "TEXT",
+  "beauty.shade_evidence": "STATEMENT_LIST",
+  "beauty.skin_hair_claim_flags": "FLAG_LIST",
+  "beauty.texture": "TEXT",
+  "common.brand": "TEXT",
+  "common.category": "CATEGORY",
+  "common.colors": "TEXT_LIST",
+  "common.identity": "IDENTITY",
+  "common.material": "TEXT",
+  "common.package_or_part_form": "TEXT",
+  "common.product_type": "TEXT",
+  "common.prohibited_assumptions": "TEXT_LIST",
+  "common.sensitive_claims": "STATEMENT_LIST",
+  "common.source_conflicts": "STATEMENT_LIST",
+  "common.usage_context": "TEXT",
+  "common.visible_text_summary": "TEXT",
+  "common.visual_features": "TEXT_LIST"
+} as const;
+
+export type ProductBriefFieldPath = keyof typeof PRODUCT_BRIEF_FIELD_VALUE_KIND_BY_PATH;
+
+export interface ProductBriefFieldValueByKindV1 {
+  CATEGORY: ProductBriefCategoryValueV1;
+  DIMENSION_LIST: ProductBriefDimensionListValueV1;
+  FLAG_LIST: ProductBriefFlagListValueV1;
+  IDENTITY: ProductBriefIdentityValueV1;
+  STATEMENT_LIST: ProductBriefStatementListValueV1;
+  TEXT: ProductBriefTextValueV1;
+  TEXT_LIST: ProductBriefTextListValueV1;
+}
+
+export type ProductBriefFieldValueForPath<Path extends ProductBriefFieldPath> = ProductBriefFieldValueByKindV1[(typeof PRODUCT_BRIEF_FIELD_VALUE_KIND_BY_PATH)[Path]];
+export type ProductBriefFieldValueV1 = ProductBriefIdentityValueV1 | ProductBriefCategoryValueV1 | ProductBriefTextValueV1 | ProductBriefTextListValueV1 | ProductBriefStatementListValueV1 | ProductBriefFlagListValueV1 | ProductBriefDimensionListValueV1;
+
+interface ProductBriefFieldResponseV1Base {
+  id: string;
+  confidence: string;
+  source: ProductBriefFieldSource;
+  conflict: ProductBriefFieldConflict;
+  review_required: boolean;
+  sensitive: boolean;
+  review_reasons: Array<string>;
+  evidence: Array<ProductBriefEvidenceResponseV1>;
+}
+
+export type ProductBriefFieldResponseV1 = {
+  [Path in ProductBriefFieldPath]: ProductBriefFieldResponseV1Base & {
+    path: Path;
+    value: ProductBriefFieldValueForPath<Path>;
+  };
+}[ProductBriefFieldPath];
+
+interface ProductBriefFieldRevisionV1Base {
+  confidence?: number | string;
+  conflict?: ProductBriefFieldConflict;
+  review_required?: boolean;
+  sensitive: boolean;
+  evidence: [ProductBriefEvidenceRevisionV1, ...Array<ProductBriefEvidenceRevisionV1>];
+}
+
+export type ProductBriefFieldRevisionV1 = {
+  [Path in ProductBriefFieldPath]: ProductBriefFieldRevisionV1Base & {
+    path: Path;
+    value: ProductBriefFieldValueForPath<Path>;
+  };
+}[ProductBriefFieldPath];

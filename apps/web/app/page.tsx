@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   CatalogApi,
@@ -16,6 +23,9 @@ import type {
   SKUUpdateRequestV1,
 } from "../lib/generated/catalog-api";
 import { AssetUploadWorkbench } from "./asset-upload-workbench";
+import { productBriefSourceFor } from "../lib/product-brief-workbench-state";
+import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
+import { ProductBriefWorkbench } from "./product-brief-workbench";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 
@@ -384,6 +394,9 @@ export default function Home() {
   const [skuDrafts, setSkuDrafts] = useState<Record<string, SkuForm>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [productBriefSource, setProductBriefSource] =
+    useState<ProductBriefSourceSelection | null>(null);
+  const detailRequestGenerationRef = useRef(0);
 
   const loadProducts = useCallback(async () => {
     setListState("loading");
@@ -400,10 +413,12 @@ export default function Home() {
   }, []);
 
   const loadProduct = useCallback(async (productId: string) => {
+    const generation = ++detailRequestGenerationRef.current;
     setDetailState("loading");
     setDetailError(null);
     try {
       const product = await api.getProduct(productId);
+      if (generation !== detailRequestGenerationRef.current) return;
       setSelectedProduct(product);
       setProductForm(productDraft(product));
       setSkuDrafts(
@@ -413,6 +428,7 @@ export default function Home() {
       );
       setDetailState("ready");
     } catch (error) {
+      if (generation !== detailRequestGenerationRef.current) return;
       setDetailState("error");
       setDetailError(messageFor(error));
     }
@@ -424,8 +440,15 @@ export default function Home() {
 
   useEffect(() => {
     if (selectedId) void loadProduct(selectedId);
-    else setSelectedProduct(null);
+    else {
+      detailRequestGenerationRef.current += 1;
+      setSelectedProduct(null);
+    }
   }, [loadProduct, selectedId]);
+
+  useEffect(() => {
+    setProductBriefSource(null);
+  }, [selectedProduct?.id]);
 
   const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -648,7 +671,18 @@ export default function Home() {
 
                 <AssetUploadWorkbench
                   categoryCode={selectedProduct.category_code}
+                  key={`asset-upload-${selectedProduct.id}`}
+                  onSourceReady={setProductBriefSource}
                   productId={selectedProduct.id}
+                />
+
+                <ProductBriefWorkbench
+                  key={`product-brief-${selectedProduct.id}`}
+                  productId={selectedProduct.id}
+                  source={productBriefSourceFor(
+                    selectedProduct.id,
+                    productBriefSource,
+                  )}
                 />
 
                 <section className="panel" aria-labelledby="sku-heading">

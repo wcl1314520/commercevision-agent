@@ -17,6 +17,7 @@ from commercevision_application import (
     OperationExecutionFailure,
     OperationExecutionRequest,
     OperationExecutionResult,
+    OperationHumanWaitRequired,
     OperationReconciliationPolicy,
     OperationReconciliationResult,
     OperationRecoveryService,
@@ -83,6 +84,40 @@ class PermanentFailureExecutor:
         request: OperationExecutionRequest,
     ) -> OperationReconciliationResult:
         raise AssertionError(f"operation {request.operation_id} must not reconcile")
+
+
+class HumanWaitExecutor:
+    def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
+        raise OperationHumanWaitRequired(
+            output_ref=f"mysql://product-briefs/{request.target_id}",
+            provider_request_id=f"vision-{request.operation_id}",
+        )
+
+    def reconcile(
+        self,
+        request: OperationExecutionRequest,
+    ) -> OperationReconciliationResult:
+        raise AssertionError(f"operation {request.operation_id} must not reconcile")
+
+
+class ReconciliationHumanWaitExecutor:
+    def __init__(self) -> None:
+        self.execute_calls = 0
+        self.reconcile_calls = 0
+
+    def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
+        self.execute_calls += 1
+        raise AssertionError(f"operation {request.operation_id} must not be re-executed")
+
+    def reconcile(
+        self,
+        request: OperationExecutionRequest,
+    ) -> OperationReconciliationResult:
+        self.reconcile_calls += 1
+        raise OperationHumanWaitRequired(
+            output_ref=f"mysql://product-briefs/{request.target_id}",
+            provider_request_id=f"vision-{request.operation_id}",
+        )
 
 
 class BlockingPermanentFailureExecutor(PermanentFailureExecutor):
@@ -319,6 +354,109 @@ def _create_operation(
         )
     )
     return service, operation
+
+
+def test_worker_persists_human_wait_and_restart_can_complete_it(
+    integration_database,
+) -> None:
+    service, operation = _create_operation(
+        integration_database,
+        workspace_id="workspace-product-brief-wait",
+        target_id="product-brief-wait",
+        kind=OperationKind.PRODUCT_BRIEF_ANALYSIS,
+    )
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=HumanWaitExecutor(),
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="product-brief-worker",
+        lease_duration=timedelta(seconds=30),
+    )
+
+    waiting = worker.execute(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+
+    assert waiting.state == OperationState.WAITING_HUMAN
+    assert waiting.output_ref == "mysql://product-briefs/product-brief-wait"
+    assert waiting.provider_request_id == f"vision-{operation.id}"
+    assert waiting.lease_token is None
+
+    restarted_service = _operation_service(integration_database)
+    completed = restarted_service.complete_human_wait(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        output_ref="mysql://product-brief-versions/confirmed-version",
+    )
+
+    assert completed.state == OperationState.SUCCEEDED
+    assert completed.output_ref == "mysql://product-brief-versions/confirmed-version"
+
+
+def test_reconciliation_persists_human_wait_instead_of_completing_operation(
+    integration_database,
+) -> None:
+    service, operation = _create_operation(
+        integration_database,
+        workspace_id="workspace-product-brief-reconcile-wait",
+        target_id="product-brief-reconcile-wait",
+        kind=OperationKind.PRODUCT_BRIEF_ANALYSIS,
+    )
+    now = operation.created_at + timedelta(microseconds=1)
+    execution_token = service.claim(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        owner="failed-product-brief-worker",
+        lease_duration=timedelta(seconds=30),
+        now=now,
+    )
+    running = service.start(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        lease_token=execution_token,
+        now=now,
+    )
+    service.require_reconciliation(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+        lease_token=execution_token,
+        error=NormalizedOperationError(
+            code="EXTERNAL_OUTCOME_UNKNOWN",
+            category="recovery",
+            message="worker stopped after provider execution",
+            retryable=True,
+        ),
+        expected_execution_version=running.version,
+        expected_attempt_count=running.attempt_count,
+        now=now,
+    )
+    executor = ReconciliationHumanWaitExecutor()
+    worker = DurableOperationWorker(
+        operations=_operation_service(integration_database),
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="restarted-product-brief-worker",
+        lease_duration=timedelta(seconds=30),
+        clock=MutableClock(now + timedelta(microseconds=1)),
+    )
+
+    waiting = worker.execute(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+
+    assert waiting.state == OperationState.WAITING_HUMAN
+    assert waiting.reconciliation_outcome == ReconciliationOutcome.CONFIRMED_SUCCESS
+    assert waiting.output_ref == "mysql://product-briefs/product-brief-reconcile-wait"
+    assert waiting.provider_request_id == f"vision-{operation.id}"
+    assert waiting.lease_token is None
+    assert executor.execute_calls == 0
+    assert executor.reconcile_calls == 1
 
 
 def _create_failed_operation(

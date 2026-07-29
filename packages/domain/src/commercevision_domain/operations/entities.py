@@ -606,11 +606,55 @@ class DurableOperation:
             now=resolved_at,
         )
 
-    def wait_for_human(self, *, lease_token: str, now: datetime | None = None) -> None:
+    def wait_for_human(
+        self,
+        *,
+        lease_token: str,
+        output_ref: str | None = None,
+        provider_request_id: str | None = None,
+        expected_execution_version: int | None = None,
+        expected_attempt_count: int | None = None,
+        now: datetime | None = None,
+    ) -> None:
         waiting_at = now or datetime.now(UTC)
-        self._assert_lease(lease_token, waiting_at)
+        self._assert_execution_result_authority(
+            lease_token=lease_token,
+            expected_execution_version=expected_execution_version,
+            expected_attempt_count=expected_attempt_count,
+            now=waiting_at,
+        )
         self._assert_state(OperationState.RUNNING, "wait for human")
         self.state = OperationState.WAITING_HUMAN
+        self.output_ref = output_ref
+        self._capture_provider_request_id(provider_request_id)
+        self._clear_lease()
+        self._touch(waiting_at)
+
+    def wait_for_human_after_reconciliation(
+        self,
+        *,
+        lease_token: str,
+        output_ref: str | None = None,
+        provider_request_id: str | None = None,
+        expected_reconciliation_version: int | None = None,
+        expected_reconciliation_attempt_count: int | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        waiting_at = now or datetime.now(UTC)
+        self._assert_reconciliation_result_authority(
+            lease_token=lease_token,
+            expected_reconciliation_version=expected_reconciliation_version,
+            expected_reconciliation_attempt_count=(expected_reconciliation_attempt_count),
+            now=waiting_at,
+        )
+        self._assert_state(OperationState.RECONCILING, "wait for human")
+        self.state = OperationState.WAITING_HUMAN
+        self.output_ref = output_ref
+        self._capture_provider_request_id(provider_request_id)
+        self.reconciliation_required = True
+        self.reconciliation_outcome = ReconciliationOutcome.CONFIRMED_SUCCESS
+        self.next_reconciliation_at = None
+        self.error = None
         self._clear_lease()
         self._touch(waiting_at)
 

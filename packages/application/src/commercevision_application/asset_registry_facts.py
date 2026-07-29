@@ -8,6 +8,7 @@ from commercevision_domain import (
     NotFoundError,
     RetentionClass,
     UploadSession,
+    canonical_task_retention_deadline,
     canonicalize_uuid,
 )
 
@@ -15,7 +16,6 @@ from .asset_ports import AssetUnitOfWorkPort
 
 _IDEMPOTENCY_RETENTION = timedelta(days=30)
 _AUDIT_RETENTION = timedelta(days=180)
-_TASK_ASSET_RETENTION = timedelta(hours=72)
 
 
 def canonicalize_resource_id(value: str, *, resource: str) -> str:
@@ -94,7 +94,10 @@ def task_asset_retention_deadline(
     )
     if facts is None:
         return None
-    return min(facts.expires_at, facts.created_at + _TASK_ASSET_RETENTION)
+    return canonical_task_retention_deadline(
+        created_at=facts.created_at,
+        expires_at=facts.expires_at,
+    )
 
 
 def idempotency_expiry(

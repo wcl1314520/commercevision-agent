@@ -74,6 +74,8 @@ class WorkflowRunRequestedPayload(CompatibleEventPayload):
     workflow_id: str = Field(min_length=1, max_length=36)
     action: Literal["start", "retry", "recover"]
     reason: str | None = Field(default=None, min_length=1, max_length=160)
+    product_brief_version_id: str | None = Field(default=None, min_length=1, max_length=36)
+    product_brief_version_number: int | None = Field(default=None, ge=1)
 
 
 class WorkflowResumeRequestedPayload(CompatibleEventPayload):
@@ -283,6 +285,45 @@ class AssetDeleteRequestedPayload(CompatibleEventPayload):
     reason: UploadCleanupReason
 
 
+class ProductBriefRequestedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    product_brief_id: str = Field(min_length=1, max_length=36)
+    product_brief_version: int = Field(ge=1)
+    workflow_id: str = Field(min_length=1, max_length=36)
+    product_id: str = Field(min_length=1, max_length=36)
+    operation_id: str = Field(min_length=1, max_length=36)
+
+
+class ProductBriefAwaitingConfirmationPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    product_brief_id: str = Field(min_length=1, max_length=36)
+    product_brief_version: int = Field(ge=1)
+    product_brief_version_id: str = Field(min_length=1, max_length=36)
+    product_brief_version_number: int = Field(ge=1)
+    workflow_id: str = Field(min_length=1, max_length=36)
+    operation_id: str = Field(min_length=1, max_length=36)
+    unresolved_field_count: int = Field(ge=0, le=64)
+    review_policy_version: str = Field(min_length=1, max_length=64)
+
+
+class ProductBriefConfirmedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    product_brief_id: str = Field(min_length=1, max_length=36)
+    product_brief_version: int = Field(ge=1)
+    product_brief_version_id: str = Field(min_length=1, max_length=36)
+    product_brief_version_number: int = Field(ge=1)
+    workflow_id: str = Field(min_length=1, max_length=36)
+    operation_id: str = Field(min_length=1, max_length=36)
+    confirmation_id: str | None = Field(default=None, min_length=1, max_length=36)
+    confirmation_source: Literal["POLICY", "HUMAN"]
+
+    @model_validator(mode="after")
+    def validate_confirmation_identity(self) -> ProductBriefConfirmedPayload:
+        if (self.confirmation_source == "HUMAN") != (self.confirmation_id is not None):
+            raise ValueError("human ProductBrief confirmation requires an append-only identity")
+        return self
+
+
 class PendingPhase2Payload(RootModel[dict[str, JsonValue]]):
     """JSON payload boundary for Phase 2 events whose owning ticket defines fields later."""
 
@@ -430,6 +471,27 @@ ASSET_DELETE_REQUESTED_V1 = EventContract(
     AssetDeleteRequestedPayload,
     EventHandling.COMMAND,
 )
+PRODUCT_BRIEF_REQUESTED_V1 = EventContract(
+    EventType.PRODUCT_BRIEF_REQUESTED,
+    1,
+    EventQueue.ASSET,
+    ProductBriefRequestedPayload,
+    EventHandling.COMMAND,
+)
+PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1 = EventContract(
+    EventType.PRODUCT_BRIEF_AWAITING_CONFIRMATION,
+    1,
+    EventQueue.ASSET,
+    ProductBriefAwaitingConfirmationPayload,
+    EventHandling.OBSERVATION,
+)
+PRODUCT_BRIEF_CONFIRMED_V1 = EventContract(
+    EventType.PRODUCT_BRIEF_CONFIRMED,
+    1,
+    EventQueue.ASSET,
+    ProductBriefConfirmedPayload,
+    EventHandling.OBSERVATION,
+)
 
 
 def _phase2_contract(
@@ -449,21 +511,9 @@ PHASE2_EVENT_CONTRACTS = (
     ASSET_VALIDATION_FAILED_V1,
     ASSET_RIGHTS_CHANGED_V1,
     ASSET_RIGHTS_EXPIRED_V1,
-    _phase2_contract(
-        EventType.PRODUCT_BRIEF_REQUESTED,
-        EventQueue.ASSET,
-        EventHandling.COMMAND,
-    ),
-    _phase2_contract(
-        EventType.PRODUCT_BRIEF_AWAITING_CONFIRMATION,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
-    _phase2_contract(
-        EventType.PRODUCT_BRIEF_CONFIRMED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
+    PRODUCT_BRIEF_REQUESTED_V1,
+    PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
+    PRODUCT_BRIEF_CONFIRMED_V1,
     _phase2_contract(
         EventType.BRAND_PROFILE_PUBLISHED,
         EventQueue.ASSET,

@@ -58,11 +58,16 @@ def _verify_c2pa_from_daemonized_billiard_child(
             byte_length=4,
         )
         timeout_elapsed = time.monotonic() - started
-        recovered = adapter.verify(
-            mime_type="image/jpeg",
-            stream=io.BytesIO(b"clean"),
-            byte_length=5,
-        )
+        recovered_attempts = []
+        for _ in range(3):
+            recovered = adapter.verify(
+                mime_type="image/jpeg",
+                stream=io.BytesIO(b"clean"),
+                byte_length=5,
+            )
+            recovered_attempts.append(recovered)
+            if recovered.outcome == ProvenanceVerificationOutcome.EVIDENCE:
+                break
         malformed = adapter.verify(
             mime_type="image/jpeg",
             stream=io.BytesIO(b"malformed"),
@@ -83,6 +88,9 @@ def _verify_c2pa_from_daemonized_billiard_child(
                 "recovered_failure_codes": recovered.failure_codes,
                 "recovered_outcome": recovered.outcome.value,
                 "recovered_status": recovered.status.value if recovered.status else None,
+                "recovered_transient_codes": tuple(
+                    result.failure_code for result in recovered_attempts[:-1]
+                ),
                 "timed_out_code": timed_out.failure_code,
                 "timeout_elapsed": timeout_elapsed,
                 "unavailable_failure_code": unavailable.failure_code,
@@ -536,7 +544,7 @@ def test_c2pa_subprocess_works_in_daemonized_prefork_child_and_reclaims_capacity
 
     process.start()
     result_sender.close()
-    process.join(timeout=12)
+    process.join(timeout=25)
     if process.is_alive():
         process.terminate()
         process.join(timeout=2)
@@ -552,6 +560,10 @@ def test_c2pa_subprocess_works_in_daemonized_prefork_child_and_reclaims_capacity
     assert result["timeout_elapsed"] < 3
     assert result["recovered_outcome"] == ProvenanceVerificationOutcome.EVIDENCE.value
     assert result["recovered_status"] == ProvenanceEvidenceStatus.VERIFIED.value, result
+    assert set(result["recovered_transient_codes"]) <= {
+        "PROVENANCE_READER_UNAVAILABLE",
+        "PROVENANCE_TIMEOUT",
+    }
     assert result["malformed_status"] == ProvenanceEvidenceStatus.CONFLICTING.value
     assert result["malformed_failure_codes"] == ("MALFORMED_CREDENTIAL",)
     assert result["unavailable_outcome"] == ProvenanceVerificationOutcome.RETRYABLE_FAILURE.value

@@ -28,6 +28,7 @@ from commercevision_domain import (
     ConcurrencyError,
     NotFoundError,
     Workflow,
+    WorkflowCancellationRefusedError,
     WorkflowStatus,
     validate_workspace_id,
 )
@@ -105,20 +106,30 @@ class WorkflowApplicationService:
             expected_version=1,
             now=now,
         )
-        event = self._workflow_event(
-            workflow=workflow,
-            event_type=EventType.WORKFLOW_RUN_REQUESTED,
-            trace_id=trace_id,
-            payload=WorkflowRunRequestedPayload(
-                action="start",
-                workflow_id=workflow.id,
-            ).model_dump(mode="json", exclude_none=True),
-            now=now,
-        )
+        event = None
+        if request.workflow_type == "COMMERCE_IMAGE_GENERATION":
+            workflow.transition(
+                WorkflowStatus.UNDERSTANDING,
+                current_node="understand_product",
+                expected_version=workflow.version,
+                now=now,
+            )
+        else:
+            event = self._workflow_event(
+                workflow=workflow,
+                event_type=EventType.WORKFLOW_RUN_REQUESTED,
+                trace_id=trace_id,
+                payload=WorkflowRunRequestedPayload(
+                    action="start",
+                    workflow_id=workflow.id,
+                ).model_dump(mode="json", exclude_none=True),
+                now=now,
+            )
         try:
             with self._uow_factory() as uow:
                 uow.workflows.add(workflow)
-                uow.outbox.add(event)
+                if event is not None:
+                    uow.outbox.add(event)
                 uow.idempotency.add(
                     scope=scope,
                     key_hash=key_hash,
@@ -205,6 +216,14 @@ class WorkflowApplicationService:
             workflow = uow.workflows.get(workflow_id, workspace_id=workspace_id, for_update=True)
             if workflow is None:
                 raise NotFoundError(f"workflow {workflow_id} was not found")
+            if uow.workflows.has_irreversible_provider_submission(
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+            ):
+                raise WorkflowCancellationRefusedError(
+                    "workflow cancellation is refused after an external provider "
+                    "submission has started"
+                )
             workflow.request_cancellation(expected_version=expected_version, now=now)
             for step in uow.steps.list_for_workflow(workflow.id):
                 if not step.status.terminal:

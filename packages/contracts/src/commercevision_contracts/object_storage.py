@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal, Protocol
 
 from commercevision_domain import StorageBackend, StorageLocationClass
@@ -37,6 +38,15 @@ class PresignedRequest(StorageContract):
     expires_at: datetime
 
 
+class ServerSideEncryptionState(StrEnum):
+    NONE = "NONE"
+    AES256 = "AES256"
+    KMS = "KMS"
+    KMS_DSSE = "KMS_DSSE"
+    SM4 = "SM4"
+    UNKNOWN = "UNKNOWN"
+
+
 class ObjectStat(StorageContract):
     reference: ObjectReference
     backend: StorageBackend
@@ -47,6 +57,7 @@ class ObjectStat(StorageContract):
     checksum_sha256_base64: str | None
     metadata: dict[str, str]
     last_modified: datetime | None
+    server_side_encryption: ServerSideEncryptionState = ServerSideEncryptionState.NONE
 
 
 class BoundedReadRequest(StorageContract):
@@ -63,6 +74,26 @@ class ConditionalCopyRequest(StorageContract):
     expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     content_type: str = Field(min_length=1, max_length=128)
     upload_session_id: str = Field(min_length=1, max_length=36)
+
+
+class ConditionalWriteRequest(StorageContract):
+    reference: ObjectReference
+    payload: bytes = Field(max_length=2 * 1024 * 1024, repr=False)
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_type: str = Field(min_length=1, max_length=128)
+    metadata: dict[str, str] = Field(default_factory=dict)
+    require_encryption: bool = False
+
+    @model_validator(mode="after")
+    def require_unversioned_destination(self) -> ConditionalWriteRequest:
+        if self.reference.version_id is not None:
+            raise ValueError("conditional writes require an unversioned destination key")
+        if len(self.metadata) > 16 or any(
+            not 1 <= len(name) <= 64 or not 1 <= len(value) <= 512
+            for name, value in self.metadata.items()
+        ):
+            raise ValueError("conditional write metadata exceeds its bounds")
+        return self
 
 
 class ConditionalDeleteRequest(StorageContract):
@@ -112,6 +143,15 @@ class TemporaryReadRequest(StorageContract):
     reference: ObjectReference
     expires_at: datetime
     expected_etag: str | None = None
+    expected_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def require_exact_content_identity(self) -> TemporaryReadRequest:
+        if self.expected_sha256 is not None and (
+            self.reference.version_id is None or self.expected_etag is None
+        ):
+            raise ValueError("content-verified temporary reads require an exact version and ETag")
+        return self
 
 
 class ObjectStorage(Protocol):
@@ -128,6 +168,8 @@ class ObjectStorage(Protocol):
     ) -> AbstractContextManager[Iterable[bytes]]: ...
 
     def copy_if_absent(self, request: ConditionalCopyRequest) -> ObjectStat: ...
+
+    def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat: ...
 
     def delete_if_match(self, request: ConditionalDeleteRequest) -> bool: ...
 

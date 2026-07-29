@@ -9,6 +9,32 @@ const DEFAULT_API_PROXY_TIMEOUT_MS = 15_000;
 const MAXIMUM_API_PROXY_TIMEOUT_MS = 120_000;
 const MAXIMUM_PROXY_REQUEST_BODY_BYTES = 1024 * 1024;
 const MAXIMUM_PROXY_RESPONSE_BODY_BYTES = 2 * 1024 * 1024;
+const UUID_PATH_SEGMENT =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const PRODUCT_BRIEF_READ_PATH = new RegExp(
+  `^/product-briefs/${UUID_PATH_SEGMENT}$`,
+  "i",
+);
+const PRODUCT_BRIEF_VERSIONS_PATH = new RegExp(
+  `^/product-briefs/${UUID_PATH_SEGMENT}/versions$`,
+  "i",
+);
+const PRODUCT_BRIEF_MUTATION_PATH = new RegExp(
+  `^/product-briefs/${UUID_PATH_SEGMENT}:(revise|confirm)$`,
+  "i",
+);
+const PRODUCT_BRIEF_WORKFLOW_CONTEXT_PATH = new RegExp(
+  `^/product-briefs/workflow-context/${UUID_PATH_SEGMENT}$`,
+  "i",
+);
+const PRODUCT_BRIEF_ANALYSIS_WORKFLOW_CONTEXT_PATH = new RegExp(
+  `^/product-briefs/analysis-workflow-context/${UUID_PATH_SEGMENT}$`,
+  "i",
+);
+const PRODUCT_BRIEF_OPERATION_STATUS_PATH = new RegExp(
+  `^/product-briefs/${UUID_PATH_SEGMENT}/operations/${UUID_PATH_SEGMENT}$`,
+  "i",
+);
 const FORWARDED_HEADERS = [
   "accept",
   "content-type",
@@ -26,9 +52,10 @@ class RequestBodyTooLargeError extends Error {}
 class UpstreamResponseTooLargeError extends Error {}
 
 function encodeApiPathSegment(segment: string): string {
-  const action = /^(.*):(abort|block|check|finalize|replace|revoke)$/.exec(
-    segment,
-  );
+  const action =
+    /^(.*):(abort|analyze|block|check|confirm|finalize|replace|revise|revoke)$/.exec(
+      segment,
+    );
   if (action) {
     return `${encodeURIComponent(action[1])}:${action[2]}`;
   }
@@ -163,13 +190,15 @@ function apiMethodAllowed(path: string, method: string): boolean {
     return method === "POST";
   }
   if (/^\/assets\/[^/:]+:block$/.test(path)) return method === "POST";
-  if (
-    /^\/operations\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      path,
-    )
-  ) {
+  if (path === "/product-briefs:analyze") return method === "POST";
+  if (PRODUCT_BRIEF_READ_PATH.test(path)) return method === "GET";
+  if (PRODUCT_BRIEF_VERSIONS_PATH.test(path)) return method === "GET";
+  if (PRODUCT_BRIEF_MUTATION_PATH.test(path)) return method === "POST";
+  if (PRODUCT_BRIEF_WORKFLOW_CONTEXT_PATH.test(path)) return method === "GET";
+  if (PRODUCT_BRIEF_ANALYSIS_WORKFLOW_CONTEXT_PATH.test(path)) {
     return method === "GET";
   }
+  if (PRODUCT_BRIEF_OPERATION_STATUS_PATH.test(path)) return method === "GET";
   return false;
 }
 
@@ -309,21 +338,33 @@ async function proxyApi(request: Request, context: RouteContext): Promise<Respon
     () =>
       timeoutController.abort(
         new DOMException("upstream request timed out", "TimeoutError"),
-      ),
+    ),
     timeoutMs,
   );
+  const upstreamSignal = AbortSignal.any([
+    request.signal,
+    timeoutController.signal,
+  ]);
   try {
     const upstream = await fetch(target, {
       method: request.method,
       headers,
       body,
       cache: "no-store",
-      signal: timeoutController.signal,
+      signal: upstreamSignal,
     });
     const responseHeaders = new Headers();
     for (const header of ["content-type", "x-request-id", "x-trace-id"]) {
       const value = upstream.headers.get(header);
       if (value) responseHeaders.set(header, value);
+    }
+    if (upstream.status === 410 && path.startsWith("/product-briefs")) {
+      void upstream.body?.cancel().catch(() => undefined);
+      clearTimeout(timeout);
+      return new Response(null, {
+        status: 410,
+        headers: responseHeaders,
+      });
     }
     const responseBody = await readBoundedUpstreamBody(upstream);
     const response = new Response(responseBody, {
@@ -334,7 +375,10 @@ async function proxyApi(request: Request, context: RouteContext): Promise<Respon
     return response;
   } catch (error) {
     clearTimeout(timeout);
-    if (timeoutController.signal.aborted) {
+    if (
+      timeoutController.signal.aborted &&
+      upstreamSignal.reason === timeoutController.signal.reason
+    ) {
       return errorResponse(
         request,
         504,

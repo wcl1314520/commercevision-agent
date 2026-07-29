@@ -61,6 +61,22 @@ class RightsDeniedError(AuthorizationError):
     """The authoritative current Rights Record denies the requested asset use."""
 
 
+class ProviderPolicyDeniedError(AuthorizationError):
+    """A deny-by-default provider transfer policy rejected the request."""
+
+
+class ProductBriefConfirmationRequiredError(DomainError):
+    """A ProductBrief version requires an exact human confirmation."""
+
+
+class ProductBriefRetentionExpiredError(DomainError):
+    """A ProductBrief mutation reached its authoritative retention boundary."""
+
+
+class WorkflowCancellationRefusedError(DomainError):
+    """Cancellation crossed an irreversible external-submission boundary."""
+
+
 class AuthenticationError(AuthorizationError):
     """No valid trusted principal was supplied."""
 

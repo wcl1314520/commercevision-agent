@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-24 |
+| 最后更新 | 2026-07-29 |
 | 适用版本 | Schema v1 |
 
 ## 设计原则
@@ -232,6 +232,91 @@ MySQL 不保存向量本体，只保存索引事实：
 - `milvus_primary_key`
 - `status`
 - `indexed_at`
+
+## ProductBrief
+
+### `product_briefs`
+
+ProductBrief identity 是可变聚合根，历史事实保存在独立 append-only 表：
+
+- `id`、`workspace_id`、`workflow_id`、`product_id`
+- 当前 Durable Analysis `operation_id`
+- `state`、`category`、`current_version_id`、`confirmed_version_id`
+- `retention_class`、精确 `retention_deadline`
+- 乐观并发 `version`
+- `created_at`、`updated_at`
+
+同一 Workflow 与 Product 只有一个 ProductBrief identity。所有 Workflow、Product、Operation
+和 Version 关系都使用 Workspace 前置复合外键。Task ProductBrief 的 deadline 继承 Workflow
+创建时的 72 小时边界，重新分析、人工修订和 retry 都不得延长。业务读取、continuation 消费
+和每个 Agent 节点 claim 均以 MySQL 当前时间和该持久边界失败关闭。
+
+### `product_brief_analysis_requests` 与 `product_brief_source_assets`
+
+每次分析周期创建一条不可变 Analysis Request，冻结：
+
+- ProductBrief、Durable Operation、品类和原始 HTTP `trace_id`
+- Prompt、配置、Vision Provider、跨境传输和 HITL policy 的版本化 snapshot/hash
+- 置信阈值、保留类型、精确 deadline 与创建时间
+
+Source Asset 子表按 ordinal 绑定当次分析实际授权的 Asset Version 和精确 Asset Object，
+最多八项；历史不从 ProductBrief 的当前指针反推。两表在普通运行时身份下都不可更新或删除。
+
+### `product_brief_provider_attempts`
+
+每次真实外部提交前先追加 intent：
+
+- `(operation_id, operation_attempt, call_index)` 唯一
+- ProductBrief、Provider 幂等键哈希、输入哈希和配置 snapshot hash
+- 精确 retention deadline 与创建时间
+
+`call_index` 区分首个请求和 bounded repair。已有 intent 但没有 completed Call 表示提交结果
+可能未知，不能自动重发。
+
+### `product_brief_provider_artifacts`
+
+原始 request/response 对象的 durable ledger 在写对象前创建 `INTENDED` 行，冻结确定性
+后端、逻辑位置、Bucket、Key、期望 SHA-256/字节数、所属 Operation attempt/call、kind 和
+retention。对象写入后只允许按单调生命周期推进为 `STORED` 或 `UNKNOWN`，并补充精确
+Provider Version ID、ETag、实际哈希、大小和时间。Artifact 行不可任意更新、覆盖或删除；
+降级若无法把未结算 intent/unknown 状态无损映射回旧结构，必须在 DDL 前拒绝。
+
+### `product_brief_provider_calls`
+
+每个 completed Provider Call 绑定同一 Workspace、ProductBrief、Operation attempt、
+`call_index` 和对应的 `STORED` request artifact。非成功 Call 可以没有 response artifact；
+`SUCCEEDED` Call 必须绑定同一归属、同 `call_index`、kind=`RESPONSE` 且状态为 `STORED`
+的 artifact。记录公开 Provider/模型/latency/usage 事实以及内部配置 snapshot 和稳定错误，
+但浏览器只读取 allowlisted 摘要。Call 写入后不可更新或由普通运行时身份删除。
+
+### `product_brief_versions`、`product_brief_fields` 与 `product_brief_evidence`
+
+Model 与 Human 修改都创建不可变 Version：
+
+- 单调 `version_number`、schema/category version、来源、supersedes 关系
+- 结构化 payload hash、changed paths、actor/reason 和精确 retention deadline
+- Model Version 必须复合引用同一 ProductBrief 的 completed Provider Call
+
+Field 以 version + path 唯一，保存带 kind 判别器的值、confidence、source、conflict、
+review-required 和 sensitive flag。Evidence 复合绑定同一 ProductBrief Version 与 Field，
+只保存受控 opaque reference、kind、source Asset Version 和 excerpt hash。列表读取使用
+有硬上限的 keyset pagination，并批量加载当页 Field/Evidence/公开 Provider 摘要。
+
+### `product_brief_confirmations`
+
+Confirmation 是 append-only 人工批准事实。组合外键把 Workspace、Workflow、ProductBrief、
+Version ID、Version Number、Approval Type、Approval Decision 和 Durable Operation 锁定到
+同一精确主题；同一 Version 只能确认一次。确认只在该 Version 仍是 current authority 且
+retention 有效时推进聚合并发布 continuation。
+
+### 历史删除权限
+
+ProductBrief identity 防止普通运行时 `DELETE`；上述历史事实表同时防止普通运行时
+`UPDATE` 和 `DELETE`。可变 identity 只能通过带版本检查的聚合命令更新。由于 InnoDB 外键
+级联不应被当作会触发子表删除栅栏，聚合父行也必须受保护。到期只改变业务可用性，不自动赋予
+通用运行时账号删除权；Ticket 13 的 Durable Retention Cleaner 使用独立、最小权限的数据库
+身份，在 MySQL 复验 deadline 后执行受控删除和对象存储对账。不得使用普通连接可伪造的
+session variable 作为删除授权。
 
 ## 配置
 

@@ -14,8 +14,10 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    ConditionalWriteRequest,
     ObjectReference,
     PresignPutRequest,
+    ServerSideEncryptionState,
     TemporaryReadRequest,
 )
 from commercevision_domain import (
@@ -144,6 +146,10 @@ def test_real_oss_adapter_contract_is_an_explicit_production_gate(
         location=StorageLocationClass.FOUNDATION,
         key=f"{prefix}/conflict",
     )
+    provider_artifact = ObjectReference(
+        location=StorageLocationClass.PROVIDER_RESULT,
+        key=f"{prefix}/provider-artifact.json",
+    )
     cleanup: list[tuple[ObjectReference, str]] = []
 
     with httpx.Client(timeout=30) as client:
@@ -158,6 +164,7 @@ def test_real_oss_adapter_contract_is_an_explicit_production_gate(
             source_stat = storage.stat(source)
             cleanup.append((source_stat.reference, source_stat.etag))
             assert source_stat.reference.version_id
+            assert source_stat.server_side_encryption == ServerSideEncryptionState.AES256
             with storage.open_bounded_read(
                 BoundedReadRequest(
                     reference=source,
@@ -180,6 +187,7 @@ def test_real_oss_adapter_contract_is_an_explicit_production_gate(
             )
             cleanup.append((copied.reference, copied.etag))
             assert copied.reference.version_id
+            assert copied.server_side_encryption == ServerSideEncryptionState.AES256
             assert (
                 storage.copy_if_absent(
                     ConditionalCopyRequest(
@@ -217,10 +225,25 @@ def test_real_oss_adapter_contract_is_an_explicit_production_gate(
                     )
                 )
 
+            artifact_payload = b'{"provider":"raw"}'
+            artifact_request = ConditionalWriteRequest(
+                reference=provider_artifact,
+                payload=artifact_payload,
+                expected_sha256=hashlib.sha256(artifact_payload).hexdigest(),
+                content_type="application/json",
+                metadata={"retention-class": "TASK"},
+                require_encryption=True,
+            )
+            artifact_stat = storage.write_if_absent(artifact_request)
+            cleanup.append((artifact_stat.reference, artifact_stat.etag))
+            assert artifact_stat.server_side_encryption == ServerSideEncryptionState.AES256
+            assert storage.write_if_absent(artifact_request).reference == artifact_stat.reference
+
             temporary = storage.temporary_read(
                 TemporaryReadRequest(
                     reference=copied.reference,
                     expected_etag=copied.etag,
+                    expected_sha256=digest,
                     expires_at=datetime.now(UTC) + timedelta(seconds=30),
                 )
             )

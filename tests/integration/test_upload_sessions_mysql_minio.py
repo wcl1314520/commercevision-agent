@@ -970,6 +970,10 @@ def upload_settings(integration_settings: Settings) -> Settings:
         environment="ci",
         service_name="upload-integration",
         mysql_dsn=integration_settings.mysql_dsn,
+        rabbitmq_url=os.getenv(
+            "CV_TEST_RABBITMQ_URL",
+            "amqp://commercevision:commercevision@127.0.0.1:15673//",
+        ),
         object_store_backend="minio",
         object_store_endpoint="http://127.0.0.1:19000",
         object_store_presign_endpoint="http://127.0.0.1:19000",
@@ -1021,9 +1025,12 @@ def test_real_worker_preflight_queries_mysql_and_authenticated_bucket_controls(
     del integration_database, minio_client
 
     assert probe_worker_dependencies(upload_settings) == {
+        "broker": "ok",
         "mysql": "ok",
         "object_storage": "ok",
         "malware_scanner": "ok",
+        "provider_result_storage": "ok",
+        "vision_credential": "not_required",
     }
 
 

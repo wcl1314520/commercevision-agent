@@ -37,6 +37,41 @@ x-upload-cleanup-runtime-environment: &upload-cleanup-runtime-environment
   CV_OPERATION_RECONCILIATION_MAX_SECONDS: ${CV_OPERATION_RECONCILIATION_MAX_SECONDS:-3600}
   CV_OPERATION_RECONCILIATION_MAX_ELAPSED_SECONDS: ${CV_OPERATION_RECONCILIATION_MAX_ELAPSED_SECONDS:-345600}
 
+x-product-brief-policy-environment: &product-brief-policy-environment
+  CV_VISION_ADAPTER: ${CV_VISION_ADAPTER:-deterministic}
+  CV_DETERMINISTIC_VISION_SCENARIO: ${CV_DETERMINISTIC_VISION_SCENARIO:-success}
+  CV_VISION_PROMPT_VERSION: ${CV_VISION_PROMPT_VERSION:-product-brief-prompt-v1}
+  CV_VISION_PRODUCT_FACTS_MAXIMUM_BYTES: ${CV_VISION_PRODUCT_FACTS_MAXIMUM_BYTES:-65536}
+  CV_VISION_PRODUCT_FACTS_MAXIMUM_DEPTH: ${CV_VISION_PRODUCT_FACTS_MAXIMUM_DEPTH:-8}
+  CV_VISION_PRODUCT_FACTS_MAXIMUM_NODES: ${CV_VISION_PRODUCT_FACTS_MAXIMUM_NODES:-1024}
+  CV_VISION_PRODUCT_FACTS_MAXIMUM_STRING_BYTES: ${CV_VISION_PRODUCT_FACTS_MAXIMUM_STRING_BYTES:-4096}
+  CV_PRODUCT_BRIEF_REVIEW_POLICY_VERSION: ${CV_PRODUCT_BRIEF_REVIEW_POLICY_VERSION:-product-brief-review-v1}
+  CV_PRODUCT_BRIEF_CONFIDENCE_THRESHOLD: "${CV_PRODUCT_BRIEF_CONFIDENCE_THRESHOLD:-0.80}"
+  CV_PRODUCT_BRIEF_MANDATORY_REVIEW_PATHS: '${CV_PRODUCT_BRIEF_MANDATORY_REVIEW_PATHS:-[]}'
+  CV_PRODUCT_BRIEF_SENSITIVE_CLAIM_PATHS: '${CV_PRODUCT_BRIEF_SENSITIVE_CLAIM_PATHS:-["common.sensitive_claims","beauty.ingredient_claim_evidence","beauty.skin_hair_claim_flags","beauty.medical_like_claim_flags","automotive.compatibility_evidence","automotive.safety_critical_claim_flags","automotive.certification_marks"]}'
+  CV_PRODUCT_BRIEF_ANALYSIS_MAX_ATTEMPTS: ${CV_PRODUCT_BRIEF_ANALYSIS_MAX_ATTEMPTS:-5}
+  CV_PRODUCT_BRIEF_ANALYSIS_MAX_RECONCILIATION_ATTEMPTS: ${CV_PRODUCT_BRIEF_ANALYSIS_MAX_RECONCILIATION_ATTEMPTS:-8}
+  CV_VISION_TEMPORARY_REFERENCE_LIFETIME_SECONDS: ${CV_VISION_TEMPORARY_REFERENCE_LIFETIME_SECONDS:-60}
+  CV_VISION_DATA_TRANSFER_ENABLED: ${CV_VISION_DATA_TRANSFER_ENABLED:-false}
+  CV_VISION_DATA_TRANSFER_POLICY_VERSION: ${CV_VISION_DATA_TRANSFER_POLICY_VERSION:-vision-transfer-deny-v1}
+  CV_VISION_DATA_TRANSFER_ALLOWED_WORKSPACE_IDS: '${CV_VISION_DATA_TRANSFER_ALLOWED_WORKSPACE_IDS:-[]}'
+  CV_VISION_DATA_TRANSFER_ALLOWED_RETENTION_CLASSES: '${CV_VISION_DATA_TRANSFER_ALLOWED_RETENTION_CLASSES:-[]}'
+  CV_VISION_DATA_TRANSFER_ALLOWED_PROVIDERS: '${CV_VISION_DATA_TRANSFER_ALLOWED_PROVIDERS:-[]}'
+  CV_VISION_DATA_TRANSFER_ALLOWED_ENDPOINT_REGIONS: '${CV_VISION_DATA_TRANSFER_ALLOWED_ENDPOINT_REGIONS:-[]}'
+  CV_VISION_DATA_TRANSFER_ALLOWED_ENDPOINT_HOSTS: '${CV_VISION_DATA_TRANSFER_ALLOWED_ENDPOINT_HOSTS:-[]}'
+  CV_ALIBABA_VISION_ENDPOINT: ${CV_ALIBABA_VISION_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+  CV_ALIBABA_VISION_ENDPOINT_REGION: ${CV_ALIBABA_VISION_ENDPOINT_REGION:-cn-beijing}
+  CV_ALIBABA_VISION_MODEL: ${CV_ALIBABA_VISION_MODEL:-qwen-vl-max}
+  CV_ALIBABA_VISION_MODEL_SNAPSHOT: ${CV_ALIBABA_VISION_MODEL_SNAPSHOT:-qwen-vl-max}
+  CV_ALIBABA_VISION_ADAPTER_VERSION: ${CV_ALIBABA_VISION_ADAPTER_VERSION:-alibaba-openai-vision-v1}
+  CV_ALIBABA_VISION_CONNECT_TIMEOUT_SECONDS: ${CV_ALIBABA_VISION_CONNECT_TIMEOUT_SECONDS:-3}
+  CV_ALIBABA_VISION_READ_TIMEOUT_SECONDS: ${CV_ALIBABA_VISION_READ_TIMEOUT_SECONDS:-30}
+  CV_ALIBABA_VISION_END_TO_END_TIMEOUT_SECONDS: ${CV_ALIBABA_VISION_END_TO_END_TIMEOUT_SECONDS:-45}
+  CV_ALIBABA_VISION_MAXIMUM_CONCURRENCY: ${CV_ALIBABA_VISION_MAXIMUM_CONCURRENCY:-4}
+  CV_ALIBABA_VISION_MAXIMUM_RESPONSE_BYTES: ${CV_ALIBABA_VISION_MAXIMUM_RESPONSE_BYTES:-524288}
+  CV_ALIBABA_VISION_MAXIMUM_OUTPUT_TOKENS: ${CV_ALIBABA_VISION_MAXIMUM_OUTPUT_TOKENS:-4096}
+  CV_ALIBABA_VISION_MAXIMUM_REPAIR_ATTEMPTS: ${CV_ALIBABA_VISION_MAXIMUM_REPAIR_ATTEMPTS:-1}
+
 services:
   mysql:
     image: mysql:8.4
@@ -266,7 +301,7 @@ services:
       - --port
       - "8000"
     environment:
-      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment]
+      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment]
       CV_SERVICE_NAME: control-api
       CV_ENVIRONMENT: local
       CV_READINESS_PROBE_EXTERNAL: "true"
@@ -336,7 +371,7 @@ services:
       - --loglevel=INFO
       - --concurrency=${CV_WORKER_CONCURRENCY:-2}
     environment:
-      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment]
+      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment]
       CV_SERVICE_NAME: agent-worker
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
@@ -344,8 +379,10 @@ services:
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
       CV_WORKER_CONCURRENCY: "${CV_WORKER_CONCURRENCY:-2}"
       CV_WORKER_READINESS_PATH: /tmp/commercevision-worker-ready.json
+      CV_WORKER_READINESS_MAX_AGE_SECONDS: ${CV_WORKER_READINESS_MAX_AGE_SECONDS:-50}
+      CV_WORKER_STOP_GRACE_PERIOD_SECONDS: ${CV_WORKER_STOP_GRACE_PERIOD_SECONDS:-90}
       CV_WORKER_QUEUES: '["commercevision.workflow", "commercevision.asset", "commercevision.maintenance"]'
-      CV_WORKER_REQUIRED_OPERATION_KINDS: '["ASSET_VALIDATION", "ASSET_DELETION"]'
+      CV_WORKER_REQUIRED_OPERATION_KINDS: '["ASSET_VALIDATION", "ASSET_DELETION", "PRODUCT_BRIEF_ANALYSIS"]'
       CV_UPLOAD_MAX_BYTES: ${CV_UPLOAD_MAX_BYTES:-10485760}
       CV_UPLOAD_MAX_LORA_BYTES: ${CV_UPLOAD_MAX_LORA_BYTES:-104857600}
       CV_UPLOAD_MAX_PROMPT_TEMPLATE_BYTES: ${CV_UPLOAD_MAX_PROMPT_TEMPLATE_BYTES:-262144}
@@ -365,9 +402,20 @@ services:
       CV_DETERMINISTIC_CONTENT_SAFETY_OUTCOME: ${CV_DETERMINISTIC_CONTENT_SAFETY_OUTCOME:-PASS}
       CV_CONTENT_SAFETY_POLICY_VERSION: ${CV_CONTENT_SAFETY_POLICY_VERSION:-content-safety-policy-v1}
       CV_CONTENT_SAFETY_MAPPING_VERSION: ${CV_CONTENT_SAFETY_MAPPING_VERSION:-content-safety-map-v1}
+      CV_ALIBABA_VISION_API_KEY_FILE: /run/secrets/alibaba-vision-api-key
+      CV_ALIBABA_VISION_API_KEY_FILE_MAX_BYTES: ${CV_ALIBABA_VISION_API_KEY_FILE_MAX_BYTES:-4096}
+      CV_ALIBABA_VISION_ALLOWED_IMAGE_ORIGINS: '${CV_ALIBABA_VISION_ALLOWED_IMAGE_ORIGINS:-[]}'
+      CV_VISION_PREFLIGHT_BUDGET_SECONDS: ${CV_VISION_PREFLIGHT_BUDGET_SECONDS:-10}
+      CV_VISION_OPERATION_LEASE_MARGIN_SECONDS: ${CV_VISION_OPERATION_LEASE_MARGIN_SECONDS:-15}
+      CV_PROVIDER_ARTIFACT_RECONCILIATION_TARGETS: '${CV_PROVIDER_ARTIFACT_RECONCILIATION_TARGETS:-[]}'
       CV_ASSET_PROVENANCE_ADAPTER: deterministic
       CV_DETERMINISTIC_PROVENANCE_STATUS: ${CV_DETERMINISTIC_PROVENANCE_STATUS:-NOT_PRESENT}
       CV_C2PA_TRUST_CONFIG_VERSION: ${CV_C2PA_TRUST_CONFIG_VERSION:-c2pa-trust-v1}
+    volumes:
+      - type: bind
+        source: "${CV_ALIBABA_VISION_API_KEY_HOST_PATH:-./fixtures/blank-alibaba-vision-api-key}"
+        target: /run/secrets/alibaba-vision-api-key
+        read_only: true
     depends_on:
       clamav:
         condition: service_healthy
@@ -377,14 +425,16 @@ services:
         condition: service_completed_successfully
       object-storage-init:
         condition: service_completed_successfully
+    stop_grace_period: "${CV_WORKER_STOP_GRACE_PERIOD_SECONDS:-90}s"
     restart: unless-stopped
     healthcheck:
       test:
         [
           "CMD",
           "python",
-          "-c",
-          "import json, os, pathlib, socket; marker=pathlib.Path('/tmp/commercevision-worker-ready.json'); assert b'celery' in pathlib.Path('/proc/1/cmdline').read_bytes(); data=json.loads(marker.read_text()); assert data.get('ready') is True; assert data.get('consumer_ready') is True; assert data.get('master_pid') == 1; assert data.get('mysql') == 'ok'; assert data.get('object_storage') == 'ok'; assert data.get('malware_scanner') == 'ok'; assert data.get('missing_kinds') == []; children={int(pid) for pid in pathlib.Path('/proc/1/task/1/children').read_text().split() if pathlib.Path(f'/proc/{pid}').exists()}; child_data=[json.loads(path.read_text()) for path in marker.with_name(marker.name + '.children').glob('*.json')]; ready_children={item.get('child_pid') for item in child_data if item.get('ready') is True and item.get('master_pid') == 1 and item.get('missing_kinds') == []}; assert len(children.intersection(ready_children)) >= int(os.environ['CV_WORKER_CONCURRENCY']); socket.create_connection(('rabbitmq', 5672), 3).close()",
+          "-m",
+          "commercevision_worker.readiness",
+          "healthcheck",
         ]
       interval: 15s
       timeout: 10s

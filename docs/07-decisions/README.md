@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-07-29 |
 | 适用版本 | Project v1 |
 
 ## 已接受
@@ -14,6 +14,7 @@
 - [ADR-004：单一 Agent 与 LangGraph](ADR-004-single-agent-langgraph.md)
 - [ADR-005：开源许可与来源代码边界](ADR-005-open-source-boundary.md)
 - [ADR-006：任务资产与基础资产采用不同保留边界](ADR-006-asset-retention-boundary.md)
+- [ADR-007：ProductBrief continuation 由消费时权威事实授权](ADR-007-product-brief-continuation-authority.md)
 
 ## 状态
 

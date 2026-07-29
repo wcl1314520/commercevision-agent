@@ -74,6 +74,12 @@ flowchart LR
 - Workflow/Step 和 Outbox 在同一事务写入。
 - Relay 发布后记录 broker message ID。
 - 发布后崩溃可能重复消息，Inbox 负责去重。
+- `workflow.run.requested` 与 `workflow.resume.requested` 携带精确 ProductBrief Version，
+  但 queued event 不是永久授权。Consumer 在 Inbox claim 后以 MySQL 当前时间、Workflow
+  类型/冻结 Product、retention 和当前 confirmed version 重验。
+- 已过期或已被后续分析/修订取代的 continuation 作为可观测 stale no-op 完成 Inbox，不创建
+  Step/Checkpoint/Outbox，不消耗业务 retry 或 DLQ；临时依赖故障才重试，未知事件或无效
+  Contract 才进入永久失败。
 
 ### MySQL 与 Checkpoint
 

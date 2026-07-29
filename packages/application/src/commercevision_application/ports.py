@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
+from commercevision_domain import ProductBrief, ProductBriefVersion
 from commercevision_domain.messaging import DeadLetterMessage, OutboxEvent
 from commercevision_domain.workflow.entities import (
     Approval,
@@ -33,6 +34,12 @@ class WorkflowRepositoryPort(Protocol):
         cursor: tuple[datetime, str] | None = None,
     ) -> list[Workflow]: ...
     def list_recoverable(self, *, stale_before: datetime, limit: int) -> list[Workflow]: ...
+    def has_irreversible_provider_submission(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+    ) -> bool: ...
 
 
 class StepRepositoryPort(Protocol):
@@ -49,8 +56,12 @@ class StepRepositoryPort(Protocol):
 
 class AttemptRepositoryPort(Protocol):
     def add(self, attempt: WorkflowAttempt) -> None: ...
+    def get(self, attempt_id: str, *, for_update: bool = False) -> WorkflowAttempt | None: ...
     def get_by_idempotency(
         self, idempotency_key: str, *, for_update: bool = False
+    ) -> WorkflowAttempt | None: ...
+    def get_latest_for_step(
+        self, step_id: str, *, for_update: bool = False
     ) -> WorkflowAttempt | None: ...
     def save(self, attempt: WorkflowAttempt) -> None: ...
     def list_for_workflow(self, workflow_id: str) -> list[WorkflowAttempt]: ...
@@ -63,6 +74,24 @@ class ApprovalRepositoryPort(Protocol):
 
 class IdempotencyRepositoryPort(Protocol):
     def get(self, scope: str, key_hash: str, *, for_update: bool = False) -> Any | None: ...
+    def claim(
+        self,
+        *,
+        scope: str,
+        key_hash: str,
+        request_hash: str,
+        expires_at: datetime,
+    ) -> Any: ...
+    def complete(
+        self,
+        *,
+        scope: str,
+        key_hash: str,
+        request_hash: str,
+        resource_type: str,
+        resource_id: str,
+        response_data: dict[str, Any],
+    ) -> None: ...
     def add(
         self,
         *,
@@ -128,6 +157,52 @@ class AuditRepositoryPort(Protocol):
     def add(self, **kwargs: Any) -> None: ...
 
 
+class StoredProductBriefContinuationVersionPort(Protocol):
+    version: ProductBriefVersion
+
+
+class ProductBriefContinuationConfirmationPort(Protocol):
+    approval_id: str
+    workflow_id: str
+    product_brief_version_number: int
+
+
+class ProductBriefContinuationRepositoryPort(Protocol):
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        product_brief_id: str,
+        for_update: bool = False,
+    ) -> ProductBrief | None: ...
+
+    def get_version(
+        self,
+        *,
+        workspace_id: str,
+        product_brief_version_id: str,
+    ) -> StoredProductBriefContinuationVersionPort | None: ...
+
+
+class ProductBriefContinuationConfirmationRepositoryPort(Protocol):
+    def get_confirmation(
+        self,
+        *,
+        workspace_id: str,
+        product_brief_id: str,
+        product_brief_version_id: str,
+    ) -> ProductBriefContinuationConfirmationPort | None: ...
+
+
+class ProductBriefContinuationLineageRepositoryPort(Protocol):
+    def analysis_trace_id(
+        self,
+        *,
+        workspace_id: str,
+        product_brief_id: str,
+    ) -> str | None: ...
+
+
 class UnitOfWorkPort(Protocol):
     workflows: WorkflowRepositoryPort
     steps: StepRepositoryPort
@@ -138,10 +213,14 @@ class UnitOfWorkPort(Protocol):
     inbox: InboxRepositoryPort
     dead_letters: DeadLetterRepositoryPort
     audit: AuditRepositoryPort
+    product_briefs: ProductBriefContinuationRepositoryPort
+    product_brief_confirmations: ProductBriefContinuationConfirmationRepositoryPort
+    product_brief_lineage: ProductBriefContinuationLineageRepositoryPort
 
     def __enter__(self) -> UnitOfWorkPort: ...
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None: ...
     def commit(self) -> None: ...
+    def database_now(self) -> datetime: ...
 
 
 UnitOfWorkFactory = Callable[[], UnitOfWorkPort]

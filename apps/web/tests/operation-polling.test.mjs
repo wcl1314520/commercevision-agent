@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isProductBriefOperationPollTerminal,
   operationPollDelayMs,
   shouldContinueOperationPolling,
 } from "../lib/operation-polling";
@@ -24,5 +25,25 @@ describe("durable operation polling policy", () => {
     expect(shouldContinueOperationPolling(1)).toBe(true);
     expect(shouldContinueOperationPolling(23)).toBe(true);
     expect(shouldContinueOperationPolling(24)).toBe(false);
+  });
+
+  it("classifies every polling terminal state through one canonical policy", () => {
+    expect(
+      [
+        "PENDING",
+        "CLAIMED",
+        "RUNNING",
+        "RECONCILING",
+        "RETRYABLE_FAILED",
+      ].map(isProductBriefOperationPollTerminal),
+    ).toEqual([false, false, false, false, false]);
+    expect(
+      [
+        "WAITING_HUMAN",
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELLED",
+      ].map(isProductBriefOperationPollTerminal),
+    ).toEqual([true, true, true, true]);
   });
 });

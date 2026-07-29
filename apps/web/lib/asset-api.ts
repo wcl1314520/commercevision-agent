@@ -2,7 +2,6 @@ import type {
   AssetResponseV1,
   AssetValidationStatusResponseV1,
   ErrorResponse,
-  OperationResponseV1,
   PresignedUploadV1,
   AssetAdministratorBlockRequestV1,
   RightsHistoryResponseV1,
@@ -17,7 +16,6 @@ import type {
   UploadSessionResponseV1,
 } from "./generated/catalog-api";
 
-export type DurableOperationResponseV1 = OperationResponseV1;
 export type WorkspaceCapabilities = {
   administrator: boolean;
 };
@@ -279,12 +277,6 @@ export class AssetApi {
     return this.request<RightsUsabilityResponseV1>(
       `/api/v1/assets/${encodeURIComponent(assetId)}/usability:check`,
       { method: "POST", body: JSON.stringify(payload) },
-    );
-  }
-
-  getOperation(operationId: string): Promise<DurableOperationResponseV1> {
-    return this.request<DurableOperationResponseV1>(
-      `/api/v1/operations/${encodeURIComponent(operationId)}`,
     );
   }
 

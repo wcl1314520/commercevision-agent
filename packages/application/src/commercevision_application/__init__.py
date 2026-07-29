@@ -23,7 +23,15 @@ from .asset_validation_transfer import (
 from .assets import AssetRegistryApplicationService
 from .catalog import CatalogApplicationService
 from .dead_letter_identity import canonicalize_dead_letter_id
-from .execution import DurableNodeLifecycle
+from .execution import (
+    DurableNodeLifecycle,
+    ProductBriefContinuation,
+    ProductBriefContinuationAuthorityError,
+    ProductBriefContinuationClaim,
+    ProductBriefGenerationAuthority,
+    ProductBriefRecoveryClaim,
+    StaleProductBriefContinuation,
+)
 from .operation_recovery import OperationRecoveryService
 from .operations import (
     DurableOperationWorker,
@@ -35,6 +43,7 @@ from .operations import (
     OperationExecutionResult,
     OperationExecutor,
     OperationExecutorRegistry,
+    OperationHumanWaitRequired,
     OperationReconciliationPolicy,
     OperationReconciliationRequired,
     OperationReconciliationResult,
@@ -43,6 +52,29 @@ from .operations import (
 )
 from .operator_ports import AuthenticatedPrincipal, OperatorAccessPolicyPort
 from .operators import DeadLetterDetail, DeadLetterOperatorService
+from .product_brief_artifacts import (
+    ProductBriefProviderArtifactReconciler,
+    ProductBriefProviderArtifactService,
+    ProviderArtifactOwner,
+    ProviderArtifactReconciliationBatch,
+    ProviderArtifactReconciliationCursor,
+)
+from .product_brief_observability import (
+    NullProductBriefObserver,
+    ProductBriefObserver,
+)
+from .product_brief_transfer import (
+    VISION_ANALYSIS_PURPOSE,
+    VisionDataTransferAuthorization,
+    VisionDataTransferDenied,
+    VisionDataTransferPolicy,
+)
+from .product_brief_views import ProductBriefViewApplicationService
+from .product_briefs import (
+    ProductBriefAnalysisExecutor,
+    ProductBriefApplicationService,
+    ProductBriefPolicy,
+)
 from .reliability import InboxCoordinator, OutboxDispatcher, RecoveryService
 from .routing import (
     DuplicateEventRegistrationError,
@@ -60,6 +92,12 @@ from .workflows import WorkflowApplicationService
 
 __all__ = [
     "DurableNodeLifecycle",
+    "ProductBriefContinuation",
+    "ProductBriefContinuationAuthorityError",
+    "ProductBriefContinuationClaim",
+    "ProductBriefGenerationAuthority",
+    "ProductBriefRecoveryClaim",
+    "StaleProductBriefContinuation",
     "DurableOperationWorker",
     "DeadLetterDetail",
     "DeadLetterOperatorService",
@@ -88,10 +126,22 @@ __all__ = [
     "NullAssetValidationObserver",
     "OutboxDispatcher",
     "PresignedContentSafetyRequestFactory",
+    "ProductBriefAnalysisExecutor",
+    "ProductBriefApplicationService",
+    "ProductBriefProviderArtifactReconciler",
+    "ProductBriefProviderArtifactService",
+    "ProductBriefObserver",
+    "ProductBriefPolicy",
+    "ProductBriefViewApplicationService",
+    "ProviderArtifactOwner",
+    "ProviderArtifactReconciliationBatch",
+    "ProviderArtifactReconciliationCursor",
+    "NullProductBriefObserver",
     "OperationApplicationService",
     "OperationCreateCommand",
     "OperationExecutionBoundary",
     "OperationExecutionFailure",
+    "OperationHumanWaitRequired",
     "OperationExecutionRequest",
     "OperationExecutionResult",
     "OperationExecutor",
@@ -109,5 +159,9 @@ __all__ = [
     "UploadObjectCleaner",
     "UploadSessionMaintenanceService",
     "upload_cleanup_input_hash",
+    "VISION_ANALYSIS_PURPOSE",
+    "VisionDataTransferAuthorization",
+    "VisionDataTransferDenied",
+    "VisionDataTransferPolicy",
     "WorkflowApplicationService",
 ]

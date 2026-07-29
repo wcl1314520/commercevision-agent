@@ -109,7 +109,10 @@ def test_product_create_is_idempotent_workspace_scoped_and_uses_stable_errors(
     assert invalid.json()["details"]["errors"]
     assert invalid_expiry.status_code == 422
     assert invalid_expiry.json()["code"] == "VALIDATION_ERROR"
-    assert invalid_expiry.json()["details"]["errors"][0]["ctx"]["error"]
+    expiry_error = invalid_expiry.json()["details"]["errors"][0]
+    assert set(expiry_error) == {"type", "loc", "msg"}
+    assert "ctx" not in expiry_error
+    assert "input" not in expiry_error
 
 
 def test_product_cursor_is_stable_under_concurrent_inserts(

@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-07-29 |
 | 适用版本 | Workflow v1 |
 
 ## 业务状态
@@ -16,6 +16,8 @@ stateDiagram-v2
     UNDERSTANDING --> AWAITING_PRODUCT_CONFIRMATION
     UNDERSTANDING --> RETRIEVING
     AWAITING_PRODUCT_CONFIRMATION --> RETRIEVING
+    RETRIEVING --> UNDERSTANDING: explicit re-analysis
+    RETRIEVING --> AWAITING_PRODUCT_CONFIRMATION: human revision
     RETRIEVING --> PLANNING
     PLANNING --> AWAITING_PLAN_APPROVAL
     AWAITING_PLAN_APPROVAL --> PLANNING: edit/reject
@@ -93,6 +95,15 @@ CREATED -> SUBMITTING -> SUBMITTED -> POLLING -> SUCCEEDED
 - 完成状态不能回到执行状态；返工创建新 Step/Attempt。
 - 人工审批保存不可变快照，后续编辑产生新版本。
 - 迟到供应商回调只能更新匹配的有效 Attempt。
+- `RETRIEVING -> UNDERSTANDING` 只用于操作人显式启动新的 ProductBrief 分析周期；
+  `RETRIEVING -> AWAITING_PRODUCT_CONFIRMATION` 只用于基于已确认版本创建人工修订。
+- ProductBrief continuation 事件只表示曾经发布的命令，不是继续执行的授权。Worker 消费和
+  每个节点 claim 时都必须以 MySQL 当前事实重验 Workflow 类型、冻结 Product、当前确认版本、
+  Retention Status 和 deadline。
+- 已过期或已被后续重分析/修订取代的 continuation 作为可审计 stale no-op 收敛，不重试、
+  不进入 DLQ，也不创建 Step、Checkpoint、Outbox 或外部副作用。
+- 基础设施暂时故障保留重试；无效 Contract、未知事件类型和不支持版本继续失败关闭并进入
+  DLQ。不得把业务上的 stale continuation 伪装成基础设施失败。
 
 ## 取消
 
@@ -115,4 +126,3 @@ Recovery Scheduler 扫描：
 - 到期但未清理的任务数据。
 
 恢复器根据数据库事实创建新任务消息，不直接修改模型输出。
-

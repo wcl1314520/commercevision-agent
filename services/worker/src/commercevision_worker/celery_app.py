@@ -7,9 +7,11 @@ import os
 from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
+from time import time
 from typing import Any
 
 from celery import Celery
+from celery.platforms import EX_FAILURE
 from celery.signals import (
     worker_init,
     worker_process_init,
@@ -29,7 +31,12 @@ from .executors import (
     build_operation_executors,
     discover_operation_executor_factories,
 )
-from .readiness import probe_worker_dependencies
+from .readiness import (
+    READINESS_FAILURE_THRESHOLD,
+    READINESS_PROBE_INTERVAL_SECONDS,
+    WorkerReadinessSupervisor,
+    probe_worker_dependencies,
+)
 from .runtime import WorkerRuntime
 
 settings = load_settings("worker")
@@ -63,9 +70,11 @@ celery_app.conf.update(
 _runtime: WorkerRuntime | None = None
 _validated_factories: Mapping[OperationKind, OperationExecutorFactory] | None = None
 _dependency_readiness: dict[str, str] | None = None
+_dependency_checked_at: float | None = None
 _consumer_ready = False
 _master_pid: int | None = None
 _startup_error: str | None = None
+_readiness_supervisor: WorkerReadinessSupervisor | None = None
 
 
 def _missing_executor_message(
@@ -82,6 +91,14 @@ def _missing_executor_message(
 
 def _remove_readiness_file() -> None:
     Path(settings.worker_readiness_path).unlink(missing_ok=True)
+
+
+def _stop_readiness_supervisor() -> None:
+    global _readiness_supervisor
+    supervisor = _readiness_supervisor
+    _readiness_supervisor = None
+    if supervisor is not None:
+        supervisor.stop()
 
 
 def _child_readiness_directory() -> Path:
@@ -107,12 +124,15 @@ def _clear_child_readiness_files() -> None:
 def validate_worker_startup(**_: Any) -> None:
     """Fail the Celery master before its consumer blueprint can start."""
 
-    global _consumer_ready, _dependency_readiness, _master_pid, _startup_error
+    global _consumer_ready, _dependency_checked_at, _dependency_readiness
+    global _master_pid, _startup_error
     global _validated_factories
     _consumer_ready = False
+    _dependency_checked_at = None
     _dependency_readiness = None
     _master_pid = os.getpid()
     try:
+        _stop_readiness_supervisor()
         _remove_readiness_file()
         _clear_child_readiness_files()
         factories = discover_operation_executor_factories()
@@ -123,14 +143,17 @@ def validate_worker_startup(**_: Any) -> None:
         if error is not None:
             raise RuntimeError(error)
         dependency_readiness = probe_worker_dependencies(settings)
+        dependency_checked_at = time()
     except Exception as exc:
         _consumer_ready = False
+        _dependency_checked_at = None
         _dependency_readiness = None
         _validated_factories = None
         _startup_error = str(exc)
         # Celery's signal dispatcher catches Exception. SystemExit propagates and
         # aborts WorkController construction before any consumer is created.
         raise SystemExit(f"worker bootstrap failed: {exc}") from exc
+    _dependency_checked_at = dependency_checked_at
     _dependency_readiness = dependency_readiness
     _validated_factories = factories
     _startup_error = None
@@ -147,6 +170,21 @@ def _write_readiness_file(readiness: dict[str, object]) -> None:
     temporary_path.replace(path)
 
 
+def _publish_live_readiness(
+    statuses: Mapping[str, str],
+    checked_at: float,
+) -> None:
+    global _dependency_readiness
+    _dependency_readiness = dict(statuses)
+    readiness = worker_bootstrap_readiness()
+    if not readiness["ready"]:
+        raise RuntimeError("worker dependencies are not ready")
+    marker = {key: value for key, value in readiness.items() if key != "error"}
+    marker["checked_at"] = checked_at
+    marker["fresh_until"] = checked_at + settings.worker_readiness_max_age_seconds
+    _write_readiness_file(marker)
+
+
 def _write_child_readiness_file(readiness: dict[str, object]) -> None:
     path = _child_readiness_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,6 +194,20 @@ def _write_child_readiness_file(readiness: dict[str, object]) -> None:
         encoding="utf-8",
     )
     temporary_path.replace(path)
+
+
+def _child_executor_readiness(runtime: WorkerRuntime) -> dict[str, object]:
+    runtime.assert_local_resources_ready()
+    required = frozenset(settings.worker_required_operation_kinds)
+    missing = runtime.operation_executors.missing(required)
+    return {
+        "ready": not missing,
+        "required_kinds": sorted(kind.value for kind in required),
+        "registered_kinds": sorted(
+            kind.value for kind in runtime.operation_executors.registered_kinds
+        ),
+        "missing_kinds": sorted(kind.value for kind in missing),
+    }
 
 
 @worker_process_init.connect(weak=False)
@@ -173,7 +225,7 @@ def initialize_worker_process(**_: Any) -> None:
             factories=_validated_factories,
         )
         runtime = WorkerRuntime.build(settings, operation_executors=executors)
-        readiness = runtime.operation_executor_readiness()
+        readiness = _child_executor_readiness(runtime)
         if not readiness["ready"]:
             missing = ", ".join(readiness["missing_kinds"])
             raise RuntimeError(f"required operation executors are unavailable: {missing}")
@@ -181,7 +233,8 @@ def initialize_worker_process(**_: Any) -> None:
         raise
     except Exception as exc:
         if runtime is not None:
-            runtime.close()
+            with suppress(Exception):
+                runtime.close()
         _runtime = None
         _startup_error = str(exc)
         _child_readiness_path().unlink(missing_ok=True)
@@ -200,7 +253,8 @@ def initialize_worker_process(**_: Any) -> None:
             }
         )
     except Exception as exc:
-        runtime.close()
+        with suppress(Exception):
+            runtime.close()
         _runtime = None
         _startup_error = str(exc)
         _child_readiness_path().unlink(missing_ok=True)
@@ -213,14 +267,29 @@ def _get_runtime() -> WorkerRuntime:
     return _runtime
 
 
+def _retire_unhealthy_runtime(runtime: WorkerRuntime) -> None:
+    """Revoke this child before Celery replaces its unhealthy process runtime."""
+
+    global _runtime
+    if _runtime is runtime:
+        _runtime = None
+    _child_readiness_path().unlink(missing_ok=True)
+    with suppress(Exception):
+        runtime.close()
+    raise SystemExit("worker runtime became unhealthy") from None
+
+
 def worker_bootstrap_readiness() -> dict[str, object]:
     required = set(settings.worker_required_operation_kinds)
     registered = set(_validated_factories or {}).union(available_builtin_operation_kinds(settings))
     missing = required.difference(registered)
     dependencies_ready = (
-        (_dependency_readiness or {}).get("mysql") == "ok"
+        (_dependency_readiness or {}).get("broker") == "ok"
+        and (_dependency_readiness or {}).get("mysql") == "ok"
         and (_dependency_readiness or {}).get("object_storage") in {"ok", "not_required"}
         and (_dependency_readiness or {}).get("malware_scanner") in {"ok", "not_required"}
+        and (_dependency_readiness or {}).get("provider_result_storage") in {"ok", "not_required"}
+        and (_dependency_readiness or {}).get("vision_credential") in {"ok", "not_required"}
     )
     return {
         "ready": _consumer_ready and dependencies_ready and not missing,
@@ -229,6 +298,7 @@ def worker_bootstrap_readiness() -> dict[str, object]:
         "required_kinds": sorted(kind.value for kind in required),
         "registered_kinds": sorted(kind.value for kind in registered),
         "missing_kinds": sorted(kind.value for kind in missing),
+        "broker": (_dependency_readiness or {}).get("broker", "not_checked"),
         "mysql": (_dependency_readiness or {}).get("mysql", "not_checked"),
         "object_storage": (_dependency_readiness or {}).get(
             "object_storage",
@@ -238,15 +308,23 @@ def worker_bootstrap_readiness() -> dict[str, object]:
             "malware_scanner",
             "not_checked",
         ),
+        "provider_result_storage": (_dependency_readiness or {}).get(
+            "provider_result_storage",
+            "not_checked",
+        ),
+        "vision_credential": (_dependency_readiness or {}).get(
+            "vision_credential",
+            "not_checked",
+        ),
         "error": _startup_error,
     }
 
 
 @worker_ready.connect(weak=False)
-def mark_worker_ready(**_: Any) -> None:
+def mark_worker_ready(sender: object | None = None, **_: Any) -> None:
     """Publish one master-owned marker only after the consumer is ready."""
 
-    global _consumer_ready, _startup_error
+    global _consumer_ready, _readiness_supervisor, _startup_error
     if _master_pid is None or os.getpid() != _master_pid:
         raise SystemExit("worker readiness can only be published by the Celery master")
     _consumer_ready = True
@@ -254,9 +332,37 @@ def mark_worker_ready(**_: Any) -> None:
     if not readiness["ready"]:
         _consumer_ready = False
         raise SystemExit("worker consumer became ready without validated dependencies")
+    controller = getattr(sender, "controller", None)
+    stop_master = getattr(controller, "stop", None)
+    if not callable(stop_master):
+        _consumer_ready = False
+        _startup_error = "Celery master shutdown control is unavailable"
+        _remove_readiness_file()
+        raise SystemExit(_startup_error)
+
+    def shutdown_master() -> None:
+        stop_master(exitcode=EX_FAILURE)
+
+    supervisor = WorkerReadinessSupervisor(
+        probe=lambda: probe_worker_dependencies(settings),
+        publish=_publish_live_readiness,
+        revoke=_remove_readiness_file,
+        shutdown=shutdown_master,
+        interval_seconds=READINESS_PROBE_INTERVAL_SECONDS,
+        failure_threshold=READINESS_FAILURE_THRESHOLD,
+        clock=time,
+        owner_pid=_master_pid,
+    )
     try:
-        _write_readiness_file(readiness)
+        if _dependency_checked_at is None:
+            raise RuntimeError("worker dependency probe completion time is unavailable")
+        _publish_live_readiness(_dependency_readiness or {}, _dependency_checked_at)
+        _readiness_supervisor = supervisor
+        if not supervisor.start():
+            raise RuntimeError("worker readiness supervisor did not start")
     except Exception as exc:
+        supervisor.stop()
+        _readiness_supervisor = None
         _consumer_ready = False
         _startup_error = str(exc)
         _remove_readiness_file()
@@ -269,6 +375,7 @@ def remove_worker_readiness(**_: Any) -> None:
 
     global _consumer_ready
     if _master_pid is not None and os.getpid() == _master_pid:
+        _stop_readiness_supervisor()
         _consumer_ready = False
         _remove_readiness_file()
         _clear_child_readiness_files()
@@ -276,13 +383,27 @@ def remove_worker_readiness(**_: Any) -> None:
 
 @celery_app.task(name="commercevision.process_outbox_event")
 def process_outbox_event(event_id: str) -> str:
-    return _get_runtime().process_event(event_id)
+    runtime = _get_runtime()
+    try:
+        runtime.assert_local_resources_ready()
+    except Exception:
+        _retire_unhealthy_runtime(runtime)
+    try:
+        return runtime.process_event(event_id)
+    finally:
+        try:
+            runtime.assert_local_resources_ready()
+        except Exception:
+            _retire_unhealthy_runtime(runtime)
 
 
 @worker_process_shutdown.connect
 def close_runtime(**_: Any) -> None:
     global _runtime
-    if _runtime is not None:
-        _runtime.close()
-        _runtime = None
-    _child_readiness_path().unlink(missing_ok=True)
+    runtime = _runtime
+    _runtime = None
+    try:
+        if runtime is not None:
+            runtime.close()
+    finally:
+        _child_readiness_path().unlink(missing_ok=True)

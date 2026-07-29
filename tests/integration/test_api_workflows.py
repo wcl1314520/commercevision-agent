@@ -61,3 +61,45 @@ def test_workflow_http_idempotency_and_error_contract(
     assert conflict.json()["code"] == "IDEMPOTENCY_CONFLICT"
     assert conflict.json()["request_id"]
     assert missing_key.status_code == 422
+
+
+def test_commerce_workflow_opens_at_the_product_brief_gate_without_running_ahead(
+    integration_database,
+    integration_settings,
+) -> None:
+    del integration_database
+    headers = {
+        "X-Workspace-Id": "integration-api",
+        "X-Actor-Id": "integration-user",
+        "Idempotency-Key": "commerce-workflow-create-0001",
+        "X-Trace-Id": "commerce-workflow-trace-0001",
+    }
+    app = create_app(integration_settings)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/workflows",
+            headers=headers,
+            json={
+                "workflow_type": "COMMERCE_IMAGE_GENERATION",
+                "input_data": {
+                    "schema_version": "1.0",
+                    "product_id": "019fac40-0000-7000-8000-000000000001",
+                },
+                "retention_hours": 72,
+            },
+        )
+        assert created.status_code == 202, created.text
+        events = client.get(
+            f"/api/v1/workflows/{created.json()['id']}/events",
+            headers={
+                "X-Workspace-Id": "integration-api",
+                "X-Actor-Id": "integration-user",
+            },
+        )
+
+    assert created.json()["status"] == "UNDERSTANDING"
+    assert created.json()["current_node"] == "understand_product"
+    assert created.json()["version"] == 3
+    assert events.status_code == 200, events.text
+    assert all(event["event_type"] != "workflow.run.requested" for event in events.json())

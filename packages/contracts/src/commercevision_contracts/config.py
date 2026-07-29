@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import os
+import re
+from decimal import Decimal
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 from urllib.parse import urlsplit
 
 from commercevision_domain import (
+    DEFAULT_PRODUCT_BRIEF_SENSITIVE_CLAIM_PATHS,
     AssetKind,
     OperationKind,
+    ProductBriefCategory,
     RetentionClass,
     StorageLocationClass,
+    product_brief_field_paths,
 )
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -26,6 +31,15 @@ from .endpoint_identity import validate_canonical_endpoint_host
 from .workspace_identity import validate_workspace_id
 
 _FINALIZE_STORAGE_REQUEST_BOUND = 3
+_ALIBABA_IMMUTABLE_MODEL_SNAPSHOT = re.compile(r"^[-a-zA-Z0-9.]+-\d{4}-\d{2}-\d{2}$")
+WORKER_READINESS_BROKER_CONNECT_TIMEOUT_SECONDS = 3.0
+WORKER_READINESS_MYSQL_QUERY_TIMEOUT_SECONDS = 5.0
+WORKER_READINESS_PROBE_INTERVAL_SECONDS = 5.0
+WORKER_READINESS_PUBLICATION_MARGIN_SECONDS = 2.0
+PROVIDER_ARTIFACT_RECONCILIATION_TARGET_LIMIT = 16
+PROVIDER_ARTIFACT_READINESS_TARGET_LIMIT = PROVIDER_ARTIFACT_RECONCILIATION_TARGET_LIMIT + 1
+_OBJECT_STORAGE_READINESS_REQUEST_BOUND = 3
+_OBJECT_STORAGE_READINESS_TIMEOUT_PHASE_BOUND = 2
 
 
 def _secret_directories() -> list[Path]:
@@ -40,6 +54,54 @@ def _origin_identity(value: str) -> tuple[str, str, int]:
     assert parsed.hostname is not None
     default_port = 443 if parsed.scheme.lower() == "https" else 80
     return parsed.scheme.lower(), parsed.hostname.lower(), parsed.port or default_port
+
+
+class ProviderArtifactReconciliationTargetSettings(BaseModel):
+    """Explicit connection overrides for one historical provider-artifact target."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    object_store_backend: Literal["minio", "oss"]
+    object_store_provider_result_bucket: str = Field(min_length=1, max_length=255)
+    object_store_credential_mode: (
+        Literal[
+            "static",
+            "ecs_ram_role",
+            "oidc_role_arn",
+        ]
+        | None
+    ) = None
+    object_store_endpoint: str | None = None
+    object_store_presign_endpoint: str | None = None
+    object_store_region: str | None = None
+    object_store_access_key: str | None = None
+    object_store_secret_key: SecretStr | None = None
+    object_store_session_token: SecretStr | None = None
+    object_store_ram_role_name: str | None = None
+    object_store_oidc_role_arn: str | None = None
+    object_store_oidc_provider_arn: str | None = None
+    object_store_oidc_token_file_path: str | None = None
+    object_store_sts_endpoint: str | None = None
+    object_store_role_session_name: str | None = None
+    object_store_tls_verify: bool | None = None
+    object_store_force_path_style: bool | None = None
+    object_store_require_encryption: bool | None = None
+    object_store_connect_timeout_seconds: float | None = Field(default=None, gt=0, le=60)
+    object_store_read_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
+    object_store_readiness_timeout_seconds: float | None = Field(default=None, gt=0, le=10)
+    object_store_credential_refresh_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        le=30,
+    )
+
+    @field_validator("object_store_provider_result_bucket")
+    @classmethod
+    def _trim_required_target_identity(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider artifact reconciliation bucket must not be blank")
+        return normalized
 
 
 class Settings(BaseSettings):
@@ -99,6 +161,12 @@ class Settings(BaseSettings):
         default=5.0,
         gt=0,
         le=30,
+    )
+    provider_artifact_reconciliation_targets: list[ProviderArtifactReconciliationTargetSettings] = (
+        Field(
+            default_factory=list,
+            max_length=PROVIDER_ARTIFACT_RECONCILIATION_TARGET_LIMIT,
+        )
     )
     upload_session_expiry_seconds: int = Field(default=900, ge=60, le=3600)
     upload_cleanup_presign_grace_seconds: int = Field(default=30, ge=1, le=300)
@@ -254,6 +322,87 @@ class Settings(BaseSettings):
     validation_data_transfer_allowed_providers: list[str] = Field(default_factory=list)
     validation_data_transfer_allowed_endpoint_regions: list[str] = Field(default_factory=list)
     validation_data_transfer_allowed_endpoint_hosts: list[str] = Field(default_factory=list)
+    vision_adapter: Literal["deterministic", "alibaba"] = "deterministic"
+    deterministic_vision_scenario: Literal[
+        "success",
+        "low_confidence",
+        "conflict",
+        "sensitive",
+        "malformed",
+        "timeout",
+        "rejected",
+        "throttled",
+        "unknown",
+    ] = "success"
+    vision_prompt_version: str = "product-brief-prompt-v1"
+    vision_product_facts_maximum_bytes: int = Field(
+        default=64 * 1024,
+        ge=2,
+        le=512 * 1024,
+    )
+    vision_product_facts_maximum_depth: int = Field(default=8, ge=1, le=32)
+    vision_product_facts_maximum_nodes: int = Field(default=1024, ge=1, le=10_000)
+    vision_product_facts_maximum_string_bytes: int = Field(
+        default=4096,
+        ge=1,
+        le=64 * 1024,
+    )
+    product_brief_review_policy_version: str = "product-brief-review-v1"
+    product_brief_confidence_threshold: Decimal = Field(
+        default=Decimal("0.80"),
+        ge=Decimal("0"),
+        le=Decimal("1"),
+    )
+    product_brief_mandatory_review_paths: list[str] = Field(default_factory=list)
+    product_brief_sensitive_claim_paths: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_PRODUCT_BRIEF_SENSITIVE_CLAIM_PATHS)
+    )
+    product_brief_analysis_max_attempts: int = Field(default=5, ge=1, le=50)
+    product_brief_analysis_max_reconciliation_attempts: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+    )
+    vision_temporary_reference_lifetime_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+    )
+    vision_data_transfer_enabled: bool = False
+    vision_data_transfer_policy_version: str = "vision-transfer-deny-v1"
+    vision_data_transfer_allowed_workspace_ids: list[str] = Field(default_factory=list)
+    vision_data_transfer_allowed_retention_classes: list[RetentionClass] = Field(
+        default_factory=list
+    )
+    vision_data_transfer_allowed_providers: list[str] = Field(default_factory=list)
+    vision_data_transfer_allowed_endpoint_regions: list[str] = Field(default_factory=list)
+    vision_data_transfer_allowed_endpoint_hosts: list[str] = Field(default_factory=list)
+    alibaba_vision_api_key: SecretStr | None = None
+    alibaba_vision_api_key_file: str | None = None
+    alibaba_vision_api_key_file_max_bytes: int = Field(default=4096, ge=1, le=64 * 1024)
+    alibaba_vision_endpoint: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    alibaba_vision_endpoint_region: str = "cn-beijing"
+    alibaba_vision_model: str = "qwen-vl-max"
+    alibaba_vision_model_snapshot: str = "qwen-vl-max"
+    alibaba_vision_adapter_version: str = "alibaba-openai-vision-v1"
+    alibaba_vision_connect_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
+    alibaba_vision_read_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    alibaba_vision_end_to_end_timeout_seconds: float = Field(
+        default=45.0,
+        gt=0,
+        le=600,
+    )
+    vision_preflight_budget_seconds: int = Field(default=10, ge=1, le=300)
+    vision_operation_lease_margin_seconds: int = Field(default=15, ge=5, le=120)
+    alibaba_vision_maximum_concurrency: int = Field(default=4, ge=1, le=128)
+    alibaba_vision_maximum_response_bytes: int = Field(
+        default=512 * 1024,
+        ge=1,
+        lt=2 * 1024 * 1024,
+    )
+    alibaba_vision_maximum_output_tokens: int = Field(default=4096, ge=1, le=32_768)
+    alibaba_vision_maximum_repair_attempts: int = Field(default=1, ge=0, le=1)
+    alibaba_vision_allowed_image_origins: list[str] = Field(default_factory=list)
     asset_provenance_adapter: Literal["deterministic", "c2pa"] = "deterministic"
     deterministic_provenance_status: Literal[
         "VERIFIED",
@@ -299,6 +448,8 @@ class Settings(BaseSettings):
     worker_queues: list[str] | None = None
     worker_required_operation_kinds: list[OperationKind] = Field(default_factory=list)
     worker_readiness_path: str = "/tmp/commercevision-worker-ready.json"
+    worker_readiness_max_age_seconds: float = Field(default=50.0, gt=0, le=600)
+    worker_stop_grace_period_seconds: int = Field(default=90, ge=1, le=3600)
     workflow_queue_name: str = "commercevision.workflow"
     asset_queue_name: str = "commercevision.asset"
     index_queue_name: str = "commercevision.index"
@@ -386,6 +537,13 @@ class Settings(BaseSettings):
         "alibaba_content_safety_service",
         "alibaba_content_safety_sdk_version",
         "validation_data_transfer_policy_version",
+        "vision_prompt_version",
+        "product_brief_review_policy_version",
+        "vision_data_transfer_policy_version",
+        "alibaba_vision_endpoint_region",
+        "alibaba_vision_model",
+        "alibaba_vision_model_snapshot",
+        "alibaba_vision_adapter_version",
         "c2pa_trust_config_version",
         "worker_consumer_name",
         "worker_readiness_path",
@@ -406,6 +564,10 @@ class Settings(BaseSettings):
         "content_safety_mapping_version",
         "alibaba_content_safety_sdk_version",
         "validation_data_transfer_policy_version",
+        "vision_prompt_version",
+        "product_brief_review_policy_version",
+        "vision_data_transfer_policy_version",
+        "alibaba_vision_adapter_version",
         "c2pa_trust_config_version",
     )
     @classmethod
@@ -414,7 +576,10 @@ class Settings(BaseSettings):
             raise ValueError("validation policy and provider identities must not exceed 64 chars")
         return value
 
-    @field_validator("validation_data_transfer_allowed_workspace_ids")
+    @field_validator(
+        "validation_data_transfer_allowed_workspace_ids",
+        "vision_data_transfer_allowed_workspace_ids",
+    )
     @classmethod
     def _validate_transfer_workspaces(cls, value: list[str]) -> list[str]:
         try:
@@ -428,6 +593,8 @@ class Settings(BaseSettings):
     @field_validator(
         "validation_data_transfer_allowed_providers",
         "validation_data_transfer_allowed_endpoint_regions",
+        "vision_data_transfer_allowed_providers",
+        "vision_data_transfer_allowed_endpoint_regions",
     )
     @classmethod
     def _validate_transfer_canonical_allowlists(
@@ -441,7 +608,10 @@ class Settings(BaseSettings):
             raise ValueError("validation data transfer allowlists must be unique")
         return normalized
 
-    @field_validator("validation_data_transfer_allowed_endpoint_hosts")
+    @field_validator(
+        "validation_data_transfer_allowed_endpoint_hosts",
+        "vision_data_transfer_allowed_endpoint_hosts",
+    )
     @classmethod
     def _validate_transfer_endpoint_hosts(cls, value: list[str]) -> list[str]:
         validated = [validate_canonical_endpoint_host(item) for item in value]
@@ -452,11 +622,27 @@ class Settings(BaseSettings):
     @field_validator(
         "validation_data_transfer_allowed_asset_kinds",
         "validation_data_transfer_allowed_retention_classes",
+        "vision_data_transfer_allowed_retention_classes",
     )
     @classmethod
     def _validate_transfer_enum_allowlists(cls, value: list[object]) -> list[object]:
         if len(set(value)) != len(value):
             raise ValueError("validation data transfer allowlists must be unique")
+        return value
+
+    @field_validator(
+        "product_brief_mandatory_review_paths",
+        "product_brief_sensitive_claim_paths",
+    )
+    @classmethod
+    def _validate_product_brief_review_paths(cls, value: list[str]) -> list[str]:
+        known_paths = set(product_brief_field_paths(ProductBriefCategory.BEAUTY)) | set(
+            product_brief_field_paths(ProductBriefCategory.AUTOMOTIVE)
+        )
+        if any(path != path.strip() or path not in known_paths for path in value):
+            raise ValueError("ProductBrief review policy field path is invalid")
+        if len(set(value)) != len(value):
+            raise ValueError("ProductBrief review policy field paths must be unique")
         return value
 
     @field_validator("clamav_host")
@@ -502,6 +688,50 @@ class Settings(BaseSettings):
             raise ValueError("content-safety origins must be unique")
         return normalized
 
+    @field_validator("alibaba_vision_allowed_image_origins")
+    @classmethod
+    def _validate_vision_origins(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for origin in value:
+            parsed = urlsplit(origin)
+            try:
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError("Vision origins must be valid HTTPS origins") from exc
+            if (
+                parsed.scheme.lower() != "https"
+                or parsed.hostname is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Vision origins must be credential-free HTTPS origins")
+            normalized.append(origin.rstrip("/"))
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("Vision origins must be unique")
+        return normalized
+
+    @field_validator("alibaba_vision_endpoint")
+    @classmethod
+    def _validate_alibaba_vision_endpoint(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Alibaba Vision endpoint must be a valid HTTPS URL") from exc
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Alibaba Vision endpoint must be a credential-free HTTPS URL")
+        return value.rstrip("/")
+
     @field_validator(
         "object_store_ram_role_name",
         "object_store_oidc_role_arn",
@@ -509,6 +739,8 @@ class Settings(BaseSettings):
         "object_store_oidc_token_file_path",
         "object_store_sts_endpoint",
         "object_store_session_token",
+        "alibaba_vision_api_key",
+        "alibaba_vision_api_key_file",
         mode="before",
     )
     @classmethod
@@ -695,6 +927,11 @@ class Settings(BaseSettings):
             and not self.worker_required_operation_kinds
         ):
             raise ValueError("production requires explicit required operation kinds")
+        if (
+            self.service_name == "worker"
+            and self.worker_readiness_max_age_seconds < self.worker_readiness_cycle_budget_seconds
+        ):
+            raise ValueError("Worker readiness marker lease must cover the full remote probe cycle")
         if self.environment == "production":
             if self.object_store_backend == "oss" and self.object_store_force_path_style:
                 raise ValueError("production OSS object storage requires virtual-hosted addressing")
@@ -841,6 +1078,156 @@ class Settings(BaseSettings):
                         "production Alibaba requires an explicit enabled validation "
                         "data transfer policy with exact allowlists"
                     )
+        worker_executes_product_briefs = (
+            OperationKind.PRODUCT_BRIEF_ANALYSIS in self.worker_required_operation_kinds
+        )
+        historical_target_identities = tuple(
+            (
+                target.object_store_backend,
+                target.object_store_provider_result_bucket,
+            )
+            for target in self.provider_artifact_reconciliation_targets
+        )
+        if len(set(historical_target_identities)) != len(historical_target_identities):
+            raise ValueError("provider artifact reconciliation exact targets must be unique")
+        current_provider_target = (
+            self.object_store_backend,
+            self.object_store_provider_result_bucket,
+        )
+        if current_provider_target in historical_target_identities:
+            raise ValueError(
+                "provider artifact reconciliation targets must not repeat the current target"
+            )
+        if self.provider_artifact_reconciliation_targets and not (
+            self.service_name in {"commercevision", "worker"}
+            and self.asset_queue_name in self.configured_worker_queues
+            and (self.service_name == "commercevision" or worker_executes_product_briefs)
+        ):
+            raise ValueError(
+                "provider artifact reconciliation targets require a ProductBrief-executing Worker"
+            )
+        for target in self.provider_artifact_reconciliation_targets:
+            if target.object_store_backend == self.object_store_backend:
+                continue
+            required_cross_backend_values = (
+                target.object_store_credential_mode,
+                target.object_store_endpoint,
+                target.object_store_presign_endpoint,
+                target.object_store_region,
+                target.object_store_force_path_style,
+            )
+            if any(value is None for value in required_cross_backend_values):
+                raise ValueError(
+                    "cross-backend provider artifact reconciliation targets require "
+                    "explicit connection and credential configuration"
+                )
+            if target.object_store_credential_mode == "static" and (
+                target.object_store_access_key is None or target.object_store_secret_key is None
+            ):
+                raise ValueError(
+                    "cross-backend static provider artifact reconciliation targets "
+                    "require explicit credentials"
+                )
+        process_accepts_vision_execution_inputs = self.service_name == "commercevision" or (
+            self.service_name == "worker" and worker_executes_product_briefs
+        )
+        vision_execution_inputs_configured = (
+            self.alibaba_vision_api_key is not None
+            or self.alibaba_vision_api_key_file is not None
+            or bool(self.alibaba_vision_allowed_image_origins)
+        )
+        if vision_execution_inputs_configured and not process_accepts_vision_execution_inputs:
+            raise ValueError(
+                "Alibaba Vision execution inputs require a ProductBrief-executing process"
+            )
+        if self.vision_adapter == "alibaba":
+            if (
+                self.alibaba_vision_api_key is not None
+                and self.alibaba_vision_api_key_file is not None
+            ):
+                raise ValueError(
+                    "Alibaba Vision API key requires exactly one configured credential source"
+                )
+            if self.alibaba_vision_api_key_file is not None and not (
+                PurePosixPath(self.alibaba_vision_api_key_file).is_absolute()
+                or PureWindowsPath(self.alibaba_vision_api_key_file).is_absolute()
+            ):
+                raise ValueError("Alibaba Vision API key file path must be absolute")
+            if worker_executes_product_briefs:
+                if self.alibaba_vision_api_key is None and self.alibaba_vision_api_key_file is None:
+                    raise ValueError(
+                        "Alibaba Vision API key requires exactly one configured credential source"
+                    )
+                if self.environment == "production" and self.alibaba_vision_api_key_file is None:
+                    raise ValueError("production Alibaba Vision requires a mounted API key file")
+                if not self.alibaba_vision_allowed_image_origins:
+                    raise ValueError("Alibaba Vision requires controlled HTTPS origins")
+                if (
+                    self.alibaba_vision_end_to_end_timeout_seconds
+                    <= self.alibaba_vision_connect_timeout_seconds
+                    + self.alibaba_vision_read_timeout_seconds
+                ):
+                    raise ValueError(
+                        "Alibaba Vision deadline must exceed its transport timeout budget"
+                    )
+                if (
+                    self.vision_temporary_reference_lifetime_seconds
+                    <= self.alibaba_vision_end_to_end_timeout_seconds
+                ):
+                    raise ValueError(
+                        "Vision temporary reference lifetime must exceed provider execution"
+                    )
+                if self.workflow_step_lease_seconds < (
+                    self.vision_preflight_budget_seconds
+                    + self.alibaba_vision_end_to_end_timeout_seconds
+                    + self.vision_operation_lease_margin_seconds
+                ):
+                    raise ValueError(
+                        "Alibaba Vision operation lease must cover preflight, provider, "
+                        "and commit budgets"
+                    )
+                if self.worker_stop_grace_period_seconds < (
+                    self.vision_preflight_budget_seconds
+                    + self.alibaba_vision_end_to_end_timeout_seconds
+                    + self.vision_operation_lease_margin_seconds
+                ):
+                    raise ValueError(
+                        "Worker shutdown grace must cover preflight, provider, and cleanup budgets"
+                    )
+            if (
+                self.environment == "production"
+                and _ALIBABA_IMMUTABLE_MODEL_SNAPSHOT.fullmatch(self.alibaba_vision_model_snapshot)
+                is None
+            ):
+                raise ValueError(
+                    "production Alibaba Vision requires a dated immutable model snapshot"
+                )
+            vision_transfer_allowlists = (
+                self.vision_data_transfer_allowed_workspace_ids,
+                self.vision_data_transfer_allowed_retention_classes,
+                self.vision_data_transfer_allowed_providers,
+                self.vision_data_transfer_allowed_endpoint_regions,
+                self.vision_data_transfer_allowed_endpoint_hosts,
+            )
+            if (
+                not self.vision_data_transfer_enabled
+                or any(not allowlist for allowlist in vision_transfer_allowlists)
+                or "alibaba-model-studio" not in self.vision_data_transfer_allowed_providers
+                or self.alibaba_vision_endpoint_region
+                not in self.vision_data_transfer_allowed_endpoint_regions
+                or self.alibaba_vision_endpoint_host
+                not in self.vision_data_transfer_allowed_endpoint_hosts
+            ):
+                raise ValueError(
+                    "Alibaba Vision requires an explicit enabled data transfer "
+                    "policy with exact allowlists"
+                )
+        if (
+            self.environment == "production"
+            and worker_executes_product_briefs
+            and self.vision_adapter != "alibaba"
+        ):
+            raise ValueError("production ProductBrief workers require the Alibaba Vision adapter")
         c2pa_anchors = self.c2pa_trust_anchors_pem
         c2pa_eku = self.c2pa_trust_eku_policy
         if (c2pa_anchors is None) != (c2pa_eku is None):
@@ -850,6 +1237,8 @@ class Settings(BaseSettings):
         if self.environment == "production" and self.worker_requires_asset_validation:
             if OperationKind.ASSET_VALIDATION not in self.worker_required_operation_kinds:
                 raise ValueError("production Asset workers must require ASSET_VALIDATION")
+            if OperationKind.PRODUCT_BRIEF_ANALYSIS not in self.worker_required_operation_kinds:
+                raise ValueError("production Asset workers must require PRODUCT_BRIEF_ANALYSIS")
             if (
                 self.asset_malware_adapter != "clamav"
                 or self.asset_content_safety_adapter != "alibaba"
@@ -893,6 +1282,72 @@ class Settings(BaseSettings):
     def worker_requires_asset_validation(self) -> bool:
         return self.asset_queue_name in self.configured_worker_queues
 
+    @property
+    def worker_readiness_cycle_budget_seconds(self) -> float:
+        mysql_query_budget = WORKER_READINESS_MYSQL_QUERY_TIMEOUT_SECONDS * (
+            2 if self.worker_requires_asset_validation else 1
+        )
+        current_storage_budget = 0.0
+        if self.worker_requires_object_storage:
+            credential_budget = (
+                self.object_store_credential_refresh_timeout_seconds
+                if self.object_store_credential_mode != "static"
+                else 0.0
+            )
+            current_storage_budget = _OBJECT_STORAGE_READINESS_REQUEST_BOUND * (
+                credential_budget
+                + _OBJECT_STORAGE_READINESS_TIMEOUT_PHASE_BOUND
+                * self.object_store_readiness_timeout_seconds
+            )
+
+        historical_storage_budget = 0.0
+        for target in self.provider_artifact_reconciliation_targets:
+            credential_mode = (
+                target.object_store_credential_mode or self.object_store_credential_mode
+            )
+            credential_budget = (
+                (
+                    target.object_store_credential_refresh_timeout_seconds
+                    or self.object_store_credential_refresh_timeout_seconds
+                )
+                if credential_mode != "static"
+                else 0.0
+            )
+            readiness_timeout = (
+                target.object_store_readiness_timeout_seconds
+                or self.object_store_readiness_timeout_seconds
+            )
+            target_budget = _OBJECT_STORAGE_READINESS_REQUEST_BOUND * (
+                credential_budget
+                + _OBJECT_STORAGE_READINESS_TIMEOUT_PHASE_BOUND * readiness_timeout
+            )
+            historical_storage_budget = max(
+                historical_storage_budget,
+                target_budget,
+            )
+
+        malware_scanner_budget = (
+            self.clamav_timeout_seconds
+            if self.worker_requires_asset_validation and self.asset_malware_adapter == "clamav"
+            else 0.0
+        )
+        return (
+            WORKER_READINESS_PROBE_INTERVAL_SECONDS
+            + WORKER_READINESS_BROKER_CONNECT_TIMEOUT_SECONDS
+            + self.mysql_connect_timeout_seconds
+            + mysql_query_budget
+            + current_storage_budget
+            + historical_storage_budget
+            + malware_scanner_budget
+            + WORKER_READINESS_PUBLICATION_MARGIN_SECONDS
+        )
+
+    @property
+    def alibaba_vision_endpoint_host(self) -> str:
+        hostname = urlsplit(self.alibaba_vision_endpoint).hostname
+        assert hostname is not None
+        return validate_canonical_endpoint_host(hostname)
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -918,7 +1373,4 @@ class Settings(BaseSettings):
 def load_settings(service_name: str) -> Settings:
     """Load settings with a service-specific default name."""
 
-    settings = Settings()
-    if settings.service_name == "commercevision":
-        settings.service_name = service_name
-    return settings
+    return Settings(service_name=service_name)

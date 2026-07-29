@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -25,6 +26,11 @@ from commercevision_application import (
     OperationExecutorRegistry,
     OperationReconciliationPolicy,
     OperationRetryPolicy,
+    ProductBriefContinuation,
+    ProductBriefContinuationAuthorityError,
+    ProductBriefContinuationClaim,
+    ProductBriefRecoveryClaim,
+    StaleProductBriefContinuation,
     UploadObjectCleaner,
     build_event_routing_registry,
 )
@@ -39,6 +45,9 @@ from commercevision_contracts.events import (
     ASSET_VALIDATION_REQUESTED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
     OPERATION_RECOVERY_REQUESTED_V1,
+    PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
+    PRODUCT_BRIEF_CONFIRMED_V1,
+    PRODUCT_BRIEF_REQUESTED_V1,
     WORKFLOW_CANCELLED_V1,
     WORKFLOW_FAILED_V1,
     WORKFLOW_HUMAN_INPUT_RECEIVED_V1,
@@ -55,11 +64,25 @@ from commercevision_contracts.events import (
     AssetValidationRequestedPayload,
     EventQueue,
     EventType,
+    ProductBriefAwaitingConfirmationPayload,
+    ProductBriefConfirmedPayload,
+    ProductBriefRequestedPayload,
+    WorkflowResumeRequestedPayload,
+    WorkflowRunRequestedPayload,
 )
 from commercevision_contracts.object_storage import ObjectStorage
-from commercevision_domain import LeaseConflictError, NotFoundError, OperationKind
+from commercevision_domain import (
+    ApprovalType,
+    LeaseConflictError,
+    NotFoundError,
+    OperationKind,
+    StorageLocationClass,
+)
 from commercevision_domain.messaging import OutboxEvent
-from commercevision_object_storage import build_object_storage, close_object_storage
+from commercevision_object_storage import (
+    build_object_storage,
+    close_object_storage,
+)
 from commercevision_persistence import (
     Database,
     MySQLCheckpointSaver,
@@ -77,9 +100,12 @@ from commercevision_tool_runtime import (
 )
 from commercevision_tool_runtime.policy import ToolPolicy
 
+from . import product_brief
 from .asset_cleanup import UploadSessionCleanupExecutor
 from .asset_validation import build_asset_validation_executor
 from .executors import available_builtin_operation_kinds
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -94,6 +120,7 @@ class WorkerRuntime:
     operation_executors: OperationExecutorRegistry
     object_storage: ObjectStorage | None
     resources: tuple[object, ...]
+    lifecycle: DurableNodeLifecycle | None = None
 
     @classmethod
     def build(
@@ -126,6 +153,20 @@ class WorkerRuntime:
             )
             configured_executors[OperationKind.ASSET_VALIDATION] = built_validation.executor
             resources.extend(built_validation.closeables)
+        if (
+            object_storage is not None
+            and settings.asset_queue_name in settings.configured_worker_queues
+            and OperationKind.PRODUCT_BRIEF_ANALYSIS not in configured_executors
+        ):
+            built_product_brief = product_brief.build_product_brief_executor(
+                settings=settings,
+                database=database,
+                storage=object_storage,
+            )
+            configured_executors[OperationKind.PRODUCT_BRIEF_ANALYSIS] = (
+                built_product_brief.executor
+            )
+            resources.extend(built_product_brief.closeables)
         if (
             object_storage is not None
             and settings.maintenance_queue_name in settings.configured_worker_queues
@@ -244,6 +285,7 @@ class WorkerRuntime:
             operation_executors=executor_registry,
             object_storage=object_storage,
             resources=tuple(resources),
+            lifecycle=lifecycle,
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
@@ -309,11 +351,31 @@ class WorkerRuntime:
             contract=ASSET_RIGHTS_EXPIRED_V1,
             handler=runtime._observe_asset_rights_changed,
         )
+        runtime.event_router.register_handler(
+            contract=PRODUCT_BRIEF_REQUESTED_V1,
+            handler=runtime._handle_product_brief_analysis,
+        )
+        runtime.event_router.register_handler(
+            contract=PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
+            handler=runtime._observe_product_brief_state,
+        )
+        runtime.event_router.register_handler(
+            contract=PRODUCT_BRIEF_CONFIRMED_V1,
+            handler=runtime._observe_product_brief_state,
+        )
         return runtime
 
     def operation_executor_readiness(self) -> dict[str, object]:
+        self.assert_local_resources_ready()
         required = frozenset(self.settings.worker_required_operation_kinds)
         missing = self.operation_executors.missing(required)
+        vision_credential = product_brief.validate_product_brief_vision_credential(self.settings)
+        provider_result_storage = "not_required"
+        if self.settings.asset_queue_name in self.settings.configured_worker_queues:
+            if self.object_storage is None:
+                raise RuntimeError("ProductBrief Worker requires provider-result object storage")
+            self.object_storage.assert_ready((StorageLocationClass.PROVIDER_RESULT,))
+            provider_result_storage = "ok"
         return {
             "ready": not missing,
             "required_kinds": sorted(kind.value for kind in required),
@@ -321,7 +383,17 @@ class WorkerRuntime:
                 kind.value for kind in self.operation_executors.registered_kinds
             ),
             "missing_kinds": sorted(kind.value for kind in missing),
+            "vision_credential": vision_credential,
+            "provider_result_storage": provider_result_storage,
         }
+
+    def assert_local_resources_ready(self) -> None:
+        """Fail closed when a process-owned adapter can no longer accept work."""
+
+        for resource in self.resources:
+            assert_ready = getattr(resource, "assert_ready", None)
+            if callable(assert_ready):
+                assert_ready()
 
     def process_event(self, event_id: str) -> str:
         claim, event = self.inbox.claim(event_id)
@@ -356,15 +428,42 @@ class WorkerRuntime:
         return "processed"
 
     def close(self) -> None:
+        failures: list[Exception] = []
+        shared_dependencies_drained = True
         for resource in reversed(self.resources):
             close = getattr(resource, "close", None)
             if callable(close):
-                close()
-        if self.object_storage is not None:
-            close_object_storage(self.object_storage)
-        self.database.dispose()
+                try:
+                    close()
+                except Exception as exc:
+                    failures.append(exc)
+            if getattr(resource, "shutdown_drained", True) is False:
+                shared_dependencies_drained = False
+        if not shared_dependencies_drained:
+            failures.append(
+                RuntimeError(
+                    "Worker shared dependencies remain open until resource lifecycles drain"
+                )
+            )
+        elif self.object_storage is not None:
+            try:
+                close_object_storage(self.object_storage)
+            except Exception as exc:
+                failures.append(exc)
+        if shared_dependencies_drained:
+            try:
+                self.database.dispose()
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise ExceptionGroup("Worker runtime shutdown failed", failures)
 
-    def _load_initial_state(self, workflow_id: str, *, trace_id: str) -> FixtureAgentState:
+    def _load_initial_state(
+        self,
+        workflow_id: str,
+        *,
+        trace_id: str,
+    ) -> FixtureAgentState:
         with SqlAlchemyUnitOfWork(self.database.session_factory) as uow:
             workflow = uow.workflows.get(workflow_id)
             if workflow is None:
@@ -382,21 +481,264 @@ class WorkerRuntime:
             current_node=workflow.current_node or "validate_input",
         )
 
+    @staticmethod
+    def _product_brief_initial_state(
+        *,
+        claim: ProductBriefContinuationClaim,
+        continuation: ProductBriefContinuation,
+        trace_id: str,
+    ) -> FixtureAgentState:
+        node_claim = claim.node_claim
+        authority = claim.generation_authority
+        if (
+            node_claim is None
+            or node_claim.lease_token is None
+            or authority is None
+            or authority.initial_step_id != node_claim.step_id
+        ):
+            raise RuntimeError("current ProductBrief continuation has no durable node claim")
+        fixture_config = claim.input_data.get("fixture_config", claim.input_data)
+        return FixtureAgentState(
+            workflow_id=claim.workflow_id,
+            workflow_version=claim.workflow_version,
+            workspace_id=claim.workspace_id,
+            actor_id=claim.actor_id,
+            trace_id=trace_id,
+            input_ref=f"mysql://workflows/{claim.workflow_id}/input",
+            fixture_config=fixture_config,
+            product_brief_ref=(
+                f"mysql://product-brief-versions/{continuation.product_brief_version_id}"
+            ),
+            product_brief_version_id=continuation.product_brief_version_id,
+            product_brief_version_number=continuation.product_brief_version_number,
+            product_brief_approval_id=continuation.approval_id,
+            product_brief_checkpoint_generation=authority.checkpoint_generation,
+            current_node="retrieve_references",
+            initial_entry_reason="PRODUCT_BRIEF_CONFIRMED",
+            initial_step_id=node_claim.step_id,
+        )
+
+    @staticmethod
+    def _product_brief_recovery_initial_state(
+        *,
+        claim: ProductBriefRecoveryClaim,
+        trace_id: str,
+    ) -> FixtureAgentState:
+        continuation = claim.continuation
+        authority = claim.generation_authority
+        if continuation is None or authority is None:
+            raise RuntimeError("current ProductBrief recovery has no generation authority")
+        node_claim = claim.node_claim
+        if claim.current_node == "retrieve_references" and (
+            node_claim is None
+            or node_claim.lease_token is None
+            or node_claim.step_id != authority.initial_step_id
+        ):
+            raise RuntimeError("ProductBrief retrieval recovery has no live lease authority")
+        fixture_config = claim.input_data.get("fixture_config", claim.input_data)
+        return FixtureAgentState(
+            workflow_id=claim.workflow_id,
+            workflow_version=claim.workflow_version,
+            workspace_id=claim.workspace_id,
+            actor_id=claim.actor_id,
+            trace_id=trace_id,
+            input_ref=f"mysql://workflows/{claim.workflow_id}/input",
+            fixture_config=fixture_config,
+            product_brief_ref=(
+                f"mysql://product-brief-versions/{continuation.product_brief_version_id}"
+            ),
+            product_brief_version_id=continuation.product_brief_version_id,
+            product_brief_version_number=continuation.product_brief_version_number,
+            product_brief_approval_id=continuation.approval_id,
+            product_brief_checkpoint_generation=authority.checkpoint_generation,
+            current_node=claim.current_node,
+            initial_entry_reason="PRODUCT_BRIEF_CONFIRMED",
+            initial_step_id=authority.initial_step_id,
+        )
+
     def _handle_workflow_event(self, event: OutboxEvent) -> None:
-        initial_state = self._load_initial_state(
-            event.envelope.aggregate_id,
-            trace_id=event.envelope.trace_id,
-        )
-        resume_payload = (
-            event.envelope.payload
-            if event.envelope.event_type == EventType.WORKFLOW_RESUME_REQUESTED
-            else None
-        )
+        resume_payload: dict[str, Any] | None = None
+        continuation: ProductBriefContinuation | None = None
+        product_brief_recovery: tuple[str, int] | None = None
+        preclaimed_step_id: str | None = None
+        preclaimed_lease_token: str | None = None
+        payload_workflow_id: str
+        if event.envelope.event_type == EventType.WORKFLOW_RESUME_REQUESTED:
+            validated = WORKFLOW_RESUME_REQUESTED_V1.validate_payload(event.envelope.payload)
+            if not isinstance(validated, WorkflowResumeRequestedPayload):
+                raise TypeError("workflow resume contract returned an unexpected payload")
+            payload_workflow_id = validated.workflow_id
+            if validated.approval_type == ApprovalType.PRODUCT_BRIEF:
+                if validated.decision.value != "APPROVE":
+                    raise EventRoutingError(
+                        "ProductBrief continuation requires an APPROVE decision",
+                        reason="product_brief_approval_mismatch",
+                    )
+                if validated.resulting_workflow_version != event.envelope.aggregate_version:
+                    raise EventRoutingError(
+                        "ProductBrief approval version does not match its Outbox envelope",
+                        reason="product_brief_resume_mismatch",
+                    )
+                continuation = ProductBriefContinuation(
+                    workspace_id=event.workspace_id or "",
+                    product_brief_version_id=validated.subject_id,
+                    product_brief_version_number=validated.subject_version,
+                    approval_id=validated.approval_id,
+                )
+            else:
+                resume_payload = validated.model_dump(mode="json")
+        else:
+            validated_run = WORKFLOW_RUN_REQUESTED_V1.validate_payload(event.envelope.payload)
+            if not isinstance(validated_run, WorkflowRunRequestedPayload):
+                raise TypeError("workflow run contract returned an unexpected payload")
+            payload_workflow_id = validated_run.workflow_id
+            has_version_id = validated_run.product_brief_version_id is not None
+            has_version_number = validated_run.product_brief_version_number is not None
+            if has_version_id != has_version_number:
+                raise EventRoutingError(
+                    "ProductBrief continuation identity is incomplete",
+                    reason="product_brief_version_mismatch",
+                )
+            if has_version_id:
+                is_policy_continuation = (
+                    validated_run.action == "recover"
+                    and validated_run.reason == "product-brief-policy-confirmed"
+                )
+                is_generation_recovery = (
+                    validated_run.action == "recover"
+                    and validated_run.reason in {"expired_step_lease", "stale_workflow"}
+                ) or (
+                    validated_run.action == "retry"
+                    and validated_run.reason == "product-brief-generation-retry"
+                )
+                if not is_policy_continuation and not is_generation_recovery:
+                    raise EventRoutingError(
+                        "ProductBrief continuation provenance is invalid",
+                        reason="product_brief_resume_mismatch",
+                    )
+                if is_generation_recovery:
+                    product_brief_recovery = (
+                        validated_run.product_brief_version_id or "",
+                        validated_run.product_brief_version_number or 0,
+                    )
+                elif (
+                    validated_run.action != "recover"
+                    or validated_run.reason != "product-brief-policy-confirmed"
+                ):
+                    raise EventRoutingError(
+                        "ProductBrief policy continuation provenance is invalid",
+                        reason="product_brief_resume_mismatch",
+                    )
+                else:
+                    continuation = ProductBriefContinuation(
+                        workspace_id=event.workspace_id or "",
+                        product_brief_version_id=validated_run.product_brief_version_id or "",
+                        product_brief_version_number=(
+                            validated_run.product_brief_version_number or 0
+                        ),
+                        approval_id=None,
+                    )
+        if (
+            event.envelope.aggregate_type != "workflow"
+            or event.envelope.aggregate_id != payload_workflow_id
+        ):
+            raise EventRoutingError(
+                "Workflow continuation does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        if product_brief_recovery is not None:
+            if self.lifecycle is None:
+                raise RuntimeError("Worker ProductBrief recovery lifecycle is unavailable")
+            try:
+                recovery_claim = self.lifecycle.recover_product_brief_continuation(
+                    workflow_id=event.envelope.aggregate_id,
+                    expected_workflow_version=event.envelope.aggregate_version,
+                    workspace_id=event.workspace_id or "",
+                    product_brief_version_id=product_brief_recovery[0],
+                    product_brief_version_number=product_brief_recovery[1],
+                    lease_owner=self.worker_id,
+                    trace_id=event.envelope.trace_id,
+                )
+            except ProductBriefContinuationAuthorityError as exc:
+                raise EventRoutingError(str(exc), reason=exc.reason) from exc
+            if recovery_claim.stale_reason is not None:
+                logger.info(
+                    "product_brief_recovery_stale",
+                    extra={
+                        "workflow_id": event.envelope.aggregate_id,
+                        "event_id": event.envelope.event_id,
+                        "stale_reason": recovery_claim.stale_reason,
+                    },
+                )
+                return
+            initial_state = self._product_brief_recovery_initial_state(
+                claim=recovery_claim,
+                trace_id=event.envelope.trace_id,
+            )
+            assert recovery_claim.generation_authority is not None
+            preclaimed_step_id = recovery_claim.generation_authority.initial_step_id
+            preclaimed_lease_token = (
+                recovery_claim.node_claim.lease_token
+                if recovery_claim.node_claim is not None
+                else None
+            )
+        elif continuation is None:
+            initial_state = self._load_initial_state(
+                event.envelope.aggregate_id,
+                trace_id=event.envelope.trace_id,
+            )
+        else:
+            if self.lifecycle is None:
+                raise RuntimeError("Worker ProductBrief continuation lifecycle is unavailable")
+            try:
+                claim = self.lifecycle.claim_product_brief_continuation(
+                    workflow_id=event.envelope.aggregate_id,
+                    expected_workflow_version=event.envelope.aggregate_version,
+                    continuation=continuation,
+                    lease_owner=self.worker_id,
+                    trace_id=event.envelope.trace_id,
+                )
+            except ProductBriefContinuationAuthorityError as exc:
+                raise EventRoutingError(str(exc), reason=exc.reason) from exc
+            if claim.stale_reason is not None:
+                logger.info(
+                    "product_brief_continuation_stale",
+                    extra={
+                        "workflow_id": event.envelope.aggregate_id,
+                        "event_id": event.envelope.event_id,
+                        "stale_reason": claim.stale_reason,
+                    },
+                )
+                return
+            initial_state = self._product_brief_initial_state(
+                claim=claim,
+                continuation=continuation,
+                trace_id=event.envelope.trace_id,
+            )
+            assert claim.generation_authority is not None
+            preclaimed_step_id = claim.generation_authority.initial_step_id
+            preclaimed_lease_token = (
+                claim.node_claim.lease_token if claim.node_claim is not None else None
+            )
         try:
             self.agent.run(
                 initial_state=initial_state,
                 resume_payload=resume_payload,
+                preclaimed_step_id=preclaimed_step_id,
+                preclaimed_lease_token=preclaimed_lease_token,
             )
+        except StaleProductBriefContinuation as exc:
+            logger.info(
+                "product_brief_continuation_stale",
+                extra={
+                    "workflow_id": event.envelope.aggregate_id,
+                    "event_id": event.envelope.event_id,
+                    "stale_reason": exc.reason,
+                },
+            )
+            return
+        except ProductBriefContinuationAuthorityError as exc:
+            raise EventRoutingError(str(exc), reason=exc.reason) from exc
         except Exception:
             if self._workflow_outcome_was_durably_recorded(event):
                 return
@@ -505,6 +847,80 @@ class WorkerRuntime:
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
+
+    def _handle_product_brief_analysis(self, event: OutboxEvent) -> None:
+        payload = PRODUCT_BRIEF_REQUESTED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, ProductBriefRequestedPayload):
+            raise TypeError("ProductBrief request contract returned an unexpected payload")
+        self._validate_product_brief_event_identity(
+            event=event,
+            workspace_id=payload.workspace_id,
+            product_brief_id=payload.product_brief_id,
+            product_brief_version=payload.product_brief_version,
+        )
+        with SqlAlchemyOperationUnitOfWork(self.database.session_factory) as uow:
+            operation = uow.operations.get(
+                payload.operation_id,
+                workspace_id=payload.workspace_id,
+            )
+        if (
+            operation is None
+            or operation.kind is not OperationKind.PRODUCT_BRIEF_ANALYSIS
+            or operation.target_type != "product_brief"
+            or operation.target_id != payload.product_brief_id
+            or operation.target_version != payload.product_brief_version
+        ):
+            raise EventRoutingError(
+                "ProductBrief request does not match its Durable Operation target",
+                reason="aggregate_mismatch",
+            )
+        self.operation_worker.execute(
+            workspace_id=payload.workspace_id,
+            operation_id=payload.operation_id,
+        )
+
+    @staticmethod
+    def _observe_product_brief_state(event: OutboxEvent) -> None:
+        contract = (
+            PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1
+            if event.envelope.event_type == EventType.PRODUCT_BRIEF_AWAITING_CONFIRMATION.value
+            else PRODUCT_BRIEF_CONFIRMED_V1
+        )
+        payload = contract.validate_payload(event.envelope.payload)
+        if not isinstance(
+            payload,
+            ProductBriefAwaitingConfirmationPayload | ProductBriefConfirmedPayload,
+        ):
+            raise TypeError("ProductBrief state contract returned an unexpected payload")
+        WorkerRuntime._validate_product_brief_event_identity(
+            event=event,
+            workspace_id=payload.workspace_id,
+            product_brief_id=payload.product_brief_id,
+            product_brief_version=payload.product_brief_version,
+        )
+
+    @staticmethod
+    def _validate_product_brief_event_identity(
+        *,
+        event: OutboxEvent,
+        workspace_id: str,
+        product_brief_id: str,
+        product_brief_version: int,
+    ) -> None:
+        if event.workspace_id != workspace_id:
+            raise EventRoutingError(
+                "ProductBrief workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "ProductBrief"
+            or event.envelope.aggregate_id != product_brief_id
+            or event.envelope.aggregate_version != product_brief_version
+        ):
+            raise EventRoutingError(
+                "ProductBrief identity does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
 
     @staticmethod
     def _observe_asset_rights_changed(event: OutboxEvent) -> None:

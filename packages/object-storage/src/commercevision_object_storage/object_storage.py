@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -15,6 +17,7 @@ from commercevision_contracts.object_storage import (
     BoundedReadRequest,
     ConditionalCopyRequest,
     ConditionalDeleteRequest,
+    ConditionalWriteRequest,
     DeleteMarkerRequest,
     ObjectReference,
     ObjectStat,
@@ -31,18 +34,22 @@ from commercevision_domain import (
     StorageLocationClass,
     StoragePreconditionError,
     StorageUnavailableError,
+    StorageWriteSafeToRetryError,
     UploadObjectMissingError,
 )
 
 from .credentials import create_oss_credentials_provider
 from .object_storage_common import (
     READ_CHUNK_BYTES,
+    close_resources_best_effort,
     decode_version_cursor,
     encode_version_cursor,
     metadata_matches,
+    normalize_server_side_encryption,
     seconds_until,
     select_storage_locations,
     validated_response_version,
+    written_object_matches,
 )
 from .object_storage_oss import OssObjectStorage
 from .readiness import ObjectStorageReadinessError
@@ -120,7 +127,7 @@ class MinioObjectStorage:
         readiness_config = Config(
             connect_timeout=readiness_timeout,
             read_timeout=readiness_timeout,
-            retries={"max_attempts": 1, "mode": "standard"},
+            retries={"total_max_attempts": 1, "mode": "standard"},
             s3={
                 "addressing_style": "path" if force_path_style else "virtual",
                 "payload_signing_enabled": True,
@@ -152,14 +159,10 @@ class MinioObjectStorage:
             list(executor.map(self._assert_bucket_ready, bucket_names))
 
     def close(self) -> None:
-        seen: set[int] = set()
-        for client in (self._client, self._signer, self._readiness_client):
-            if id(client) in seen:
-                continue
-            seen.add(id(client))
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
+        close_resources_best_effort(
+            (self._client, self._signer, self._readiness_client),
+            message="object storage client shutdown failed",
+        )
 
     def presign_put(self, request: PresignPutRequest) -> PresignedRequest:
         bucket = self._bucket(request.reference.location)
@@ -230,6 +233,9 @@ class MinioObjectStorage:
                 str(key).lower(): str(value) for key, value in response.get("Metadata", {}).items()
             },
             last_modified=response.get("LastModified"),
+            server_side_encryption=normalize_server_side_encryption(
+                response.get("ServerSideEncryption")
+            ),
         )
 
     @contextmanager
@@ -329,6 +335,145 @@ class MinioObjectStorage:
             raise StoragePreconditionError("copied object did not match the expected facts")
         return copied
 
+    def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat:
+        try:
+            existing = self._stat_if_present(request.reference)
+        except StorageUnavailableError as exc:
+            raise StorageWriteSafeToRetryError(
+                "object storage became unavailable before conditional write"
+            ) from exc
+        metadata = {**request.metadata, "sha256": request.expected_sha256}
+        require_encryption = self._require_encryption or request.require_encryption
+        if existing is not None:
+            if not written_object_matches(
+                existing,
+                expected_length=len(request.payload),
+                expected_sha256=request.expected_sha256,
+                expected_content_type=request.content_type,
+                expected_metadata=metadata,
+                require_encryption=require_encryption,
+            ):
+                raise StoragePreconditionError(
+                    "write destination already contains another object "
+                    "or lacks required server-side encryption"
+                )
+            return existing
+        digest = hashlib.sha256(request.payload).hexdigest()
+        if digest != request.expected_sha256:
+            raise ObjectMismatchError("conditional write payload SHA-256 does not match")
+        params: dict[str, object] = {
+            "Bucket": self._bucket(request.reference.location),
+            "Key": request.reference.key,
+            "Body": request.payload,
+            "ContentType": request.content_type,
+            "ContentLength": len(request.payload),
+            "ChecksumSHA256": base64.b64encode(hashlib.sha256(request.payload).digest()).decode(
+                "ascii"
+            ),
+            "IfNoneMatch": "*",
+            "Metadata": metadata,
+        }
+        if require_encryption:
+            params["ServerSideEncryption"] = "AES256"
+        try:
+            response = self._client.put_object(**params)
+        except (BotoCoreError, ClientError) as exc:
+            try:
+                _raise_s3_error(exc)
+            except StoragePreconditionError as conflict:
+                existing = self._stat_if_present(request.reference)
+                if existing is not None and written_object_matches(
+                    existing,
+                    expected_length=len(request.payload),
+                    expected_sha256=request.expected_sha256,
+                    expected_content_type=request.content_type,
+                    expected_metadata=metadata,
+                    require_encryption=require_encryption,
+                ):
+                    return existing
+                raise conflict
+        version_id = validated_response_version(
+            request.reference,
+            response.get("VersionId"),
+        )
+        if version_id is None:
+            raise StoragePreconditionError(
+                "versioned write did not return an exact provider version"
+            )
+        exact_reference = request.reference.model_copy(update={"version_id": version_id})
+        cleanup_etag = "*"
+        try:
+            response_etag = response.get("ETag")
+            if isinstance(response_etag, str) and response_etag:
+                cleanup_etag = response_etag
+            written = self.stat(exact_reference)
+            if not written_object_matches(
+                written,
+                expected_length=len(request.payload),
+                expected_sha256=request.expected_sha256,
+                expected_content_type=request.content_type,
+                expected_metadata=metadata,
+                require_encryption=require_encryption,
+            ):
+                raise StoragePreconditionError(
+                    "written object did not match expected facts or encryption requirement"
+                )
+        except Exception as exc:
+            self._cleanup_failed_write(
+                reference=exact_reference,
+                expected_etag=cleanup_etag,
+            )
+            if isinstance(
+                exc,
+                (
+                    StoragePreconditionError,
+                    StorageUnavailableError,
+                    UploadObjectMissingError,
+                ),
+            ):
+                raise
+            raise StoragePreconditionError("written object verification failed") from exc
+        return written
+
+    def _cleanup_failed_write(
+        self,
+        *,
+        reference: ObjectReference,
+        expected_etag: str,
+    ) -> None:
+        if reference.version_id is None:
+            raise StoragePreconditionError("failed write exact-version cleanup could not be proven")
+        params: dict[str, object] = {
+            "Bucket": self._bucket(reference.location),
+            "Key": reference.key,
+            "VersionId": reference.version_id,
+            "IfMatch": expected_etag,
+        }
+        try:
+            self._client.delete_object(**params)
+        except (BotoCoreError, ClientError) as exc:
+            try:
+                _raise_s3_error(exc)
+            except UploadObjectMissingError:
+                pass
+            except (StoragePreconditionError, StorageUnavailableError) as cleanup_exc:
+                raise StoragePreconditionError(
+                    "failed write exact-version cleanup could not be proven"
+                ) from cleanup_exc
+        except Exception as exc:
+            raise StoragePreconditionError(
+                "failed write exact-version cleanup could not be proven"
+            ) from exc
+        try:
+            self.stat(reference)
+        except UploadObjectMissingError:
+            return
+        except Exception as exc:
+            raise StoragePreconditionError(
+                "failed write exact-version cleanup could not be proven"
+            ) from exc
+        raise StoragePreconditionError("failed write exact version remains readable")
+
     def delete_if_match(self, request: ConditionalDeleteRequest) -> bool:
         try:
             current = self.stat(request.reference)
@@ -427,14 +572,20 @@ class MinioObjectStorage:
         return True
 
     def temporary_read(self, request: TemporaryReadRequest) -> PresignedRequest:
+        current = self.stat(request.reference)
+        if request.expected_etag is not None and current.etag != request.expected_etag:
+            raise StoragePreconditionError("temporary read ETag does not match")
+        if (
+            request.expected_sha256 is not None
+            and current.metadata.get("sha256") != request.expected_sha256
+        ):
+            raise StoragePreconditionError("temporary read content identity does not match")
         params: dict[str, object] = {
-            "Bucket": self._bucket(request.reference.location),
-            "Key": request.reference.key,
+            "Bucket": self._bucket(current.reference.location),
+            "Key": current.reference.key,
         }
-        if request.reference.version_id is not None:
-            params["VersionId"] = request.reference.version_id
-        if request.expected_etag is not None:
-            params["IfMatch"] = request.expected_etag
+        if current.reference.version_id is not None:
+            params["VersionId"] = current.reference.version_id
         try:
             url = self._signer.generate_presigned_url(
                 "get_object",
@@ -444,11 +595,10 @@ class MinioObjectStorage:
             )
         except (BotoCoreError, ClientError, ValueError) as exc:
             _raise_s3_error(exc)
-        headers = {"If-Match": request.expected_etag} if request.expected_etag else {}
         return PresignedRequest(
             method="GET",
             url=url,
-            required_headers=headers,
+            required_headers={},
             expires_at=request.expires_at,
         )
 
@@ -500,6 +650,9 @@ class MinioObjectStorage:
             raise ObjectStorageReadinessError(
                 f"object storage bucket {bucket} encryption is not configured"
             )
+
+    def configured_bucket(self, location: StorageLocationClass) -> str:
+        return self._bucket(location)
 
     def _bucket(self, location: StorageLocationClass) -> str:
         try:

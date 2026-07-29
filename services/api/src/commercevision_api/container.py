@@ -12,7 +12,11 @@ from commercevision_application import (
     CatalogApplicationService,
     DeadLetterOperatorService,
     OperationApplicationService,
+    ProductBriefApplicationService,
+    ProductBriefPolicy,
+    ProductBriefViewApplicationService,
     ValidationDataTransferPolicy,
+    VisionDataTransferPolicy,
     WorkflowApplicationService,
 )
 from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolicy
@@ -24,12 +28,15 @@ from commercevision_object_storage import (
     build_object_storage,
     close_object_storage,
 )
+from commercevision_observability import ProductBriefTelemetry
 from commercevision_persistence import (
     Database,
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyCatalogUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyOperatorUnitOfWork,
+    SqlAlchemyProductBriefUnitOfWork,
+    SqlAlchemyProductBriefViewQueries,
     SqlAlchemyUnitOfWork,
     create_database,
     is_unit_of_work_active,
@@ -45,6 +52,8 @@ class ApiContainer:
     rights: AssetRightsApplicationService
     catalog: CatalogApplicationService
     operations: OperationApplicationService
+    product_briefs: ProductBriefApplicationService
+    product_brief_views: ProductBriefViewApplicationService
     dead_letters: DeadLetterOperatorService
     workflows: WorkflowApplicationService
     principal_resolver: SignedTrustedPrincipalResolver
@@ -69,6 +78,9 @@ class ApiContainer:
 
         def operator_uow_factory() -> SqlAlchemyOperatorUnitOfWork:
             return SqlAlchemyOperatorUnitOfWork(database.session_factory)
+
+        def product_brief_uow_factory() -> SqlAlchemyProductBriefUnitOfWork:
+            return SqlAlchemyProductBriefUnitOfWork(database.session_factory)
 
         access_policy = PrincipalAccessPolicy()
         current_secret = settings.trusted_principal_current_hmac_secret
@@ -145,6 +157,15 @@ class ApiContainer:
                 execution_max_elapsed=timedelta(
                     seconds=settings.operation_retry_max_elapsed_seconds
                 ),
+            ),
+            product_briefs=ProductBriefApplicationService(
+                uow_factory=product_brief_uow_factory,
+                policy=ProductBriefPolicy.from_settings(settings),
+                transfer_policy=VisionDataTransferPolicy.from_settings(settings),
+                observer=ProductBriefTelemetry(),
+            ),
+            product_brief_views=ProductBriefViewApplicationService(
+                queries=SqlAlchemyProductBriefViewQueries(database.session_factory),
             ),
             dead_letters=DeadLetterOperatorService(
                 uow_factory=operator_uow_factory,

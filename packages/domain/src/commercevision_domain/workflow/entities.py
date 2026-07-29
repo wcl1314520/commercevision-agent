@@ -128,6 +128,11 @@ class Workflow:
         self.version += 1
         self.updated_at = now or utc_now()
 
+    def record_recovery_observation(self, *, observed_at: datetime) -> None:
+        """Advance scanner freshness without invalidating an in-flight business command."""
+        if observed_at > self.updated_at:
+            self.updated_at = observed_at
+
 
 @dataclass(slots=True)
 class WorkflowStep:

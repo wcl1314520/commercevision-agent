@@ -35,10 +35,23 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=20
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: commercevision
+          RABBITMQ_DEFAULT_PASS: commercevision
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     env:
       CV_ENVIRONMENT: ci
       CV_MYSQL_DSN: mysql+pymysql://commercevision:commercevision@127.0.0.1:3306/commercevision
       CV_TEST_MYSQL_DSN: mysql+pymysql://root:root-change-me@127.0.0.1:3306/commercevision_test
+      CV_TEST_RABBITMQ_URL: amqp://commercevision:commercevision@127.0.0.1:5672//
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

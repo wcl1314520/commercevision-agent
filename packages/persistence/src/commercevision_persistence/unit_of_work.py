@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import TracebackType
 
+from sqlalchemy import literal_column, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import enter_unit_of_work, exit_unit_of_work
 from .integrity import classify_database_error, flush_with_integrity_classification
+from .product_briefs import ProductBriefRepository
 from .repositories import (
     ApprovalRepository,
     AttemptRepository,
@@ -41,7 +44,19 @@ class SqlAlchemyUnitOfWork:
         self.inbox = InboxRepository(self.session)
         self.dead_letters = DeadLetterRepository(self.session)
         self.audit = AuditRepository(self.session)
+        product_brief_repository = ProductBriefRepository(self.session)
+        self.product_briefs = product_brief_repository
+        self.product_brief_confirmations = product_brief_repository
+        self.product_brief_lineage = product_brief_repository
         return self
+
+    def database_now(self) -> datetime:
+        if self.session is None:
+            raise RuntimeError("unit of work is not active")
+        value = self.session.scalar(select(literal_column("UTC_TIMESTAMP(6)")))
+        if not isinstance(value, datetime):
+            raise RuntimeError("database did not return a timestamp")
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
     def commit(self) -> None:
         if self.session is None:

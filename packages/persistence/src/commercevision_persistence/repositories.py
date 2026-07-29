@@ -54,12 +54,18 @@ from .models import (
     AuditEventModel,
     DeadLetterMessageModel,
     DeadLetterReplayModel,
+    DurableOperationModel,
     IdempotencyKeyModel,
     InboxMessageModel,
     OutboxEventModel,
     WorkflowAttemptModel,
     WorkflowModel,
     WorkflowStepModel,
+)
+from .product_brief_models import (
+    ProductBriefModel,
+    ProductBriefProviderAttemptModel,
+    ProductBriefProviderCallModel,
 )
 
 
@@ -192,6 +198,53 @@ class WorkflowRepository:
             self._loaded_versions[model.id] = model.version
         return [workflow_from_model(model) for model in models]
 
+    def has_irreversible_provider_submission(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+    ) -> bool:
+        matching_call = (
+            select(ProductBriefProviderCallModel.id)
+            .where(
+                ProductBriefProviderCallModel.workspace_id
+                == ProductBriefProviderAttemptModel.workspace_id,
+                ProductBriefProviderCallModel.operation_id
+                == ProductBriefProviderAttemptModel.operation_id,
+                ProductBriefProviderCallModel.operation_attempt
+                == ProductBriefProviderAttemptModel.operation_attempt,
+                ProductBriefProviderCallModel.call_index
+                == ProductBriefProviderAttemptModel.call_index,
+            )
+            .exists()
+        )
+        statement = (
+            select(ProductBriefProviderAttemptModel.id)
+            .join(
+                ProductBriefModel,
+                and_(
+                    ProductBriefModel.workspace_id == ProductBriefProviderAttemptModel.workspace_id,
+                    ProductBriefModel.id == ProductBriefProviderAttemptModel.product_brief_id,
+                ),
+            )
+            .join(
+                DurableOperationModel,
+                and_(
+                    DurableOperationModel.workspace_id
+                    == ProductBriefProviderAttemptModel.workspace_id,
+                    DurableOperationModel.id == ProductBriefProviderAttemptModel.operation_id,
+                ),
+            )
+            .where(
+                ProductBriefProviderAttemptModel.workspace_id == workspace_id,
+                ProductBriefModel.workflow_id == workflow_id,
+                DurableOperationModel.state == "RUNNING",
+                ~matching_call,
+            )
+            .limit(1)
+        )
+        return self.session.scalar(statement) is not None
+
 
 class StepRepository:
     def __init__(self, session: Session) -> None:
@@ -313,11 +366,41 @@ class AttemptRepository:
         self.session.add(attempt_to_model(attempt))
         self._loaded_versions[attempt.id] = attempt.version
 
+    def get(self, attempt_id: str, *, for_update: bool = False) -> WorkflowAttempt | None:
+        statement = select(WorkflowAttemptModel).where(WorkflowAttemptModel.id == attempt_id)
+        if for_update:
+            statement = statement.with_for_update()
+        model = self.session.scalar(statement)
+        if model is None:
+            return None
+        self._loaded_versions[model.id] = model.version
+        return attempt_from_model(model)
+
     def get_by_idempotency(
         self, idempotency_key: str, *, for_update: bool = False
     ) -> WorkflowAttempt | None:
         statement = select(WorkflowAttemptModel).where(
             WorkflowAttemptModel.idempotency_key == idempotency_key
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        model = self.session.scalar(statement)
+        if model is None:
+            return None
+        self._loaded_versions[model.id] = model.version
+        return attempt_from_model(model)
+
+    def get_latest_for_step(
+        self, step_id: str, *, for_update: bool = False
+    ) -> WorkflowAttempt | None:
+        statement = (
+            select(WorkflowAttemptModel)
+            .where(WorkflowAttemptModel.step_id == step_id)
+            .order_by(
+                WorkflowAttemptModel.attempt_number.desc(),
+                WorkflowAttemptModel.created_at.desc(),
+            )
+            .limit(1)
         )
         if for_update:
             statement = statement.with_for_update()

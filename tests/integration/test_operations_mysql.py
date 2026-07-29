@@ -32,6 +32,8 @@ from commercevision_domain import (
     ReconciliationOutcome,
     RetryExhaustedError,
     RetryNotReadyError,
+    StorageBackend,
+    StorageLocationClass,
 )
 from commercevision_domain.messaging import (
     DeadLetterMessage,
@@ -45,6 +47,7 @@ from commercevision_persistence import (
     SqlAlchemyUnitOfWork,
     is_unit_of_work_active,
 )
+from commercevision_worker import runtime as worker_runtime_module
 from commercevision_worker.runtime import WorkerRuntime
 
 pytestmark = pytest.mark.integration
@@ -559,7 +562,29 @@ def test_worker_executes_every_durable_operation_kind(
 
 def test_worker_runtime_registers_required_operation_executor(
     integration_settings,
+    monkeypatch,
 ) -> None:
+    class ReadyStorage:
+        backend = StorageBackend.MINIO
+
+        @staticmethod
+        def configured_bucket(location: StorageLocationClass) -> str:
+            assert location is StorageLocationClass.PROVIDER_RESULT
+            return "provider-results"
+
+        @staticmethod
+        def assert_ready(locations) -> None:
+            assert tuple(locations) == (StorageLocationClass.PROVIDER_RESULT,)
+
+        @staticmethod
+        def close() -> None:
+            pass
+
+    monkeypatch.setattr(
+        worker_runtime_module,
+        "build_object_storage",
+        lambda _settings: ReadyStorage(),
+    )
     settings = integration_settings.model_copy(
         update={"worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION]}
     )
@@ -573,8 +598,14 @@ def test_worker_runtime_registers_required_operation_executor(
         assert runtime.operation_executor_readiness() == {
             "ready": True,
             "required_kinds": ["ASSET_VALIDATION"],
-            "registered_kinds": ["ASSET_DELETION", "ASSET_VALIDATION"],
+            "registered_kinds": [
+                "ASSET_DELETION",
+                "ASSET_VALIDATION",
+                "PRODUCT_BRIEF_ANALYSIS",
+            ],
             "missing_kinds": [],
+            "vision_credential": "not_required",
+            "provider_result_storage": "ok",
         }
     finally:
         runtime.close()

@@ -23,7 +23,13 @@ WORKFLOW_TRANSITIONS: Mapping[WorkflowStatus, frozenset[WorkflowStatus]] = {
         {WorkflowStatus.RETRIEVING, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}
     ),
     WorkflowStatus.RETRIEVING: frozenset(
-        {WorkflowStatus.PLANNING, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}
+        {
+            WorkflowStatus.UNDERSTANDING,
+            WorkflowStatus.AWAITING_PRODUCT_CONFIRMATION,
+            WorkflowStatus.PLANNING,
+            WorkflowStatus.FAILED,
+            WorkflowStatus.CANCELLED,
+        }
     ),
     WorkflowStatus.PLANNING: frozenset(
         {WorkflowStatus.AWAITING_PLAN_APPROVAL, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}

@@ -1,6 +1,21 @@
+import type { OperationState } from "./generated/catalog-api";
+
 const INITIAL_POLL_DELAY_MS = 1_000;
 const MAXIMUM_POLL_DELAY_MS = 10_000;
 const MAXIMUM_AUTOMATIC_POLL_REQUESTS = 24;
+const PRODUCT_BRIEF_OPERATION_POLL_TERMINAL_STATES =
+  new Set<OperationState>([
+    "WAITING_HUMAN",
+    "SUCCEEDED",
+    "FAILED",
+    "CANCELLED",
+  ]);
+
+export function isProductBriefOperationPollTerminal(
+  state: OperationState,
+): boolean {
+  return PRODUCT_BRIEF_OPERATION_POLL_TERMINAL_STATES.has(state);
+}
 
 export function operationPollDelayMs(
   completedRequests: number,

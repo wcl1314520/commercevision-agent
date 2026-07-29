@@ -266,6 +266,62 @@ class OperationApplicationService:
             uow.commit()
         return operation
 
+    def wait_for_human(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        lease_token: str,
+        output_ref: str | None,
+        provider_request_id: str | None = None,
+        expected_execution_version: int | None = None,
+        expected_attempt_count: int | None = None,
+        now: datetime | None = None,
+    ) -> DurableOperation:
+        waiting_at = now or datetime.now(UTC)
+        with self._uow_factory() as uow:
+            operation = self._get_for_update(uow, workspace_id, operation_id)
+            if self._retain_late_execution_identity(
+                uow,
+                operation,
+                provider_request_id=provider_request_id,
+                expected_execution_version=expected_execution_version,
+                expected_attempt_count=expected_attempt_count,
+                now=waiting_at,
+            ):
+                return operation
+            operation.wait_for_human(
+                lease_token=lease_token,
+                output_ref=output_ref,
+                provider_request_id=provider_request_id,
+                expected_execution_version=expected_execution_version,
+                expected_attempt_count=expected_attempt_count,
+                now=waiting_at,
+            )
+            uow.operations.save(operation)
+            uow.commit()
+        return operation
+
+    def complete_human_wait(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        output_ref: str | None,
+        now: datetime | None = None,
+    ) -> DurableOperation:
+        completed_at = now or datetime.now(UTC)
+        with self._uow_factory() as uow:
+            operation = self._get_for_update(uow, workspace_id, operation_id)
+            if operation.state != OperationState.SUCCEEDED:
+                operation.complete_human_wait(
+                    output_ref=output_ref,
+                    now=completed_at,
+                )
+                uow.operations.save(operation)
+                uow.commit()
+        return operation
+
     def fail(
         self,
         *,
@@ -306,6 +362,33 @@ class OperationApplicationService:
                 claim_token=lease_token,
                 completed_at=failed_at,
             )
+            uow.commit()
+        return operation
+
+    def wait_for_human_after_reconciliation(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        lease_token: str,
+        output_ref: str | None,
+        provider_request_id: str | None = None,
+        expected_reconciliation_version: int | None = None,
+        expected_reconciliation_attempt_count: int | None = None,
+        now: datetime | None = None,
+    ) -> DurableOperation:
+        waiting_at = now or datetime.now(UTC)
+        with self._uow_factory() as uow:
+            operation = self._get_for_update(uow, workspace_id, operation_id)
+            operation.wait_for_human_after_reconciliation(
+                lease_token=lease_token,
+                output_ref=output_ref,
+                provider_request_id=provider_request_id,
+                expected_reconciliation_version=expected_reconciliation_version,
+                expected_reconciliation_attempt_count=(expected_reconciliation_attempt_count),
+                now=waiting_at,
+            )
+            uow.operations.save(operation)
             uow.commit()
         return operation
 
@@ -1299,6 +1382,7 @@ class OperationExecutionRequest:
     provider_request_id: str | None
     attempt_count: int
     idempotency_key: str
+    lease_expires_at: datetime | None = None
 
     @classmethod
     def from_operation(
@@ -1317,6 +1401,7 @@ class OperationExecutionRequest:
             provider_request_id=operation.provider_request_id,
             attempt_count=operation.attempt_count,
             idempotency_key=f"durable-operation:{operation.id}",
+            lease_expires_at=operation.lease_expires_at,
         )
 
 
@@ -1361,6 +1446,18 @@ class OperationExecutionFailure(Exception):
         super().__init__(error.message)
         self.error = error
         self.retry_at = retry_at
+
+
+class OperationHumanWaitRequired(Exception):
+    def __init__(
+        self,
+        *,
+        output_ref: str | None,
+        provider_request_id: str | None = None,
+    ) -> None:
+        super().__init__("operation requires human input")
+        self.output_ref = output_ref
+        self.provider_request_id = normalize_provider_request_id(provider_request_id)
 
 
 class OperationReconciliationRequired(Exception):
@@ -1730,6 +1827,17 @@ class DurableOperationWorker:
     ) -> DurableOperation:
         try:
             result = self._execution.execute(OperationExecutionRequest.from_operation(running))
+        except OperationHumanWaitRequired as exc:
+            return self._operations.wait_for_human(
+                workspace_id=running.workspace_id,
+                operation_id=running.id,
+                lease_token=lease_token,
+                output_ref=exc.output_ref,
+                provider_request_id=exc.provider_request_id,
+                expected_execution_version=running.version,
+                expected_attempt_count=running.attempt_count,
+                now=self._clock(),
+            )
         except OperationReconciliationRequired as exc:
             required_at = self._clock()
             return self._operations.require_reconciliation(
@@ -1939,6 +2047,17 @@ class DurableOperationWorker:
     ) -> DurableOperation:
         try:
             result = self._execution.reconcile(OperationExecutionRequest.from_operation(current))
+        except OperationHumanWaitRequired as exc:
+            return self._operations.wait_for_human_after_reconciliation(
+                workspace_id=current.workspace_id,
+                operation_id=current.id,
+                lease_token=lease_token,
+                output_ref=exc.output_ref,
+                provider_request_id=exc.provider_request_id,
+                expected_reconciliation_version=current.version,
+                expected_reconciliation_attempt_count=(current.reconciliation_attempt_count),
+                now=self._clock(),
+            )
         except UnknownOperationOutcome as exc:
             return self._defer_reconciliation(
                 operation=current,

@@ -6,10 +6,61 @@ import math
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 
-from commercevision_contracts.object_storage import ObjectReference, ObjectStat
+from commercevision_contracts.object_storage import (
+    ObjectReference,
+    ObjectStat,
+    ServerSideEncryptionState,
+)
 from commercevision_domain import StorageLocationClass, StoragePreconditionError
 
 READ_CHUNK_BYTES = 64 * 1024
+_ENCRYPTED_SERVER_SIDE_ENCRYPTION_STATES = frozenset(
+    {
+        ServerSideEncryptionState.AES256,
+        ServerSideEncryptionState.KMS,
+        ServerSideEncryptionState.KMS_DSSE,
+        ServerSideEncryptionState.SM4,
+    }
+)
+
+
+def close_resources_best_effort(
+    resources: Iterable[object | None],
+    *,
+    message: str,
+) -> None:
+    failures: list[Exception] = []
+    closed_resource_ids: set[int] = set()
+    for resource in resources:
+        if resource is None or id(resource) in closed_resource_ids:
+            continue
+        closed_resource_ids.add(id(resource))
+        close = getattr(resource, "close", None)
+        if not callable(close):
+            continue
+        try:
+            close()
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise ExceptionGroup(message, failures)
+
+
+def normalize_server_side_encryption(value: object) -> ServerSideEncryptionState:
+    if not isinstance(value, str) or not value.strip():
+        return ServerSideEncryptionState.NONE
+    normalized = value.strip().lower()
+    return {
+        "aes256": ServerSideEncryptionState.AES256,
+        "aws:kms": ServerSideEncryptionState.KMS,
+        "kms": ServerSideEncryptionState.KMS,
+        "aws:kms:dsse": ServerSideEncryptionState.KMS_DSSE,
+        "sm4": ServerSideEncryptionState.SM4,
+    }.get(normalized, ServerSideEncryptionState.UNKNOWN)
+
+
+def has_verified_server_side_encryption(stat: ObjectStat) -> bool:
+    return stat.server_side_encryption in _ENCRYPTED_SERVER_SIDE_ENCRYPTION_STATES
 
 
 def encode_version_cursor(
@@ -110,4 +161,23 @@ def metadata_matches(
         and stat.metadata.get("upload-session-id") == expected_upload_session_id
         and stat.content_type is not None
         and stat.content_type.partition(";")[0].strip().lower() == expected_content_type.lower()
+    )
+
+
+def written_object_matches(
+    stat: ObjectStat,
+    *,
+    expected_length: int,
+    expected_sha256: str,
+    expected_content_type: str,
+    expected_metadata: Mapping[str, str],
+    require_encryption: bool = False,
+) -> bool:
+    return (
+        stat.content_length == expected_length
+        and stat.metadata.get("sha256") == expected_sha256
+        and all(stat.metadata.get(name) == value for name, value in expected_metadata.items())
+        and stat.content_type is not None
+        and stat.content_type.partition(";")[0].strip().lower() == expected_content_type.lower()
+        and (not require_encryption or has_verified_server_side_encryption(stat))
     )

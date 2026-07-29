@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
 from commercevision_contracts import ErrorResponse
 from commercevision_domain import (
     AdminRequiredError,
@@ -18,6 +15,9 @@ from commercevision_domain import (
     LeaseConflictError,
     NotFoundError,
     ObjectMismatchError,
+    ProductBriefConfirmationRequiredError,
+    ProductBriefRetentionExpiredError,
+    ProviderPolicyDeniedError,
     ReferenceConstraintError,
     RightsDeniedError,
     StorageUnavailableError,
@@ -27,6 +27,7 @@ from commercevision_domain import (
     UploadBusyError,
     UploadExpiredError,
     UploadObjectMissingError,
+    WorkflowCancellationRefusedError,
     WorkspaceAccessError,
 )
 from commercevision_domain.workflow.errors import (
@@ -34,21 +35,27 @@ from commercevision_domain.workflow.errors import (
     IdempotencyConflictError,
     RetryNotReadyError,
 )
+from commercevision_observability import get_logger
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+logger = get_logger("commercevision.api.errors")
 
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, BaseException):
-        return str(value)
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, tuple):
-        return [_json_safe(item) for item in value]
-    return value
+
+def _public_validation_errors(
+    exc: RequestValidationError,
+) -> list[dict[str, str | list[str | int]]]:
+    return [
+        {
+            "type": str(error.get("type", "validation_error")),
+            "loc": [
+                item if isinstance(item, (str, int)) else str(item) for item in error.get("loc", ())
+            ],
+            "msg": str(error.get("msg", "request value is invalid")),
+        }
+        for error in exc.errors()
+    ]
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -62,7 +69,7 @@ def install_error_handlers(app: FastAPI) -> None:
             message="request validation failed",
             category="validation",
             retryable=False,
-            details={"errors": _json_safe(exc.errors())},
+            details={"errors": _public_validation_errors(exc)},
             request_id=request.state.request_id,
             trace_id=request.state.trace_id,
         )
@@ -95,6 +102,36 @@ def install_error_handlers(app: FastAPI) -> None:
         )
         return JSONResponse(status_code=400, content=payload.model_dump(mode="json"))
 
+    @app.exception_handler(Exception)
+    async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", "unavailable")
+        trace_id = getattr(request.state, "trace_id", request_id)
+        logger.error(
+            "unhandled_api_exception",
+            request_id=request_id,
+            trace_id=trace_id,
+            method=request.method,
+            path=request.url.path,
+            exception_type=type(exc).__name__,
+        )
+        payload = ErrorResponse(
+            code="INTERNAL_ERROR",
+            message="an unexpected internal error occurred",
+            category="internal",
+            retryable=False,
+            details={},
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+        return JSONResponse(
+            status_code=500,
+            content=payload.model_dump(mode="json"),
+            headers={
+                "X-Request-Id": request_id,
+                "X-Trace-Id": trace_id,
+            },
+        )
+
 
 def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
     if isinstance(exc, AuthenticationError):
@@ -105,6 +142,8 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
         return 403, "ADMIN_REQUIRED", "authorization", False
     if isinstance(exc, RightsDeniedError):
         return 403, "RIGHTS_DENIED", "authorization", False
+    if isinstance(exc, ProviderPolicyDeniedError):
+        return 403, "PROVIDER_POLICY_DENIED", "authorization", False
     if isinstance(exc, AuthorizationError):
         return 403, "AUTHORIZATION_DENIED", "authorization", False
     if isinstance(exc, NotFoundError):
@@ -137,6 +176,12 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
         return 409, "VERSION_CONFLICT", "conflict", False
     if isinstance(exc, InvalidTransitionError):
         return 409, "INVALID_TRANSITION", "state", False
+    if isinstance(exc, ProductBriefConfirmationRequiredError):
+        return 409, "PRODUCT_BRIEF_CONFIRMATION_REQUIRED", "state", False
+    if isinstance(exc, ProductBriefRetentionExpiredError):
+        return 410, "PRODUCT_BRIEF_RETENTION_EXPIRED", "state", False
+    if isinstance(exc, WorkflowCancellationRefusedError):
+        return 409, "WORKFLOW_CANCELLATION_REFUSED", "state", False
     if isinstance(exc, (LeaseConflictError, RetryNotReadyError)):
         return 409, "EXECUTION_BUSY", "transient", True
     return 422, "DOMAIN_ERROR", "domain", False

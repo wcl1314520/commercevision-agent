@@ -12,8 +12,15 @@ from commercevision_application import (
     WorkflowApplicationService,
 )
 from commercevision_application import execution as execution_module
+from commercevision_application import reliability as reliability_module
 from commercevision_contracts.workflow import WorkflowCreateRequest
-from commercevision_domain import StepType, WorkflowStatus
+from commercevision_domain import (
+    AttemptStatus,
+    StepStatus,
+    StepType,
+    WorkflowStatus,
+    new_uuid7,
+)
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 from commercevision_domain.workflow.errors import RetryNotReadyError
 from commercevision_persistence import SqlAlchemyUnitOfWork
@@ -229,6 +236,69 @@ def test_step_retry_is_ready_at_the_exact_microsecond(
     assert retry_claim.lease_token is not None
 
 
+def test_permanent_node_failure_atomically_settles_exact_attempt(
+    integration_database,
+) -> None:
+    service = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    workflow = service.create(
+        request=WorkflowCreateRequest(input_data={}),
+        workspace_id="integration-exact-attempt-failure",
+        actor_id="user",
+        idempotency_key="exact-attempt-failure-create-0001",
+        trace_id="exact-attempt-failure",
+    )
+    lifecycle = DurableNodeLifecycle(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory),
+        lease_duration=timedelta(seconds=30),
+    )
+    claim = lifecycle.begin_node(
+        workflow_id=workflow.id,
+        expected_workflow_version=workflow.version,
+        step_key="exact-attempt-failure",
+        step_type=StepType.VALIDATE_INPUT,
+        running_state=WorkflowStatus.INGESTING,
+        node_name="exact-attempt-failure",
+        lease_owner="worker-a",
+        trace_id="exact-attempt-failure",
+    )
+    assert claim.lease_token is not None
+    attempt = lifecycle.begin_attempt(
+        workflow_id=workflow.id,
+        step_id=claim.step_id,
+        idempotency_key="exact-attempt-failure-tool-call",
+        request_data={"input": "immutable"},
+        lease_token=claim.lease_token,
+    )
+
+    lifecycle.fail_node(
+        workflow_id=workflow.id,
+        step_id=claim.step_id,
+        attempt_id=attempt.attempt_id,
+        lease_token=claim.lease_token,
+        trace_id="exact-attempt-failure",
+        error=RuntimeError("permanent provider failure"),
+        retryable=False,
+        retry_delay=timedelta(seconds=1),
+    )
+
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        stored_attempt = uow.attempts.get(attempt.attempt_id)
+        stored_step = uow.steps.get(claim.step_id)
+        stored_workflow = uow.workflows.get(workflow.id)
+
+    assert stored_attempt is not None
+    assert stored_attempt.status == AttemptStatus.PERMANENT_FAILED
+    assert stored_attempt.completed_at is not None
+    assert stored_attempt.error_class == "RuntimeError"
+    assert stored_attempt.error_message == "permanent provider failure"
+    assert stored_step is not None
+    assert stored_step.status == StepStatus.FAILED
+    assert stored_workflow is not None
+    assert stored_workflow.status == WorkflowStatus.FAILED
+
+
 def test_concurrent_outbox_claim_has_no_duplicate_claims(
     integration_database,
 ) -> None:
@@ -341,3 +411,155 @@ def test_recovery_requeues_expired_step(integration_database, integration_settin
     assert recovered_steps == 1
     current = service.get(workflow_id=workflow.id, workspace_id="integration-recovery")
     assert current.steps[0].status.value == "RETRYABLE_FAILED"
+
+
+def test_recovery_uses_mysql_time_instead_of_the_scheduler_clock(
+    integration_database,
+    monkeypatch,
+) -> None:
+    service = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    workflow = service.create(
+        request=WorkflowCreateRequest(input_data={}),
+        workspace_id="integration-recovery-db-clock",
+        actor_id="user",
+        idempotency_key="recovery-db-clock-create-0001",
+        trace_id="recovery-db-clock",
+    )
+    lifecycle = DurableNodeLifecycle(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory),
+        lease_duration=timedelta(minutes=30),
+    )
+    claim = lifecycle.begin_node(
+        workflow_id=workflow.id,
+        expected_workflow_version=workflow.version,
+        step_key="validate_input",
+        step_type=StepType.VALIDATE_INPUT,
+        running_state=WorkflowStatus.INGESTING,
+        node_name="validate_input",
+        lease_owner="live-worker",
+        trace_id="recovery-db-clock",
+    )
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        database_now = uow.database_now()
+
+    class SkewedSchedulerDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            del tz
+            return database_now + timedelta(hours=2)
+
+    monkeypatch.setattr(reliability_module, "datetime", SkewedSchedulerDateTime)
+    recovery = RecoveryService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory),
+        batch_size=20,
+        stale_after=timedelta(days=3650),
+    )
+
+    assert recovery.recover_once() == (0, 0)
+    current = service.get(
+        workflow_id=workflow.id,
+        workspace_id="integration-recovery-db-clock",
+    )
+    assert current.steps[0].id == claim.step_id
+    assert current.steps[0].status.value == "RUNNING"
+
+
+def test_published_recovery_event_advances_scanner_freshness(
+    integration_database,
+) -> None:
+    service = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    workflow = service.create(
+        request=WorkflowCreateRequest(input_data={}),
+        workspace_id="integration-recovery-observation",
+        actor_id="user",
+        idempotency_key="recovery-observation-create-0001",
+        trace_id="recovery-observation",
+    )
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE outbox_events SET published_at = CURRENT_TIMESTAMP(6) "
+                "WHERE aggregate_id = :workflow_id"
+            ),
+            {"workflow_id": workflow.id},
+        )
+        connection.execute(
+            text(
+                "UPDATE workflows "
+                "SET updated_at = CURRENT_TIMESTAMP(6) - INTERVAL 2 DAY "
+                "WHERE id = :workflow_id"
+            ),
+            {"workflow_id": workflow.id},
+        )
+    recovery = RecoveryService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory),
+        batch_size=20,
+        stale_after=timedelta(days=1),
+    )
+
+    assert recovery.recover_once() == (0, 1)
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE outbox_events SET published_at = CURRENT_TIMESTAMP(6) "
+                "WHERE aggregate_id = :workflow_id"
+            ),
+            {"workflow_id": workflow.id},
+        )
+
+    assert recovery.recover_once() == (0, 0)
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        recovery_events = [
+            event
+            for event in uow.outbox.list_for_aggregate(workflow.id)
+            if event.envelope.payload.get("reason") == "stale_workflow"
+        ]
+    assert len(recovery_events) == 1
+
+
+def test_stale_commerce_workflow_before_product_brief_is_observed_without_graph_recovery(
+    integration_database,
+) -> None:
+    service = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    workflow = service.create(
+        request=WorkflowCreateRequest(
+            workflow_type="COMMERCE_IMAGE_GENERATION",
+            input_data={
+                "schema_version": "1.0",
+                "product_id": new_uuid7(),
+            },
+        ),
+        workspace_id="integration-commerce-recovery",
+        actor_id="user",
+        idempotency_key="commerce-recovery-create-0001",
+        trace_id="commerce-recovery-trace",
+    )
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE workflows "
+                "SET updated_at = CURRENT_TIMESTAMP(6) - INTERVAL 2 DAY "
+                "WHERE id = :workflow_id"
+            ),
+            {"workflow_id": workflow.id},
+        )
+
+    recovery = RecoveryService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory),
+        batch_size=20,
+        stale_after=timedelta(days=1),
+    )
+    assert recovery.recover_once() == (0, 1)
+    with SqlAlchemyUnitOfWork(integration_database.session_factory) as uow:
+        recovery_events = [
+            item
+            for item in uow.outbox.list_for_aggregate(workflow.id)
+            if item.envelope.payload.get("reason") == "stale_workflow"
+        ]
+    assert recovery_events == []

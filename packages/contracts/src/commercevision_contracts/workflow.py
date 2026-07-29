@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from commercevision_domain import (
+    TASK_RETENTION_MAX_HOURS,
     ApprovalDecision,
     ApprovalType,
     AttemptStatus,
@@ -14,10 +17,37 @@ from commercevision_domain import (
     StepType,
     WorkflowStatus,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .events import WorkflowResumeRequestedPayload
 from .workspace_identity import WorkspaceId
+
+
+def product_brief_checkpoint_generation(
+    *,
+    workspace_id: str,
+    product_brief_version_id: str,
+    initial_step_id: str,
+    initial_step_lease_token: str,
+) -> str:
+    generation_identity = json.dumps(
+        [
+            workspace_id,
+            product_brief_version_id,
+            initial_step_id,
+            initial_step_lease_token,
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode()
+    return f"product-brief:v1:{hashlib.sha256(generation_identity).hexdigest()}"
+
+
+class CommerceImageGenerationInputV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal["1.0"]
+    product_id: str = Field(min_length=1, max_length=36)
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -26,6 +56,19 @@ class WorkflowCreateRequest(BaseModel):
     workflow_type: str = Field(default="FIXTURE_IMAGE_GENERATION", min_length=1, max_length=64)
     input_data: dict[str, Any] = Field(default_factory=dict)
     retention_hours: int = Field(default=72, ge=1, le=168)
+
+    @model_validator(mode="after")
+    def validate_workflow_input(self) -> WorkflowCreateRequest:
+        if self.workflow_type == "COMMERCE_IMAGE_GENERATION":
+            if self.retention_hours > TASK_RETENTION_MAX_HOURS:
+                raise ValueError(
+                    f"retention_hours must not exceed {TASK_RETENTION_MAX_HOURS} for "
+                    "COMMERCE_IMAGE_GENERATION"
+                )
+            self.input_data = CommerceImageGenerationInputV1.model_validate(
+                self.input_data
+            ).model_dump(mode="json")
+        return self
 
 
 class WorkflowCancelRequest(BaseModel):

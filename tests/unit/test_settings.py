@@ -10,6 +10,495 @@ def test_settings_reject_unknown_environment() -> None:
         Settings(environment="invalid")
 
 
+def test_vision_transfer_and_provider_configuration_deny_by_default() -> None:
+    settings = Settings()
+
+    assert settings.vision_adapter == "deterministic"
+    assert settings.vision_data_transfer_enabled is False
+    assert settings.vision_data_transfer_allowed_workspace_ids == []
+    assert settings.alibaba_vision_api_key is None
+    assert settings.alibaba_vision_api_key_file is None
+    assert settings.alibaba_vision_maximum_output_tokens == 4096
+    assert settings.vision_product_facts_maximum_bytes == 64 * 1024
+    assert settings.vision_product_facts_maximum_depth == 8
+    assert settings.vision_product_facts_maximum_nodes == 1024
+    assert settings.vision_product_facts_maximum_string_bytes == 4096
+    assert "common.sensitive_claims" in settings.product_brief_sensitive_claim_paths
+    assert "beauty.medical_like_claim_flags" in (settings.product_brief_sensitive_claim_paths)
+
+
+def test_vision_provider_budgets_are_explicitly_bounded() -> None:
+    settings = Settings(
+        alibaba_vision_maximum_output_tokens=2048,
+        vision_product_facts_maximum_bytes=32 * 1024,
+        vision_product_facts_maximum_depth=6,
+        vision_product_facts_maximum_nodes=512,
+        vision_product_facts_maximum_string_bytes=2048,
+    )
+
+    assert settings.alibaba_vision_maximum_output_tokens == 2048
+    assert settings.vision_product_facts_maximum_bytes == 32 * 1024
+    assert settings.vision_product_facts_maximum_depth == 6
+    assert settings.vision_product_facts_maximum_nodes == 512
+    assert settings.vision_product_facts_maximum_string_bytes == 2048
+
+    invalid_budgets = (
+        {"alibaba_vision_maximum_output_tokens": 0},
+        {"vision_product_facts_maximum_bytes": 1},
+        {"vision_product_facts_maximum_depth": 0},
+        {"vision_product_facts_maximum_nodes": 0},
+        {"vision_product_facts_maximum_string_bytes": 0},
+        {"alibaba_vision_maximum_response_bytes": 2 * 1024 * 1024},
+    )
+    for invalid in invalid_budgets:
+        with pytest.raises(ValidationError):
+            Settings(**invalid)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["rejected", "throttled", "unknown"],
+)
+def test_deterministic_vision_failure_scenarios_are_configurable(scenario: str) -> None:
+    settings = Settings(deterministic_vision_scenario=scenario)
+
+    assert settings.deterministic_vision_scenario == scenario
+
+
+def test_product_brief_review_policy_rejects_unknown_or_duplicate_field_paths() -> None:
+    with pytest.raises(ValidationError, match="review policy field"):
+        Settings(product_brief_sensitive_claim_paths=["unknown.field"])
+    with pytest.raises(ValidationError, match="unique"):
+        Settings(
+            product_brief_mandatory_review_paths=[
+                "common.identity",
+                "common.identity",
+            ]
+        )
+
+
+def test_alibaba_vision_configuration_requires_complete_controlled_boundary() -> None:
+    with pytest.raises(ValidationError, match="Alibaba Vision API key"):
+        Settings(
+            vision_adapter="alibaba",
+            worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        )
+    with pytest.raises(ValidationError, match="Alibaba Vision API key"):
+        Settings(
+            vision_adapter="alibaba",
+            worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+            alibaba_vision_api_key=" ",
+            alibaba_vision_allowed_image_origins=["https://assets.example.com"],
+            vision_data_transfer_enabled=True,
+            vision_data_transfer_allowed_workspace_ids=["Catalog-A"],
+            vision_data_transfer_allowed_retention_classes=["TASK"],
+            vision_data_transfer_allowed_providers=["alibaba-model-studio"],
+            vision_data_transfer_allowed_endpoint_regions=["cn-beijing"],
+            vision_data_transfer_allowed_endpoint_hosts=["dashscope.aliyuncs.com"],
+        )
+
+    settings = Settings(
+        vision_adapter="alibaba",
+        worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        alibaba_vision_api_key="vision-secret",
+        alibaba_vision_allowed_image_origins=["https://assets.example.com"],
+        vision_data_transfer_enabled=True,
+        vision_data_transfer_allowed_workspace_ids=["Catalog-A"],
+        vision_data_transfer_allowed_retention_classes=["TASK"],
+        vision_data_transfer_allowed_providers=["alibaba-model-studio"],
+        vision_data_transfer_allowed_endpoint_regions=["cn-beijing"],
+        vision_data_transfer_allowed_endpoint_hosts=["dashscope.aliyuncs.com"],
+    )
+
+    assert settings.alibaba_vision_endpoint_host == "dashscope.aliyuncs.com"
+    assert settings.alibaba_vision_allowed_image_origins == ["https://assets.example.com"]
+
+
+def test_alibaba_vision_static_and_mounted_file_credentials_are_exclusive() -> None:
+    boundary = {
+        "vision_adapter": "alibaba",
+        "worker_required_operation_kinds": [OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        "alibaba_vision_allowed_image_origins": ["https://assets.example.com"],
+        "vision_data_transfer_enabled": True,
+        "vision_data_transfer_allowed_workspace_ids": ["Catalog-A"],
+        "vision_data_transfer_allowed_retention_classes": ["TASK"],
+        "vision_data_transfer_allowed_providers": ["alibaba-model-studio"],
+        "vision_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
+        "vision_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+    }
+
+    with pytest.raises(ValidationError, match="exactly one.*credential source"):
+        Settings(
+            **boundary,
+            alibaba_vision_api_key="static-secret",
+            alibaba_vision_api_key_file="/run/secrets/model-studio-api-key",
+        )
+    with pytest.raises(ValidationError, match="absolute"):
+        Settings(
+            **boundary,
+            alibaba_vision_api_key_file="relative/model-studio-api-key",
+        )
+
+    settings = Settings(
+        **boundary,
+        alibaba_vision_api_key_file="/run/secrets/model-studio-api-key",
+        alibaba_vision_api_key_file_max_bytes=256,
+    )
+
+    assert settings.alibaba_vision_api_key is None
+    assert settings.alibaba_vision_api_key_file == "/run/secrets/model-studio-api-key"
+    assert settings.alibaba_vision_api_key_file_max_bytes == 256
+
+
+def test_alibaba_vision_policy_identity_does_not_expose_worker_secret_to_api() -> None:
+    settings = Settings(
+        vision_adapter="alibaba",
+        vision_data_transfer_enabled=True,
+        vision_data_transfer_allowed_workspace_ids=["Catalog-A"],
+        vision_data_transfer_allowed_retention_classes=["TASK"],
+        vision_data_transfer_allowed_providers=["alibaba-model-studio"],
+        vision_data_transfer_allowed_endpoint_regions=["cn-beijing"],
+        vision_data_transfer_allowed_endpoint_hosts=["dashscope.aliyuncs.com"],
+    )
+
+    assert settings.alibaba_vision_api_key is None
+    assert settings.alibaba_vision_allowed_image_origins == []
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "environment_value"),
+    [
+        ("CV_ALIBABA_VISION_API_KEY", "vision-secret"),
+        (
+            "CV_ALIBABA_VISION_API_KEY_FILE",
+            "/run/secrets/model-studio-api-key",
+        ),
+        (
+            "CV_ALIBABA_VISION_ALLOWED_IMAGE_ORIGINS",
+            '["https://assets.example.com"]',
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "service_name",
+    [
+        "api",
+        "control-api",
+        "scheduler",
+        "migration",
+        "mcp-server",
+        "object-storage-init",
+    ],
+)
+def test_load_settings_rejects_vision_execution_inputs_in_non_product_brief_process(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    environment_value: str,
+    service_name: str,
+) -> None:
+    monkeypatch.setenv("CV_SERVICE_NAME", "worker")
+    monkeypatch.setenv(
+        "CV_WORKER_REQUIRED_OPERATION_KINDS",
+        '["PRODUCT_BRIEF_ANALYSIS"]',
+    )
+    monkeypatch.setenv(environment_name, environment_value)
+
+    with pytest.raises(ValidationError, match="ProductBrief-executing process"):
+        load_settings(service_name)
+
+
+def test_load_settings_preserves_product_brief_worker_execution_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CV_SERVICE_NAME", "api")
+    monkeypatch.setenv("CV_VISION_ADAPTER", "alibaba")
+    monkeypatch.setenv(
+        "CV_WORKER_REQUIRED_OPERATION_KINDS",
+        '["PRODUCT_BRIEF_ANALYSIS"]',
+    )
+    monkeypatch.setenv("CV_ALIBABA_VISION_API_KEY", "vision-secret")
+    monkeypatch.setenv(
+        "CV_ALIBABA_VISION_ALLOWED_IMAGE_ORIGINS",
+        '["https://assets.example.com"]',
+    )
+    monkeypatch.setenv("CV_VISION_DATA_TRANSFER_ENABLED", "true")
+    monkeypatch.setenv(
+        "CV_VISION_DATA_TRANSFER_ALLOWED_WORKSPACE_IDS",
+        '["Catalog-A"]',
+    )
+    monkeypatch.setenv(
+        "CV_VISION_DATA_TRANSFER_ALLOWED_RETENTION_CLASSES",
+        '["TASK"]',
+    )
+    monkeypatch.setenv(
+        "CV_VISION_DATA_TRANSFER_ALLOWED_PROVIDERS",
+        '["alibaba-model-studio"]',
+    )
+    monkeypatch.setenv(
+        "CV_VISION_DATA_TRANSFER_ALLOWED_ENDPOINT_REGIONS",
+        '["cn-beijing"]',
+    )
+    monkeypatch.setenv(
+        "CV_VISION_DATA_TRANSFER_ALLOWED_ENDPOINT_HOSTS",
+        '["dashscope.aliyuncs.com"]',
+    )
+
+    settings = load_settings("worker")
+
+    assert settings.service_name == "worker"
+    assert settings.alibaba_vision_api_key is not None
+    assert settings.alibaba_vision_allowed_image_origins == ["https://assets.example.com"]
+
+
+def test_load_settings_rejects_vision_inputs_for_worker_without_product_brief_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CV_ALIBABA_VISION_API_KEY", "vision-secret")
+
+    with pytest.raises(ValidationError, match="ProductBrief-executing process"):
+        load_settings("worker")
+
+
+def test_alibaba_vision_temporary_reference_must_outlive_execution_deadline() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="temporary reference lifetime must exceed provider execution",
+    ):
+        Settings(
+            vision_adapter="alibaba",
+            worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+            alibaba_vision_api_key="vision-secret",
+            alibaba_vision_allowed_image_origins=["https://assets.example.com"],
+            alibaba_vision_connect_timeout_seconds=3,
+            alibaba_vision_read_timeout_seconds=30,
+            alibaba_vision_end_to_end_timeout_seconds=45,
+            vision_temporary_reference_lifetime_seconds=45,
+            vision_data_transfer_enabled=True,
+            vision_data_transfer_allowed_workspace_ids=["Catalog-A"],
+            vision_data_transfer_allowed_retention_classes=["TASK"],
+            vision_data_transfer_allowed_providers=["alibaba-model-studio"],
+            vision_data_transfer_allowed_endpoint_regions=["cn-beijing"],
+            vision_data_transfer_allowed_endpoint_hosts=["dashscope.aliyuncs.com"],
+        )
+
+
+def test_alibaba_vision_operation_lease_covers_preflight_provider_and_commit_budgets() -> None:
+    provider_boundary = {
+        "vision_adapter": "alibaba",
+        "worker_required_operation_kinds": [OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        "alibaba_vision_api_key": "vision-secret",
+        "alibaba_vision_allowed_image_origins": ["https://assets.example.com"],
+        "alibaba_vision_connect_timeout_seconds": 3,
+        "alibaba_vision_read_timeout_seconds": 30,
+        "alibaba_vision_end_to_end_timeout_seconds": 45,
+        "vision_data_transfer_enabled": True,
+        "vision_data_transfer_allowed_workspace_ids": ["Catalog-A"],
+        "vision_data_transfer_allowed_retention_classes": ["TASK"],
+        "vision_data_transfer_allowed_providers": ["alibaba-model-studio"],
+        "vision_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
+        "vision_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="operation lease must cover preflight, provider, and commit budgets",
+    ):
+        Settings(
+            **provider_boundary,
+            workflow_step_lease_seconds=69,
+            vision_preflight_budget_seconds=10,
+            vision_operation_lease_margin_seconds=15,
+        )
+
+    settings = Settings(
+        **provider_boundary,
+        workflow_step_lease_seconds=70,
+        vision_preflight_budget_seconds=10,
+        vision_operation_lease_margin_seconds=15,
+    )
+
+    assert settings.workflow_step_lease_seconds == 70
+
+
+def test_product_brief_worker_shutdown_grace_covers_the_execution_budget() -> None:
+    provider_boundary = {
+        "service_name": "worker",
+        "vision_adapter": "alibaba",
+        "worker_queues": ["commercevision.asset"],
+        "worker_required_operation_kinds": [OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        "alibaba_vision_api_key": "vision-secret",
+        "alibaba_vision_allowed_image_origins": ["https://assets.example.com"],
+        "alibaba_vision_connect_timeout_seconds": 3,
+        "alibaba_vision_read_timeout_seconds": 30,
+        "alibaba_vision_end_to_end_timeout_seconds": 45,
+        "vision_data_transfer_enabled": True,
+        "vision_data_transfer_allowed_workspace_ids": ["Catalog-A"],
+        "vision_data_transfer_allowed_retention_classes": ["TASK"],
+        "vision_data_transfer_allowed_providers": ["alibaba-model-studio"],
+        "vision_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
+        "vision_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+        "vision_preflight_budget_seconds": 10,
+        "vision_operation_lease_margin_seconds": 15,
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="shutdown grace must cover preflight, provider, and cleanup budgets",
+    ):
+        Settings(
+            **provider_boundary,
+            worker_stop_grace_period_seconds=69,
+        )
+
+    settings = Settings(
+        **provider_boundary,
+        worker_stop_grace_period_seconds=70,
+    )
+
+    assert settings.worker_stop_grace_period_seconds == 70
+
+
+def test_provider_artifact_reconciliation_targets_are_explicit_worker_configuration() -> None:
+    target = {
+        "object_store_backend": "oss",
+        "object_store_credential_mode": "ecs_ram_role",
+        "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        "object_store_presign_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+        "object_store_region": "cn-hangzhou",
+        "object_store_provider_result_bucket": "legacy-provider-results",
+        "object_store_force_path_style": False,
+    }
+
+    settings = Settings(
+        service_name="worker",
+        worker_queues=["commercevision.asset"],
+        worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        provider_artifact_reconciliation_targets=[target],
+        worker_readiness_max_age_seconds=67,
+    )
+
+    assert len(settings.provider_artifact_reconciliation_targets) == 1
+    configured = settings.provider_artifact_reconciliation_targets[0]
+    assert configured.object_store_backend == "oss"
+    assert configured.object_store_provider_result_bucket == "legacy-provider-results"
+
+    with pytest.raises(ValidationError, match="exact targets must be unique"):
+        Settings(
+            service_name="worker",
+            worker_queues=["commercevision.asset"],
+            worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+            provider_artifact_reconciliation_targets=[target, target],
+            worker_readiness_max_age_seconds=67,
+        )
+
+    with pytest.raises(ValidationError, match="ProductBrief-executing Worker"):
+        Settings(
+            service_name="api",
+            provider_artifact_reconciliation_targets=[target],
+        )
+
+
+def test_worker_readiness_marker_lease_covers_the_full_remote_probe_cycle() -> None:
+    worker_boundary = {
+        "service_name": "worker",
+        "worker_queues": ["commercevision.asset"],
+        "worker_required_operation_kinds": [OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        "object_store_readiness_timeout_seconds": 2,
+        "mysql_connect_timeout_seconds": 7,
+        "asset_malware_adapter": "clamav",
+        "clamav_timeout_seconds": 11,
+        "provider_artifact_reconciliation_targets": [
+            {
+                "object_store_backend": "oss",
+                "object_store_credential_mode": "ecs_ram_role",
+                "object_store_endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+                "object_store_presign_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+                "object_store_region": "cn-hangzhou",
+                "object_store_provider_result_bucket": "provider-results-legacy",
+                "object_store_force_path_style": False,
+                "object_store_readiness_timeout_seconds": 4,
+                "object_store_credential_refresh_timeout_seconds": 3,
+            }
+        ],
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="readiness marker lease must cover the full remote probe cycle",
+    ):
+        Settings(
+            **worker_boundary,
+            worker_readiness_max_age_seconds=82.99,
+        )
+
+    settings = Settings(
+        **worker_boundary,
+        worker_readiness_max_age_seconds=83,
+    )
+
+    assert settings.worker_readiness_cycle_budget_seconds == 83
+    assert settings.worker_readiness_max_age_seconds == 83
+
+
+def test_production_alibaba_vision_requires_a_dated_immutable_model_snapshot() -> None:
+    production_boundary = {
+        "environment": "production",
+        "worker_queues": ["commercevision.workflow"],
+        "worker_required_operation_kinds": [OperationKind.PRODUCT_BRIEF_ANALYSIS],
+        "object_store_endpoint": "https://minio.internal.example",
+        "object_store_presign_endpoint": "https://assets.example",
+        "object_store_secret_key": "production-object-store-secret",
+        "object_store_require_encryption": True,
+        "vision_adapter": "alibaba",
+        "alibaba_vision_api_key_file": "/run/secrets/model-studio-api-key",
+        "alibaba_vision_model": "qwen3-vl-plus",
+        "alibaba_vision_allowed_image_origins": ["https://assets.example.com"],
+        "vision_data_transfer_enabled": True,
+        "vision_data_transfer_allowed_workspace_ids": ["Catalog-A"],
+        "vision_data_transfer_allowed_retention_classes": ["TASK"],
+        "vision_data_transfer_allowed_providers": ["alibaba-model-studio"],
+        "vision_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
+        "vision_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+    }
+
+    with pytest.raises(ValidationError, match="dated immutable model snapshot"):
+        Settings(
+            **production_boundary,
+            alibaba_vision_model_snapshot="qwen3-vl-plus",
+        )
+
+    settings = Settings(
+        **production_boundary,
+        alibaba_vision_model_snapshot="qwen3-vl-plus-2025-12-19",
+    )
+
+    assert settings.alibaba_vision_model_snapshot == "qwen3-vl-plus-2025-12-19"
+
+
+def test_production_alibaba_vision_rejects_static_only_credentials() -> None:
+    with pytest.raises(ValidationError, match="mounted API key file"):
+        Settings(
+            environment="production",
+            worker_queues=["commercevision.workflow"],
+            worker_required_operation_kinds=[OperationKind.PRODUCT_BRIEF_ANALYSIS],
+            object_store_endpoint="https://minio.internal.example",
+            object_store_presign_endpoint="https://assets.example",
+            object_store_secret_key="production-object-store-secret",
+            object_store_require_encryption=True,
+            vision_adapter="alibaba",
+            alibaba_vision_api_key="vision-secret",
+            alibaba_vision_model="qwen3-vl-plus",
+            alibaba_vision_model_snapshot="qwen3-vl-plus-2025-12-19",
+            alibaba_vision_allowed_image_origins=["https://assets.example.com"],
+            vision_data_transfer_enabled=True,
+            vision_data_transfer_allowed_workspace_ids=["Catalog-A"],
+            vision_data_transfer_allowed_retention_classes=["TASK"],
+            vision_data_transfer_allowed_providers=["alibaba-model-studio"],
+            vision_data_transfer_allowed_endpoint_regions=["cn-beijing"],
+            vision_data_transfer_allowed_endpoint_hosts=["dashscope.aliyuncs.com"],
+        )
+
+
 def test_validation_transfer_workspace_allowlist_preserves_binary_identity() -> None:
     settings = Settings(
         validation_data_transfer_allowed_workspace_ids=["Catalog-A", "catalog-a"],

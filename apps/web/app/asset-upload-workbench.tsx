@@ -8,7 +8,6 @@ import {
   newUploadIdempotencyKey,
   sha256Hex,
 } from "../lib/asset-api";
-import type { DurableOperationResponseV1 } from "../lib/asset-api";
 import type {
   AssetKind,
   AssetResponseV1,
@@ -30,6 +29,7 @@ import {
   operationPollDelayMs,
   shouldContinueOperationPolling,
 } from "../lib/operation-polling";
+import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
 import { useUploadWorkflow } from "../lib/use-upload-workflow";
 import type { PersistedSessionUpload } from "../lib/upload-workflow";
 import { validationPresentation } from "../lib/validation-presentation";
@@ -216,9 +216,11 @@ function terminalSessionMessage(session: UploadSessionResponseV1): string | null
 export function AssetUploadWorkbench({
   productId,
   categoryCode,
+  onSourceReady,
 }: {
   productId: string;
   categoryCode: string;
+  onSourceReady?: (source: ProductBriefSourceSelection | null) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -231,8 +233,6 @@ export function AssetUploadWorkbench({
   );
   const [createdSession, setCreatedSession] =
     useState<UploadSessionCreateResponseV1 | null>(null);
-  const [validationOperation, setValidationOperation] =
-    useState<DurableOperationResponseV1 | null>(null);
   const [validationStatus, setValidationStatus] =
     useState<AssetValidationStatusResponseV1 | null>(null);
   const [validationControlError, setValidationControlError] =
@@ -340,7 +340,6 @@ export function AssetUploadWorkbench({
     setAsset(null);
     setFinalized(null);
     setCreatedSession(null);
-    setValidationOperation(null);
     setValidationStatus(null);
     setValidationControlError(null);
     setProgress(0);
@@ -447,7 +446,6 @@ export function AssetUploadWorkbench({
 
   useEffect(() => {
     const operationId = session?.validation_operation_id;
-    setValidationOperation(null);
     setValidationStatus(null);
     setValidationControlError(null);
     setOperationPollingPaused(false);
@@ -468,26 +466,11 @@ export function AssetUploadWorkbench({
     };
     const poll = async () => {
       try {
-        let operationState: OperationState;
-        try {
-          const projection = await api.getAssetValidation(validationAssetId);
-          if (!active) return;
-          setValidationStatus(projection);
-          setValidationControlError(null);
-          operationState = projection.operation.state;
-        } catch (projectionError) {
-          if (
-            !(projectionError instanceof AssetApiError) ||
-            projectionError.status !== 404
-          ) {
-            throw projectionError;
-          }
-          const operation = await api.getOperation(operationId);
-          if (!active) return;
-          setValidationOperation(operation);
-          setValidationControlError(null);
-          operationState = operation.state;
-        }
+        const projection = await api.getAssetValidation(validationAssetId);
+        if (!active) return;
+        setValidationStatus(projection);
+        setValidationControlError(null);
+        const operationState: OperationState = projection.operation.state;
         completedRequests += 1;
         if (!TERMINAL_OPERATION_STATES.has(operationState)) {
           scheduleNextPoll();
@@ -746,10 +729,34 @@ export function AssetUploadWorkbench({
 
   const operationState =
     validationStatus?.operation.state ??
-    validationOperation?.state ??
     finalized?.validation_operation.state ??
     null;
   const displayAsset = asset ?? finalized?.asset ?? null;
+  useEffect(() => {
+    if (
+      displayAsset?.asset_kind === "IMAGE" &&
+      displayAsset.status === "AVAILABLE" &&
+      displayAsset.product_id === productId &&
+      displayAsset.workflow_id &&
+      displayAsset.current_version_id
+    ) {
+      onSourceReady?.({
+        productId,
+        workflowId: displayAsset.workflow_id,
+        assetVersionId: displayAsset.current_version_id,
+      });
+      return;
+    }
+    onSourceReady?.(null);
+  }, [
+    displayAsset?.asset_kind,
+    displayAsset?.current_version_id,
+    displayAsset?.product_id,
+    displayAsset?.status,
+    displayAsset?.workflow_id,
+    onSourceReady,
+    productId,
+  ]);
   const validationView = validationPresentation(
     validationStatus,
     operationState,

@@ -101,7 +101,11 @@
 - Ticket 04 的 monorepo CI 修复作为独立工程提交 `8c15291` 落地，不改动业务行为。
 - Ticket 05 已完成独立实现、对抗审查、迁移/运行时数据库身份修复和全部本地/远程门禁；业务提交为 `77e5214`，工程修复为 `dbc8161`，验收 CI 为 `30225320445`。
 - Ticket 06 已完成独立实现、对抗审查和全部本地/远程门禁；业务提交为 `2975fcf`，验收 CI 为 `30319058792`。
-- 当前执行 Ticket 07：Vision ProductBrief 与人工确认。
+- Ticket 07 已完成：Vision ProductBrief、原始 Provider Artifact Ledger、Durable HITL、
+  Workflow continuation、Web 工作台、运行态 readiness、迁移与生产 Runbook 均通过红绿 TDD、
+  多轮三路独立终审和全部本地发布门禁。
+- Ticket 07 的单一实现提交必须在远程 GitHub Actions 全绿后才允许进入 Ticket 08；
+  Ticket 08 尚未开始。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending
@@ -178,6 +182,17 @@
 | 2026-07-22 | 临时 schema 审计脚本从包根导入未导出的 `load_settings` | 改从 `commercevision_contracts.config` 导入，或直接使用测试 DSN 构造 Settings |
 | 2026-07-22 | 新增时间精度测试首次 Ruff 检查发现导入顺序和两个无用导入 | 删除无用导入、按 Ruff 规则排序，并改为直接用 `isinstance(..., UTCDateTime)` 枚举 schema contract |
 | 2026-07-22 | 主库迁移后误请求 Scheduler 不存在的 `/health/ready` 得到 404 | 按服务已定义 Contract 使用 `/health/live`；Compose 健康状态和 Scheduler heartbeat 均正常 |
+| 2026-07-28 | 分段审查 Provider 源码时 PowerShell 将变量后的冒号误解析为变量名组成部分 | 命令未改动文件；后续使用格式化字符串输出标题，不重复该命令形式 |
+| 2026-07-28 | 尝试用 `pnpm exec prettier --check` 检查 Ticket 07 Web 文件，但仓库未安装 Prettier | 未改动文件；改用仓库已配置的 ESLint、TypeScript、Vitest 和 Playwright 门禁，不重复不存在的工具 |
+| 2026-07-28 | 清理 ProductBrief Workbench 未使用导入的首个补丁因实际导入顺序与预期上下文不一致而拒绝 | 补丁未写入；读取文件真实开头后按当前内容拆分修改 |
+| 2026-07-28 | Ticket 07 Python 格式门禁发现 3 个文件未满足 Ruff formatter | 只对 `scripts/generate_web_types.py`、`services/api/.../errors.py` 和 `tests/contract/test_product_brief_openapi.py` 执行 Ruff format，再重跑全仓门禁 |
+| 2026-07-28 | Ruff lint 在新增 ProductBrief route 单元测试发现标准库导入顺序错误 | 按 `datetime` 后 `types` 的规范顺序手工修正并重跑 lint |
+| 2026-07-29 | 首次全仓 pytest 在 15 分钟工具上限被终止，期间无测试失败且 Python 持续消耗 CPU | 不以超时冒充通过；确认 Docker 依赖全部 healthy，改用 `pytest -q --durations=20` 和 30 分钟上限完成同一全仓范围并输出慢测证据 |
+| 2026-07-29 | 超时后的并行进程探针因 `Get-Process python` 已无匹配进程而返回非零 | 这证明超时进程已退出；后续用容错的进程查询或直接启动新的单一全量 pytest，不重复该探针 |
+| 2026-07-29 | 30 分钟全仓 pytest 得到 `983 passed / 3 skipped / 1 failed`；旧商品 API 测试仍读取 422 detail 的 `ctx` | 422 安全契约已统一移除 `input` 与 `ctx`，生产实现正确；更新旧公开 HTTP 测试改为断言二者不泄露，再执行聚焦和全量回归 |
+| 2026-07-29 | Compose 重建后手工请求 MCP `/health/ready` 得到 404 | 容器本身为 healthy；读取 Compose/服务实际健康 Contract 后使用正确路径复查，不重复不存在的端点 |
+| 2026-07-29 | 清理已验证 index 快照的 `Remove-Item -Recurse` 被环境策略拦截 | 命令未执行；保留绝对路径等值与 workspace 边界校验，改用 PowerShell 内的 .NET `Directory.Delete`，不跨 shell 传递路径 |
+| 2026-07-29 | .NET 删除 index 快照时遇到 pnpm 依赖中的只读 `eslintrc` 文件，目录只被部分清理 | 仅在已验证快照根内枚举文件并清除只读属性，再由同一 .NET API 完成删除；不触碰仓库或其他 workspace 路径 |
 | 2026-07-22 | 最终文档一致性检查发现 Phase 0 路线图仍使用旧 Runbook 显示名称 | 更新为 `Phase 0-1 Runbook`，链接目标未变化 |
 | 2026-07-22 | 新 PowerShell 会话未刷新 PATH，`gh` 命令不可见 | 使用已验证的绝对路径 `C:\Program Files\GitHub CLI\gh.exe`，后续再统一刷新 PATH |
 | 2026-07-22 | 首次 GitHub CLI 设备授权码因浏览器控件未实际录入字符而无效 | 终止旧 OAuth 等待进程，创建新设备码并使用逐键输入验证页面显示 |
@@ -295,3 +310,65 @@
 | 2026-07-27 | 修复后容器冒烟首次 MinIO PUT 返回 503，而 MinIO readiness 与日志均正常 | 宿主 `httpx` 显式禁用环境代理后同一预签名契约 PUT 返回 200，并完成 Scheduler/RabbitMQ/Celery/ClamAV/Promotion 全链路；不把宿主代理行为归因于业务配置 |
 | 2026-07-27 | Ticket 05 远程 CI `30221101083` 在 MySQL 8.4 创建不可变结果 Trigger 时返回 1419，业务账号无 `SUPER`/Trigger 权限 | 不提升运行时账号权限；新增独立迁移 DSN，使用管理员身份执行 Alembic，并在启动/CI 中把 API、Worker、Scheduler 的账号收敛为精确 DML-only 权限 |
 | 2026-07-27 | 最终全仓 Ruff 检查发现迁移身份单测的两个第三方导入顺序不符合规则 | 只调整测试导入顺序；随后 Ruff format/check 与完整 `760 passed, 3 skipped` 全部通过 |
+| 2026-07-28 | 使用异步 `mysql+aiomysql` DSN 创建同步 SQLAlchemy Engine 触发 `MissingGreenlet` | 只读 schema 探针显式将 driver 改为 `mysql+pymysql`，不修改运行时配置或凭证 |
+| 2026-07-28 | Ticket 07 集成测试库停留在同 revision 的中间 schema，17 项用例统一缺少 Provider 配置快照列 | 确认 8 张 ProductBrief 表全部为 0 行后，对明确的 `commercevision_test` 执行受控 downgrade/upgrade；复跑 18 项全绿 |
+| 2026-07-28 | Provider 提交意图并发取消红灯按预期失败后，测试线程等待 10 秒释放超时 | 这是首轮 TDD 红灯的预期副作用；实现取消围栏后同一测试快速通过，不重复旧行为 |
+| 2026-07-28 | planning-with-files 恢复脚本首次引用了本机不存在的系统 Python 绝对路径 | 未改动工作区；改用仓库锁定的 `uv run python` 成功执行恢复脚本，不重复错误路径 |
+| 2026-07-28 | ProductBrief E2E 检索命令使用 PowerShell 双引号包裹含双引号和 `|` 的正则，Shell 将片段误解析为模块名 | 命令未改动文件；后续使用单引号包裹正则或拆分字面检索，不重复该引号结构 |
+| 2026-07-28 | ProductBrief 专项 Playwright 首轮 15/16，通过浏览器 DOM 发现运行的是旧 `rows="3"` 工作台而非当前 `rows={4}` 源码 | 按既定发布门禁补执行 production build，再运行隔离 E2E；当前源码下 ProductBrief Playwright `16 passed` |
+| 2026-07-28 | OpenAPI 新门禁首次假定内部 Provider `ProductBriefFieldOutput` 会出现在 HTTP components，触发 `KeyError` | 保留 HTTP Response/Revision 组件断言；内部 Provider Output 改由其独立 `model_json_schema()` Contract 验证 |
+| 2026-07-28 | 新增 OpenAPI Contract test 通过后，Ruff 先后检出机械格式与本地包导入顺序 | 只对目标测试执行 `ruff format` 和受控 import auto-fix，再分别运行 format/check，业务断言不变 |
+| 2026-07-28 | 90 项迁移/Operation 回归中 1 项失败：仅要求 Asset Validation 的 Worker 因注册内置 ProductBrief Executor 而强制探测容器内 Provider Result bucket | 按进程实际 required Operation kinds 收窄 ProductBrief 专属 readiness；新增/保留公开 readiness 回归后重跑完整 90 项 |
+| 2026-07-28 | Asset-only readiness 红测试首次在构造 Alibaba Settings 时被缺失出境策略 allowlist 拒绝 | 补齐合法非密策略但继续不配置 API key，使红灯精确命中不应发生的 ProductBrief credential/storage probe |
+| 2026-07-28 | 按 required kind 收窄 readiness 后，既有安全回归证明 Alibaba Asset queue 即使将 ProductBrief 标为 optional 也必须验证挂载凭证 | 撤回收窄方向；保留 queue/capability 依赖保证，改造纯注册测试以注入显式 ReadyStorage，隔离宿主机 DNS |
+| 2026-07-28 | Ticket 07 全仓 Ruff 门禁检出 9 个并行修复文件需机械格式化，并检出 ProductBrief Contract import 顺序 | 仅对列出文件执行 formatter/受控 import auto-fix，再运行全仓 format/check；不改变业务语义 |
+| 2026-07-28 | 全工作树凭证前缀扫描命中 Ticket 07 未修改的既有上传测试假值 | 不输出候选内容；改为扫描固定基线后的新增行和全部 untracked 文件，由远程 Gitleaks 再做最终全仓门禁 |
+| 2026-07-28 | 容器 smoke 首次尝试读取生产 API `/openapi.json`，部署配置按安全策略返回 404，PowerShell 仍继续输出空枚举 | 不把禁用 OpenAPI 误报为路由缺失；改用未认证 ProductBrief 请求的稳定 401 验证路由装载 |
+| 2026-07-28 | 首个未认证 ProductBrief smoke 未提供必填 Workspace header，先命中请求校验并返回 422 | 补齐合法 Workspace scope 但不提供签名 principal，验证认证边界返回稳定 401 |
+| 2026-07-28 | 检查 OpenAPI schema 的 PowerShell `foreach` 结果直接接管道产生空管道解析错误 | 命令未改动文件；先将循环结果赋给变量再输出，成功读取目标 schema |
+| 2026-07-28 | 检索不存在的 `packages/contracts/.../workflows.py` 使组合 `rg` 返回非零 | 已确认实际文件为 `workflow.py`；后续使用仓库 `rg --files`/真实路径，不重复错误文件名 |
+| 2026-07-28 | 第三轮审查修复的 Provider、原子性、Event、422 和 Retention 测试按 TDD 首轮预期失败 | 每项均在公开接缝复现审查故障后实施定向修复，当前对应聚焦套件全部转绿 |
+| 2026-07-29 | 第四轮修复后首次 Web TypeScript 门禁找不到新增 Workflow 状态类型 `WorkflowStatus` | 将该 schema 加入正式生成器导出集合，重新生成 OpenAPI 客户端并重跑 lint、typecheck、unit、proxy、build 与 Playwright，全部通过 |
+| 2026-07-29 | 第四轮修复后的首次全仓 pytest 使用 1 秒工具超时窗口，宿主在约 5 秒后终止命令 | 确认无残留 pytest 进程；改用隐藏后台进程与日志轮询，在不牺牲完整运行窗口的情况下持续报告进度 |
+| 2026-07-29 | Windows 工具宿主在启动命令结束时回收 `Start-Process` 子进程，后台 pytest 只运行到约 7% | 不再依赖脱离式子进程；改用可 yield 的长运行工具单元保持进程所有权，并通过 wait 快照报告进度 |
+| 2026-07-29 | 后台 pytest 的 `uv` 父进程不可见但 Python 子进程继续到 06:30，和 06:10 启动的全量套件并发 `TRUNCATE` 同一测试库，造成两边分别 82/97 个集中集成失败 | 通过持续增长的独立日志时间戳、两组互补失败和无单测/Contract 扩散确认并发污染；等待两进程完全退出、确认测试库无事务后，只保留一个可追踪前台全量进程 |
+| 2026-07-29 | 首失败诊断使用 15 分钟窗口，在未复现任何失败时被工具超时终止 | 不再用短窗口诊断完整套件；最终干净全量使用 33 分钟窗口，超过此前约 23 分钟最慢运行 |
+| 2026-07-29 | 首次高置信凭证扫描把 tracked diff 与 untracked 输出包装成两个嵌套数组，只统计到 2 个元素 | 不采用该结果；改用 PowerShell 数组语句逐行收集并去重，再对实际全部变更文件扫描 |
+| 2026-07-29 | 并行 worker 进度探针中一个 `rg` 暂无匹配并返回 1，导致 `Promise.all` 丢弃其他只读结果 | 未修改文件；改用 `Promise.allSettled` 分别保留 ledger 与 pre-analysis 探针结果 |
+
+## Ticket 07 第十轮后端修复计划
+
+### B10-1：Recovery 权威时间
+**Status:** complete
+- 公开 seam：真实 MySQL `RecoveryService.recover_once`
+- RED：证明 Worker 时钟漂移不能提前回收 MySQL 仍有效的 Lease，也不能错误判定 ProductBrief retention
+- GREEN：同一 UoW 的 `database_now()` 驱动 lease query、retention、stale threshold 与 recovery event 时间
+
+### B10-2：Recovery 调度去重
+**Status:** complete
+- 公开 seam：真实 MySQL Recovery Outbox
+- RED：已发布未消费的 recovery event 不得因 Workflow 仍 stale 而重复生成
+- GREEN：调度 event 时持久化不提升业务版本的 recovery observation/fence
+
+### B10-3：Commerce no-generation 恢复
+**Status:** complete
+- 公开 seam：真实 Worker/Event + MySQL
+- RED：pre-ProductBrief 与 confirmed-before-first-claim 两条路径均不得 retry/DLQ
+- GREEN：恢复事件携带足够的当前权威事实，且 Graph 仍拒绝任意 unsafe initial entry
+
+### B10-4：命令与 Provider 提交绑定
+**Status:** complete
+- 公开 seam：ProductBrief HTTP/Service 与 Durable Provider Executor
+- RED：revise、confirm 和 Provider submission 在 Workflow type/product/retention 漂移后失败关闭
+- GREEN：锁内使用 MySQL 时间统一验证 Workflow/Product/ProductBrief binding 与 retention
+
+### B10-5：Checkpoint 不持久化 Lease Token
+**Status:** complete
+- 公开 seam：Agent Runtime + MySQL/InMemory Checkpointer
+- RED：START、pending writes 和历史 checkpoint 中均不可解码出 live lease token
+- GREEN：preclaim authority 通过运行时私有、非 checkpoint 通道交付；DB-ahead/checkpoint-behind 与 lease-expiry crash recovery 保持可恢复
+
+### B10-6：完整门禁
+**Status:** complete
+- ProductBrief HITL、Reliability MySQL、Agent Graph/Runtime、Contracts
+- Ruff format/check 与基线 diff-check

@@ -31,5 +31,13 @@ class StorageUnavailableError(DomainError):
     pass
 
 
+class StorageWriteSafeToRetryError(StorageUnavailableError):
+    """A conditional object write was proven not to have been attempted."""
+
+
+class StorageWriteOutcomeUnknownError(StorageUnavailableError):
+    """A conditional object write may have committed and needs reconciliation."""
+
+
 class StoragePreconditionError(DomainError):
     pass

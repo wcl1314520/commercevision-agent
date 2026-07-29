@@ -678,6 +678,181 @@ test("shows and recovers from a product detail-load failure", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Hydrating Serum" })).toBeVisible();
 });
 
+test("keeps the newly selected product when an older detail response arrives late", async ({
+  page,
+}) => {
+  const secondProduct = {
+    ...product,
+    id: "019f8a00-0000-7000-8000-000000000099",
+    external_id: "SERUM-002",
+    title: "Second Product",
+  };
+  let signalFirstDetailStarted!: () => void;
+  let releaseFirstDetail!: () => void;
+  const firstDetailStarted = new Promise<void>((resolve) => {
+    signalFirstDetailStarted = resolve;
+  });
+  const firstDetailGate = new Promise<void>((resolve) => {
+    releaseFirstDetail = resolve;
+  });
+
+  await page.route("**/api/v1/products**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    if (path === "/api/v1/products") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [product, secondProduct],
+          next_cursor: null,
+        }),
+      });
+      return;
+    }
+    if (path === `/api/v1/products/${product.id}`) {
+      signalFirstDetailStarted();
+      await firstDetailGate;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(product),
+      });
+      return;
+    }
+    if (path === `/api/v1/products/${secondProduct.id}`) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(secondProduct),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/");
+  await firstDetailStarted;
+  await page.getByRole("button", { name: /Second Product/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Second Product" }),
+  ).toBeVisible();
+
+  releaseFirstDetail();
+
+  await expect(
+    page.getByRole("heading", { name: "Second Product" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Hydrating Serum" }),
+  ).toHaveCount(0);
+});
+
+test("does not prefill Product B from a late Product A source selection", async ({
+  page,
+}) => {
+  const productB = {
+    ...product,
+    id: "019f8a00-0000-7000-8000-000000000099",
+    external_id: "SERUM-002",
+    title: "Second Product",
+  };
+  const availableSourceAsset = {
+    ...quarantinedAsset,
+    status: "AVAILABLE",
+    workflow_id: "019f8a00-0000-7000-8000-000000000098",
+    current_version_id: assetVersion.id,
+  };
+  let signalFinalizeStarted!: () => void;
+  let releaseFinalize!: () => void;
+  const finalizeStarted = new Promise<void>((resolve) => {
+    signalFinalizeStarted = resolve;
+  });
+  const finalizeGate = new Promise<void>((resolve) => {
+    releaseFinalize = resolve;
+  });
+
+  await page.route("**/api/v1/products**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const body =
+      path === `/api/v1/products/${product.id}`
+        ? product
+        : path === `/api/v1/products/${productB.id}`
+          ? productB
+          : { items: [product, productB], next_cursor: null };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+  await page.route("**/api/v1/upload-sessions", async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...uploadSession,
+        upload: {
+          method: "PUT",
+          url: "https://object-storage.example/product-a-late-source",
+          required_headers: {
+            "Content-Type": "image/png",
+            "Content-Length": "68",
+            "x-amz-meta-upload-session-id": uploadSession.id,
+          },
+          maximum_bytes: 68,
+          checksum_algorithm: "SHA-256",
+          expires_at: uploadSession.expires_at,
+        },
+      }),
+    });
+  });
+  await page.route(
+    "https://object-storage.example/product-a-late-source",
+    async (route) => {
+      await route.fulfill({ status: 200, body: "" });
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}:finalize`,
+    async (route) => {
+      signalFinalizeStarted();
+      await finalizeGate;
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...finalizeResponse,
+          upload_session: {
+            ...finalizeResponse.upload_session,
+            product_id: product.id,
+          },
+          asset: availableSourceAsset,
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByLabel("商品图片", { exact: true }).setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: pngBytes,
+  });
+  await page.getByRole("button", { name: "上传并登记" }).click();
+  await finalizeStarted;
+  await page.getByRole("button", { name: /Second Product/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Second Product" }),
+  ).toBeVisible();
+
+  releaseFinalize();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await expect(page.getByLabel("工作流 ID")).toHaveValue("");
+  await expect(page.getByLabel("素材版本 ID")).toHaveValue("");
+});
+
 test("keeps the usable workbench within a desktop viewport", async ({ page }) => {
   await mockReadyCatalog(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1666,14 +1841,14 @@ test("does not retry a terminal upload session after refresh", async ({ page }) 
   expect(finalizeRequests).toBe(0);
 });
 
-test("restores a terminal validation operation from its durable resource", async ({
+test("restores a terminal validation operation from its safe asset projection", async ({
   page,
 }) => {
   await mockReadyCatalog(page);
-  let operationRequests = 0;
-  let releaseOperation: (() => void) | undefined;
-  const operationReleased = new Promise<void>((resolve) => {
-    releaseOperation = resolve;
+  let validationRequests = 0;
+  let releaseValidation: (() => void) | undefined;
+  const validationReleased = new Promise<void>((resolve) => {
+    releaseValidation = resolve;
   });
   await page.addInitScript(
     ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
@@ -1706,21 +1881,27 @@ test("restores a terminal validation operation from its durable resource", async
   await page.route(
     `**/api/v1/assets/${quarantinedAsset.id}/validation`,
     async (route) => {
-      await route.fulfill({ status: 404, body: "" });
-    },
-  );
-  await page.route(
-    `**/api/v1/operations/${durableOperation.id}`,
-    async (route) => {
-      operationRequests += 1;
-      await operationReleased;
+      validationRequests += 1;
+      await validationReleased;
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
-          ...durableOperation,
-          state: "SUCCEEDED",
-          completed_at: "2026-07-24T12:45:05Z",
-          version: 2,
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: "PENDING_RIGHTS",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "SUCCEEDED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: null,
+            failure_category: null,
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [],
         }),
       });
     },
@@ -1731,20 +1912,20 @@ test("restores a terminal validation operation from its durable resource", async
     .locator(".asset-facts > div")
     .filter({ hasText: "校验任务" })
     .locator("dd");
-  await expect.poll(() => operationRequests).toBeGreaterThan(0);
+  await expect.poll(() => validationRequests).toBeGreaterThan(0);
   await expect(operationState).toHaveText("正在读取");
-  releaseOperation?.();
+  releaseValidation?.();
   await expect(operationState).toHaveText("SUCCEEDED");
-  const requestsAtTerminal = operationRequests;
+  const requestsAtTerminal = validationRequests;
   await page.waitForTimeout(1200);
-  expect(operationRequests).toBe(requestsAtTerminal);
+  expect(validationRequests).toBe(requestsAtTerminal);
 });
 
 test("polls a restored retryable validation operation until it is terminal", async ({
   page,
 }) => {
   await mockReadyCatalog(page);
-  let operationRequests = 0;
+  let validationRequests = 0;
   let terminal = false;
   await page.addInitScript(
     ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
@@ -1777,38 +1958,29 @@ test("polls a restored retryable validation operation until it is terminal", asy
   await page.route(
     `**/api/v1/assets/${quarantinedAsset.id}/validation`,
     async (route) => {
-      await route.fulfill({ status: 404, body: "" });
-    },
-  );
-  await page.route(
-    `**/api/v1/operations/${durableOperation.id}`,
-    async (route) => {
-      operationRequests += 1;
+      validationRequests += 1;
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify(
-          terminal
-            ? {
-                ...durableOperation,
-                state: "SUCCEEDED",
-                completed_at: "2026-07-24T12:45:08Z",
-                version: 4,
-              }
-            : {
-                ...durableOperation,
-                state: "RETRYABLE_FAILED",
-                attempt_count: 1,
-                next_attempt_at: "2026-07-24T12:45:07Z",
-                error: {
-                  code: "PROVIDER_TIMEOUT",
-                  category: "transient",
-                  message: "provider timed out",
-                  retryable: true,
-                  provider_request_id: null,
-                },
-                version: 3,
-              },
-        ),
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: terminal ? "PENDING_RIGHTS" : "VALIDATING",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: terminal ? "SUCCEEDED" : "RETRYABLE_FAILED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: terminal
+              ? null
+              : "2026-07-24T12:45:07Z",
+            retryable: !terminal,
+            failure_code: terminal ? null : "PROVIDER_TIMEOUT",
+            failure_category: terminal ? null : "transient",
+            completed_at: terminal ? "2026-07-24T12:45:08Z" : null,
+          },
+          stages: [],
+        }),
       });
     },
   );
@@ -1824,7 +1996,7 @@ test("polls a restored retryable validation operation until it is terminal", asy
   );
   terminal = true;
   await expect(operationState).toHaveText("SUCCEEDED", { timeout: 5000 });
-  expect(operationRequests).toBeGreaterThanOrEqual(2);
+  expect(validationRequests).toBeGreaterThanOrEqual(2);
 });
 
 test("renders normalized validation stages and terminal rejection", async ({

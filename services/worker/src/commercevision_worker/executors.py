@@ -17,7 +17,12 @@ def available_builtin_operation_kinds(settings: Settings) -> frozenset[Operation
     kinds: set[OperationKind] = set()
     queues = settings.configured_worker_queues
     if settings.asset_queue_name in queues:
-        kinds.add(OperationKind.ASSET_VALIDATION)
+        kinds.update(
+            {
+                OperationKind.ASSET_VALIDATION,
+                OperationKind.PRODUCT_BRIEF_ANALYSIS,
+            }
+        )
     if settings.maintenance_queue_name in queues:
         kinds.add(OperationKind.ASSET_DELETION)
     return frozenset(kinds)

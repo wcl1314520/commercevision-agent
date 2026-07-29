@@ -44,6 +44,7 @@
 - [CI/CD 与发布](05-deployment/ci-cd-and-release.md)
 - [Asset Validation Runbook](runbooks/asset-validation.md)
 - [Asset Rights Runbook](runbooks/asset-rights.md)
+- [ProductBrief Vision 与人工确认 Runbook](runbooks/product-brief.md)
 
 ## 06 路线图
 

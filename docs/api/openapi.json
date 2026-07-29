@@ -3763,6 +3763,1349 @@
         }
       }
     },
+    "/api/v1/product-briefs/analysis-workflow-context/{workflow_id}": {
+      "get": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Get Product Brief Analysis Workflow Context",
+        "operationId": "get_product_brief_analysis_workflow_context_api_v1_product_briefs_analysis_workflow_context__workflow_id__get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefWorkflowContextResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs/workflow-context/{workflow_id}": {
+      "get": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Get Product Brief Workflow Context",
+        "operationId": "get_product_brief_workflow_context_api_v1_product_briefs_workflow_context__workflow_id__get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "product_brief_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Brief Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefWorkflowContextResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs/{product_brief_id}/operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Get Product Brief Operation Status",
+        "operationId": "get_product_brief_operation_status_api_v1_product_briefs__product_brief_id__operations__operation_id__get",
+        "parameters": [
+          {
+            "name": "product_brief_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Brief Id"
+            }
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefOperationStatusResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs:analyze": {
+      "post": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Request Product Brief Analysis",
+        "operationId": "request_product_brief_analysis_api_v1_product_briefs_analyze_post",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 256,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductBriefAnalysisRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefAnalysisAcceptedV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs/{product_brief_id}": {
+      "get": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Get Product Brief",
+        "operationId": "get_product_brief_api_v1_product_briefs__product_brief_id__get",
+        "parameters": [
+          {
+            "name": "product_brief_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Brief Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs/{product_brief_id}/versions": {
+      "get": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "List Product Brief Versions",
+        "operationId": "list_product_brief_versions_api_v1_product_briefs__product_brief_id__versions_get",
+        "parameters": [
+          {
+            "name": "product_brief_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Brief Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 2147483647,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefVersionListResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs/{product_brief_id}:revise": {
+      "post": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Revise Product Brief",
+        "operationId": "revise_product_brief_api_v1_product_briefs__product_brief_id__revise_post",
+        "parameters": [
+          {
+            "name": "product_brief_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Brief Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 256,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductBriefRevisionRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/product-briefs/{product_brief_id}:confirm": {
+      "post": {
+        "tags": [
+          "product-briefs"
+        ],
+        "summary": "Confirm Product Brief",
+        "operationId": "confirm_product_brief_api_v1_product_briefs__product_brief_id__confirm_post",
+        "parameters": [
+          {
+            "name": "product_brief_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Brief Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 256,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductBriefConfirmationRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBriefConfirmationResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ProductBrief argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Provider or rights policy denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ProductBrief resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ProductBrief version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "ProductBrief retention expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ProductBrief validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ProductBrief dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/workflows": {
       "post": {
         "tags": [
@@ -5992,6 +7335,1556 @@
           "expires_at"
         ],
         "title": "PresignedUploadV1"
+      },
+      "ProductBriefAnalysisAcceptedV1": {
+        "properties": {
+          "product_brief": {
+            "$ref": "#/components/schemas/ProductBriefResponseV1"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "operation_state": {
+            "type": "string",
+            "title": "Operation State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_brief",
+          "operation_id",
+          "operation_state"
+        ],
+        "title": "ProductBriefAnalysisAcceptedV1"
+      },
+      "ProductBriefAnalysisRequestV1": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Workflow Id"
+          },
+          "product_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Product Id"
+          },
+          "asset_version_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Asset Version Ids"
+          },
+          "expected_workflow_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Workflow Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "product_id",
+          "asset_version_ids",
+          "expected_workflow_version"
+        ],
+        "title": "ProductBriefAnalysisRequestV1"
+      },
+      "ProductBriefCategory": {
+        "type": "string",
+        "enum": [
+          "BEAUTY",
+          "AUTOMOTIVE"
+        ],
+        "title": "ProductBriefCategory"
+      },
+      "ProductBriefCategoryValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "CATEGORY",
+            "title": "Kind"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "code",
+          "label"
+        ],
+        "title": "ProductBriefCategoryValueV1"
+      },
+      "ProductBriefConfirmationRequestV1": {
+        "properties": {
+          "expected_product_brief_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Product Brief Version"
+          },
+          "product_brief_version_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Product Brief Version Id"
+          },
+          "expected_workflow_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Workflow Version"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "comment_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Ref"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_product_brief_version",
+          "product_brief_version_id",
+          "expected_workflow_version"
+        ],
+        "title": "ProductBriefConfirmationRequestV1"
+      },
+      "ProductBriefConfirmationResponseV1": {
+        "properties": {
+          "product_brief": {
+            "$ref": "#/components/schemas/ProductBriefResponseV1"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_status": {
+            "type": "string",
+            "title": "Workflow Status"
+          },
+          "workflow_version": {
+            "type": "integer",
+            "title": "Workflow Version"
+          },
+          "confirmation_id": {
+            "type": "string",
+            "title": "Confirmation Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_brief",
+          "workflow_id",
+          "workflow_status",
+          "workflow_version",
+          "confirmation_id"
+        ],
+        "title": "ProductBriefConfirmationResponseV1"
+      },
+      "ProductBriefDimensionListValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "DIMENSION_LIST",
+            "title": "Kind"
+          },
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/ProductBriefDimensionValueItemV1"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Dimensions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "dimensions"
+        ],
+        "title": "ProductBriefDimensionListValueV1"
+      },
+      "ProductBriefDimensionValueItemV1": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Value"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "raw_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "ProductBriefDimensionValueItemV1"
+      },
+      "ProductBriefEvidenceKind": {
+        "type": "string",
+        "enum": [
+          "IMAGE_REGION",
+          "VISIBLE_TEXT",
+          "PRODUCT_DATA",
+          "HUMAN_NOTE"
+        ],
+        "title": "ProductBriefEvidenceKind"
+      },
+      "ProductBriefEvidenceResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source_asset_version_id": {
+            "type": "string",
+            "title": "Source Asset Version Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProductBriefEvidenceKind"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "excerpt_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "source_asset_version_id",
+          "kind",
+          "reference",
+          "region",
+          "excerpt_sha256"
+        ],
+        "title": "ProductBriefEvidenceResponseV1"
+      },
+      "ProductBriefEvidenceRevisionV1": {
+        "properties": {
+          "source_asset_version_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Source Asset Version Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProductBriefEvidenceKind"
+          },
+          "reference": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reference"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "excerpt_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_asset_version_id",
+          "kind",
+          "reference"
+        ],
+        "title": "ProductBriefEvidenceRevisionV1"
+      },
+      "ProductBriefFieldConflict": {
+        "type": "string",
+        "enum": [
+          "NONE",
+          "CONFLICTING",
+          "RESOLVED"
+        ],
+        "title": "ProductBriefFieldConflict"
+      },
+      "ProductBriefFieldResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefIdentityValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefCategoryValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefTextValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefTextListValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefStatementListValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefFlagListValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefDimensionListValueV1"
+              }
+            ],
+            "title": "Value",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "CATEGORY": "#/components/schemas/ProductBriefCategoryValueV1",
+                "DIMENSION_LIST": "#/components/schemas/ProductBriefDimensionListValueV1",
+                "FLAG_LIST": "#/components/schemas/ProductBriefFlagListValueV1",
+                "IDENTITY": "#/components/schemas/ProductBriefIdentityValueV1",
+                "STATEMENT_LIST": "#/components/schemas/ProductBriefStatementListValueV1",
+                "TEXT": "#/components/schemas/ProductBriefTextValueV1",
+                "TEXT_LIST": "#/components/schemas/ProductBriefTextListValueV1"
+              }
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Confidence"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProductBriefFieldSource"
+          },
+          "conflict": {
+            "$ref": "#/components/schemas/ProductBriefFieldConflict"
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required"
+          },
+          "sensitive": {
+            "type": "boolean",
+            "title": "Sensitive"
+          },
+          "review_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Review Reasons"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ProductBriefEvidenceResponseV1"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "value",
+          "confidence",
+          "source",
+          "conflict",
+          "review_required",
+          "sensitive",
+          "review_reasons",
+          "evidence"
+        ],
+        "title": "ProductBriefFieldResponseV1",
+        "x-commercevision-field-value-kinds": {
+          "automotive.certification_marks": "STATEMENT_LIST",
+          "automotive.compatibility_evidence": "STATEMENT_LIST",
+          "automotive.dimensions_evidence": "DIMENSION_LIST",
+          "automotive.finish": "TEXT",
+          "automotive.installation_evidence": "STATEMENT_LIST",
+          "automotive.material": "TEXT",
+          "automotive.part_type": "TEXT",
+          "automotive.placement": "TEXT",
+          "automotive.safety_critical_claim_flags": "FLAG_LIST",
+          "beauty.cosmetic_form": "TEXT",
+          "beauty.finish": "TEXT",
+          "beauty.ingredient_claim_evidence": "STATEMENT_LIST",
+          "beauty.medical_like_claim_flags": "FLAG_LIST",
+          "beauty.package_type": "TEXT",
+          "beauty.packaging_compliance_notes": "TEXT",
+          "beauty.shade_evidence": "STATEMENT_LIST",
+          "beauty.skin_hair_claim_flags": "FLAG_LIST",
+          "beauty.texture": "TEXT",
+          "common.brand": "TEXT",
+          "common.category": "CATEGORY",
+          "common.colors": "TEXT_LIST",
+          "common.identity": "IDENTITY",
+          "common.material": "TEXT",
+          "common.package_or_part_form": "TEXT",
+          "common.product_type": "TEXT",
+          "common.prohibited_assumptions": "TEXT_LIST",
+          "common.sensitive_claims": "STATEMENT_LIST",
+          "common.source_conflicts": "STATEMENT_LIST",
+          "common.usage_context": "TEXT",
+          "common.visible_text_summary": "TEXT",
+          "common.visual_features": "TEXT_LIST"
+        }
+      },
+      "ProductBriefFieldRevisionV1": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Path"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefIdentityValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefCategoryValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefTextValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefTextListValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefStatementListValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefFlagListValueV1"
+              },
+              {
+                "$ref": "#/components/schemas/ProductBriefDimensionListValueV1"
+              }
+            ],
+            "title": "Value",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "CATEGORY": "#/components/schemas/ProductBriefCategoryValueV1",
+                "DIMENSION_LIST": "#/components/schemas/ProductBriefDimensionListValueV1",
+                "FLAG_LIST": "#/components/schemas/ProductBriefFlagListValueV1",
+                "IDENTITY": "#/components/schemas/ProductBriefIdentityValueV1",
+                "STATEMENT_LIST": "#/components/schemas/ProductBriefStatementListValueV1",
+                "TEXT": "#/components/schemas/ProductBriefTextValueV1",
+                "TEXT_LIST": "#/components/schemas/ProductBriefTextListValueV1"
+              }
+            }
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Confidence",
+            "default": "1"
+          },
+          "conflict": {
+            "$ref": "#/components/schemas/ProductBriefFieldConflict",
+            "default": "RESOLVED"
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "sensitive": {
+            "type": "boolean",
+            "title": "Sensitive"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ProductBriefEvidenceRevisionV1"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "value",
+          "sensitive",
+          "evidence"
+        ],
+        "title": "ProductBriefFieldRevisionV1",
+        "x-commercevision-field-value-kinds": {
+          "automotive.certification_marks": "STATEMENT_LIST",
+          "automotive.compatibility_evidence": "STATEMENT_LIST",
+          "automotive.dimensions_evidence": "DIMENSION_LIST",
+          "automotive.finish": "TEXT",
+          "automotive.installation_evidence": "STATEMENT_LIST",
+          "automotive.material": "TEXT",
+          "automotive.part_type": "TEXT",
+          "automotive.placement": "TEXT",
+          "automotive.safety_critical_claim_flags": "FLAG_LIST",
+          "beauty.cosmetic_form": "TEXT",
+          "beauty.finish": "TEXT",
+          "beauty.ingredient_claim_evidence": "STATEMENT_LIST",
+          "beauty.medical_like_claim_flags": "FLAG_LIST",
+          "beauty.package_type": "TEXT",
+          "beauty.packaging_compliance_notes": "TEXT",
+          "beauty.shade_evidence": "STATEMENT_LIST",
+          "beauty.skin_hair_claim_flags": "FLAG_LIST",
+          "beauty.texture": "TEXT",
+          "common.brand": "TEXT",
+          "common.category": "CATEGORY",
+          "common.colors": "TEXT_LIST",
+          "common.identity": "IDENTITY",
+          "common.material": "TEXT",
+          "common.package_or_part_form": "TEXT",
+          "common.product_type": "TEXT",
+          "common.prohibited_assumptions": "TEXT_LIST",
+          "common.sensitive_claims": "STATEMENT_LIST",
+          "common.source_conflicts": "STATEMENT_LIST",
+          "common.usage_context": "TEXT",
+          "common.visible_text_summary": "TEXT",
+          "common.visual_features": "TEXT_LIST"
+        }
+      },
+      "ProductBriefFieldSource": {
+        "type": "string",
+        "enum": [
+          "MODEL",
+          "HUMAN",
+          "PRODUCT_DATA"
+        ],
+        "title": "ProductBriefFieldSource"
+      },
+      "ProductBriefFlagListValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "FLAG_LIST",
+            "title": "Kind"
+          },
+          "flags": {
+            "items": {
+              "type": "string",
+              "maxLength": 2048,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Flags"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "flags"
+        ],
+        "title": "ProductBriefFlagListValueV1"
+      },
+      "ProductBriefIdentityValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "IDENTITY",
+            "title": "Kind"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Display Name"
+          },
+          "model_number": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Number"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "display_name"
+        ],
+        "title": "ProductBriefIdentityValueV1"
+      },
+      "ProductBriefOperationErrorResponseV1": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "category",
+          "message",
+          "retryable"
+        ],
+        "title": "ProductBriefOperationErrorResponseV1"
+      },
+      "ProductBriefOperationStatusResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Attempt Count"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Attempts"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefOperationErrorResponseV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "attempt_count",
+          "max_attempts",
+          "error",
+          "version"
+        ],
+        "title": "ProductBriefOperationStatusResponseV1"
+      },
+      "ProductBriefProviderCallResponseV1": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "requested_model": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Requested Model"
+          },
+          "resolved_model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Model"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Latency Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "requested_model",
+          "resolved_model",
+          "latency_ms"
+        ],
+        "title": "ProductBriefProviderCallResponseV1"
+      },
+      "ProductBriefResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "product_id": {
+            "type": "string",
+            "title": "Product Id"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProductBriefState"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version Id"
+          },
+          "confirmed_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Version Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "retention_class": {
+            "$ref": "#/components/schemas/RetentionClass"
+          },
+          "retention_deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Deadline"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefVersionResponseV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmed_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefVersionResponseV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "workflow_id",
+          "product_id",
+          "operation_id",
+          "state",
+          "current_version_id",
+          "confirmed_version_id",
+          "version",
+          "retention_class",
+          "retention_deadline",
+          "created_at",
+          "updated_at",
+          "current_version",
+          "confirmed_version"
+        ],
+        "title": "ProductBriefResponseV1"
+      },
+      "ProductBriefRevisionRequestV1": {
+        "properties": {
+          "expected_product_brief_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Product Brief Version"
+          },
+          "base_version_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Base Version Id"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 3,
+            "title": "Reason"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ProductBriefFieldRevisionV1"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_product_brief_version",
+          "base_version_id",
+          "reason",
+          "fields"
+        ],
+        "title": "ProductBriefRevisionRequestV1"
+      },
+      "ProductBriefState": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "AWAITING_CONFIRMATION",
+          "CONFIRMED",
+          "ARCHIVED"
+        ],
+        "title": "ProductBriefState"
+      },
+      "ProductBriefStatementListValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "STATEMENT_LIST",
+            "title": "Kind"
+          },
+          "statements": {
+            "items": {
+              "type": "string",
+              "maxLength": 2048,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Statements"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "statements"
+        ],
+        "title": "ProductBriefStatementListValueV1"
+      },
+      "ProductBriefTextListValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "TEXT_LIST",
+            "title": "Kind"
+          },
+          "items": {
+            "items": {
+              "type": "string",
+              "maxLength": 2048,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "items"
+        ],
+        "title": "ProductBriefTextListValueV1"
+      },
+      "ProductBriefTextValueV1": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "TEXT",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "ProductBriefTextValueV1"
+      },
+      "ProductBriefVersionListResponseV1": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProductBriefVersionSummaryResponseV1"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ProductBriefVersionListResponseV1"
+      },
+      "ProductBriefVersionResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "product_brief_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Product Brief Id"
+          },
+          "version_number": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Version Number"
+          },
+          "supersedes_version_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 36,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Version Id"
+          },
+          "effective_state": {
+            "$ref": "#/components/schemas/ProductBriefState"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ProductBriefCategory"
+          },
+          "common_schema_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Common Schema Version"
+          },
+          "category_schema_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category Schema Version"
+          },
+          "payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Payload Sha256"
+          },
+          "changed_field_paths": {
+            "items": {
+              "type": "string",
+              "maxLength": 160,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Changed Field Paths"
+          },
+          "confirmation_required": {
+            "type": "boolean",
+            "title": "Confirmation Required"
+          },
+          "unresolved_field_count": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Unresolved Field Count"
+          },
+          "review_policy_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Review Policy Version"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProductBriefVersionSource"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "provider_call": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefProviderCallResponseV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actor_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Actor Id"
+          },
+          "revision_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Reason"
+          },
+          "retention_class": {
+            "$ref": "#/components/schemas/RetentionClass"
+          },
+          "retention_deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Deadline"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ProductBriefFieldResponseV1"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "product_brief_id",
+          "version_number",
+          "supersedes_version_id",
+          "effective_state",
+          "category",
+          "common_schema_version",
+          "category_schema_version",
+          "payload_sha256",
+          "changed_field_paths",
+          "confirmation_required",
+          "unresolved_field_count",
+          "review_policy_version",
+          "source",
+          "prompt_version",
+          "provider_call",
+          "actor_id",
+          "revision_reason",
+          "retention_class",
+          "retention_deadline",
+          "created_at",
+          "fields"
+        ],
+        "title": "ProductBriefVersionResponseV1"
+      },
+      "ProductBriefVersionSource": {
+        "type": "string",
+        "enum": [
+          "MODEL",
+          "HUMAN"
+        ],
+        "title": "ProductBriefVersionSource"
+      },
+      "ProductBriefVersionSummaryResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "product_brief_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Product Brief Id"
+          },
+          "version_number": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Version Number"
+          },
+          "supersedes_version_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 36,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Version Id"
+          },
+          "effective_state": {
+            "$ref": "#/components/schemas/ProductBriefState"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ProductBriefCategory"
+          },
+          "common_schema_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Common Schema Version"
+          },
+          "category_schema_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category Schema Version"
+          },
+          "payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Payload Sha256"
+          },
+          "changed_field_paths": {
+            "items": {
+              "type": "string",
+              "maxLength": 160,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Changed Field Paths"
+          },
+          "confirmation_required": {
+            "type": "boolean",
+            "title": "Confirmation Required"
+          },
+          "unresolved_field_count": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Unresolved Field Count"
+          },
+          "review_policy_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Review Policy Version"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProductBriefVersionSource"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "provider_call": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductBriefProviderCallResponseV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actor_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Actor Id"
+          },
+          "revision_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Reason"
+          },
+          "retention_class": {
+            "$ref": "#/components/schemas/RetentionClass"
+          },
+          "retention_deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Deadline"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "product_brief_id",
+          "version_number",
+          "supersedes_version_id",
+          "effective_state",
+          "category",
+          "common_schema_version",
+          "category_schema_version",
+          "payload_sha256",
+          "changed_field_paths",
+          "confirmation_required",
+          "unresolved_field_count",
+          "review_policy_version",
+          "source",
+          "prompt_version",
+          "provider_call",
+          "actor_id",
+          "revision_reason",
+          "retention_class",
+          "retention_deadline",
+          "created_at"
+        ],
+        "title": "ProductBriefVersionSummaryResponseV1"
+      },
+      "ProductBriefWorkflowContextResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkflowStatus"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "retention_deadline": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Retention Deadline"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "version",
+          "retention_deadline"
+        ],
+        "title": "ProductBriefWorkflowContextResponseV1"
       },
       "ProductCreateRequestV1": {
         "properties": {
