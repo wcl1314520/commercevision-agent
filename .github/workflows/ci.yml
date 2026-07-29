@@ -54,7 +54,7 @@ jobs:
       CV_TEST_RABBITMQ_URL: amqp://commercevision:commercevision@127.0.0.1:5672//
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.11.7"
       - run: uv sync --locked --all-packages
