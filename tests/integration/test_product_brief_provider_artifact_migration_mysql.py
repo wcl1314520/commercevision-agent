@@ -751,7 +751,10 @@ def test_provider_artifact_downgrade_fails_before_any_change_for_unrepresentable
 ) -> None:
     config, engine = provider_artifact_migration_database
     _seed_legacy_completed_call(engine)
-    command.upgrade(config, "head")
+    # Exercise the artifact-ledger downgrade at its own revision boundary.
+    # Later migrations use non-transactional DDL and may legitimately remove
+    # their own objects before Alembic reaches this fail-closed guard.
+    command.upgrade(config, "f2a7c9d1e406")
     if incompatibility == "UNREFERENCED_STORED":
         _insert_unrepresentable_artifact(engine, state="STORED")
     elif incompatibility == "LEGACY_MISMATCH":
@@ -764,7 +767,7 @@ def test_provider_artifact_downgrade_fails_before_any_change_for_unrepresentable
         RuntimeError,
         match="provider artifact ledger cannot be represented",
     ):
-        command.downgrade(config, "c8d3e7f1a602")
+        command.downgrade(config, "d9e4f7a2b610")
 
     assert _migration_snapshot(engine) == before
     assert before["triggers"] >= _LEDGER_TRIGGER_NAMES

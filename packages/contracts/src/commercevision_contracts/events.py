@@ -5,14 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
+from unicodedata import category
 
 from commercevision_domain import (
+    UUID_PATTERN,
     ApprovalDecision,
     ApprovalType,
     OperationKind,
     WorkflowStatus,
+    canonicalize_uuid,
 )
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    RootModel,
+    field_validator,
+    model_validator,
+)
 
 from .workspace_identity import WorkspaceId
 
@@ -285,6 +296,23 @@ class AssetDeleteRequestedPayload(CompatibleEventPayload):
     reason: UploadCleanupReason
 
 
+class AssetDeleteCompletedPayload(CompatibleEventPayload):
+    """Foundation Asset tombstone convergence observed by downstream modules."""
+
+    workspace_id: WorkspaceId
+    asset_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_id: str = Field(pattern=UUID_PATTERN)
+    retention_class: Literal["FOUNDATION"]
+    deletion_generation: int = Field(ge=1, strict=True)
+
+    @field_validator("asset_id", "asset_version_id")
+    @classmethod
+    def validate_canonical_ids(cls, value: str) -> str:
+        if canonicalize_uuid(value) != value:
+            raise ValueError("Asset deletion lineage identifiers must be canonical lowercase UUIDs")
+        return value
+
+
 class ProductBriefRequestedPayload(StrictEventPayload):
     workspace_id: WorkspaceId
     product_brief_id: str = Field(min_length=1, max_length=36)
@@ -322,6 +350,30 @@ class ProductBriefConfirmedPayload(StrictEventPayload):
         if (self.confirmation_source == "HUMAN") != (self.confirmation_id is not None):
             raise ValueError("human ProductBrief confirmation requires an append-only identity")
         return self
+
+
+class BrandProfilePublishedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    profile_id: str = Field(pattern=UUID_PATTERN)
+    profile_version_id: str = Field(pattern=UUID_PATTERN)
+    profile_version_number: int = Field(ge=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    member_count: int = Field(ge=0, le=64)
+    published_by: str = Field(min_length=1, max_length=128)
+
+    @field_validator("profile_id", "profile_version_id")
+    @classmethod
+    def validate_canonical_ids(cls, value: str) -> str:
+        if canonicalize_uuid(value) != value:
+            raise ValueError("Brand Profile event identifiers must be canonical lowercase UUIDs")
+        return value
+
+    @field_validator("published_by")
+    @classmethod
+    def validate_published_by(cls, value: str) -> str:
+        if value != value.strip() or any(category(character) == "Cc" for character in value):
+            raise ValueError("published_by must be trimmed and contain no control characters")
+        return value
 
 
 class PendingPhase2Payload(RootModel[dict[str, JsonValue]]):
@@ -471,6 +523,13 @@ ASSET_DELETE_REQUESTED_V1 = EventContract(
     AssetDeleteRequestedPayload,
     EventHandling.COMMAND,
 )
+ASSET_DELETE_COMPLETED_V1 = EventContract(
+    EventType.ASSET_DELETE_COMPLETED,
+    1,
+    EventQueue.MAINTENANCE,
+    AssetDeleteCompletedPayload,
+    EventHandling.OBSERVATION,
+)
 PRODUCT_BRIEF_REQUESTED_V1 = EventContract(
     EventType.PRODUCT_BRIEF_REQUESTED,
     1,
@@ -490,6 +549,13 @@ PRODUCT_BRIEF_CONFIRMED_V1 = EventContract(
     1,
     EventQueue.ASSET,
     ProductBriefConfirmedPayload,
+    EventHandling.OBSERVATION,
+)
+BRAND_PROFILE_PUBLISHED_V1 = EventContract(
+    EventType.BRAND_PROFILE_PUBLISHED,
+    1,
+    EventQueue.ASSET,
+    BrandProfilePublishedPayload,
     EventHandling.OBSERVATION,
 )
 
@@ -514,11 +580,7 @@ PHASE2_EVENT_CONTRACTS = (
     PRODUCT_BRIEF_REQUESTED_V1,
     PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
     PRODUCT_BRIEF_CONFIRMED_V1,
-    _phase2_contract(
-        EventType.BRAND_PROFILE_PUBLISHED,
-        EventQueue.ASSET,
-        EventHandling.OBSERVATION,
-    ),
+    BRAND_PROFILE_PUBLISHED_V1,
     _phase2_contract(
         EventType.ASSET_INDEX_REQUESTED,
         EventQueue.INDEX,
@@ -550,11 +612,7 @@ PHASE2_EVENT_CONTRACTS = (
         EventHandling.OBSERVATION,
     ),
     ASSET_DELETE_REQUESTED_V1,
-    _phase2_contract(
-        EventType.ASSET_DELETE_COMPLETED,
-        EventQueue.MAINTENANCE,
-        EventHandling.OBSERVATION,
-    ),
+    ASSET_DELETE_COMPLETED_V1,
     _phase2_contract(
         EventType.RECONCILIATION_REQUESTED,
         EventQueue.MAINTENANCE,

@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import test from "node:test";
 
 import { GET as GET_WORKSPACE_CAPABILITIES } from "../app/api/web-capabilities/route.ts";
-import { GET, POST } from "../app/api/v1/[...path]/route.ts";
+import { GET, POST, PUT } from "../app/api/v1/[...path]/route.ts";
 
 const TRUSTED_KEY_ID = "web-gateway-test";
 const TRUSTED_SECRET = "web-gateway-test-secret-at-least-32-characters";
@@ -13,6 +13,8 @@ const SAFE_READ_PRODUCT_BRIEF_ID =
 const SAFE_READ_URL =
   `http://web.local/api/v1/product-briefs/${SAFE_READ_PRODUCT_BRIEF_ID}`;
 const SAFE_READ_PATH = ["product-briefs", SAFE_READ_PRODUCT_BRIEF_ID];
+const BRAND_PROFILE_ID =
+  "019f8a00-0000-7000-8000-000000000041";
 
 process.env.CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID = TRUSTED_KEY_ID;
 process.env.CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET = TRUSTED_SECRET;
@@ -51,6 +53,109 @@ function verifyTrustedPrincipal(
   assert.ok(Number.isSafeInteger(claims.issued_at));
   assert.ok(claims.issued_at >= issuedAfter);
   assert.ok(claims.issued_at <= Math.floor(Date.now() / 1000));
+}
+
+function maximumBrandProfileDraft() {
+  const suffix = (index) => index.toString(36).padStart(2, "0");
+  return {
+    rules: Array.from({ length: 64 }, (_, index) => ({
+      code: `r${"x".repeat(125)}${suffix(index)}`,
+      scope: "VISUAL",
+      instruction: `${"😀".repeat(1022)}${suffix(index)}`,
+    })),
+    approved_colors: Array.from({ length: 32 }, (_, index) => ({
+      name: `${"😀".repeat(62)}${suffix(index)}`,
+      value: "#FFFFFFFF",
+    })),
+    required_marks: Array.from(
+      { length: 64 },
+      (_, index) => `${"😀".repeat(510)}${suffix(index)}`,
+    ),
+    prohibited_elements: Array.from(
+      { length: 64 },
+      (_, index) => `${"😀".repeat(510)}${suffix(index)}`,
+    ),
+    tone_constraints: Array.from(
+      { length: 64 },
+      (_, index) => `${"😀".repeat(510)}${suffix(index)}`,
+    ),
+    copy_constraints: Array.from(
+      { length: 64 },
+      (_, index) => `${"😀".repeat(510)}${suffix(index)}`,
+    ),
+    purpose: `p${"x".repeat(127)}`,
+    provider: `p${"x".repeat(127)}`,
+    requires_derivative: true,
+    selected_assets: Array.from({ length: 64 }, (_, index) => ({
+      asset_version_id:
+        `019f8a00-0000-7000-8000-${index
+          .toString(16)
+          .padStart(12, "0")}`,
+      role: "REFERENCE",
+    })),
+  };
+}
+
+function maximumBrandProfile(index) {
+  const suffix = index.toString(36).padStart(2, "0");
+  return {
+    id:
+      `019f8a00-0000-7000-8000-${index
+        .toString(16)
+        .padStart(12, "0")}`,
+    workspace_id: `w${"x".repeat(127)}`,
+    brand: "😀".repeat(128),
+    profile_key: `p${"x".repeat(125)}${suffix}`,
+    state: "DRAFT",
+    draft: maximumBrandProfileDraft(),
+    current_version_id: null,
+    current_version_number: 0,
+    version: 1,
+    stale_at: null,
+    created_by: "😀".repeat(128),
+    created_at: "2026-07-30T08:00:00Z",
+    updated_by: "😀".repeat(128),
+    updated_at: "2026-07-30T08:00:00Z",
+  };
+}
+
+function maximumBrandProfileVersion(index) {
+  const draft = maximumBrandProfileDraft();
+  return {
+    id:
+      `019f8a00-0000-7000-8001-${index
+        .toString(16)
+        .padStart(12, "0")}`,
+    workspace_id: `w${"x".repeat(127)}`,
+    profile_id: BRAND_PROFILE_ID,
+    version_number: index,
+    draft,
+    content_sha256: "a".repeat(64),
+    published_by: "😀".repeat(128),
+    published_at: "2026-07-30T08:00:00Z",
+    members: draft.selected_assets.map((selection, ordinal) => ({
+      ordinal,
+      asset_id:
+        `019f8a00-0000-7000-8002-${ordinal
+          .toString(16)
+          .padStart(12, "0")}`,
+      asset_version_id: selection.asset_version_id,
+      role: selection.role,
+      published_rights_record_id:
+        `019f8a00-0000-7000-8003-${ordinal
+          .toString(16)
+          .padStart(12, "0")}`,
+      published_rights_record_version: Number.MAX_SAFE_INTEGER,
+      currently_usable: true,
+      current_reason_code: "AUTHORIZED",
+      current_rights_record_id:
+        `019f8a00-0000-7000-8003-${ordinal
+          .toString(16)
+          .padStart(12, "0")}`,
+      current_rights_record_version: Number.MAX_SAFE_INTEGER,
+      decided_at: "2026-07-30T08:00:00Z",
+    })),
+  };
 }
 
 test("reports administrator UI capability from the same gateway authority boundary", async (context) => {
@@ -381,6 +486,14 @@ test("only exact ProductBrief and safe status paths cross the HTTP proxy seam", 
   };
   const cases = [
     {
+      handler: GET,
+      method: "GET",
+      path: ["brand-profiles"],
+      url: "http://web.local/api/v1/brand-profiles?brand=Northstar+Labs&limit=2",
+      upstream:
+        "http://api:8000/api/v1/brand-profiles?brand=Northstar+Labs&limit=2",
+    },
+    {
       handler: POST,
       method: "POST",
       path: ["product-briefs:analyze"],
@@ -486,6 +599,231 @@ test("only exact ProductBrief and safe status paths cross the HTTP proxy seam", 
   assert.equal(deniedInternalWorkflow.status, 404);
   assert.equal(deniedInternalOperation.status, 404);
   assert.equal(upstreamRequests.length, cases.length);
+});
+
+test("only exact Brand Profile command and immutable history paths cross the HTTP proxy seam", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const upstreamRequests = [];
+  globalThis.fetch = async (input, init) => {
+    upstreamRequests.push({
+      method: init.method,
+      url: String(input),
+    });
+    return Response.json({ ok: true });
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const profileId = "019f8a00-0000-7000-8000-000000000041";
+  const headers = {
+    "content-type": "application/json",
+    "idempotency-key": "brand-profile-proxy-test",
+    "x-workspace-id": "workspace-1",
+  };
+  const cases = [
+    {
+      handler: POST,
+      method: "POST",
+      path: ["brand-profiles"],
+      url: "http://web.local/api/v1/brand-profiles",
+      upstream: "http://api:8000/api/v1/brand-profiles",
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["brand-profiles", profileId],
+      url: `http://web.local/api/v1/brand-profiles/${profileId}`,
+      upstream: `http://api:8000/api/v1/brand-profiles/${profileId}`,
+    },
+    {
+      handler: PUT,
+      method: "PUT",
+      path: ["brand-profiles", profileId, "draft"],
+      url: `http://web.local/api/v1/brand-profiles/${profileId}/draft`,
+      upstream: `http://api:8000/api/v1/brand-profiles/${profileId}/draft`,
+    },
+    {
+      handler: POST,
+      method: "POST",
+      path: ["brand-profiles", `${profileId}:validate`],
+      url: `http://web.local/api/v1/brand-profiles/${profileId}:validate`,
+      upstream: `http://api:8000/api/v1/brand-profiles/${profileId}:validate`,
+    },
+    {
+      handler: POST,
+      method: "POST",
+      path: ["brand-profiles", `${profileId}:publish`],
+      url: `http://web.local/api/v1/brand-profiles/${profileId}:publish`,
+      upstream: `http://api:8000/api/v1/brand-profiles/${profileId}:publish`,
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["brand-profiles", profileId, "versions"],
+      url: `http://web.local/api/v1/brand-profiles/${profileId}/versions?limit=2`,
+      upstream: `http://api:8000/api/v1/brand-profiles/${profileId}/versions?limit=2`,
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["brand-profiles", profileId, "versions", "2"],
+      url: `http://web.local/api/v1/brand-profiles/${profileId}/versions/2`,
+      upstream: `http://api:8000/api/v1/brand-profiles/${profileId}/versions/2`,
+    },
+  ];
+
+  for (const item of cases) {
+    const response = await item.handler(
+      new Request(item.url, {
+        method: item.method,
+        headers,
+        body: item.method === "POST" ? "{}" : undefined,
+      }),
+      { params: Promise.resolve({ path: item.path }) },
+    );
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(
+    upstreamRequests.map(({ method, url }) => ({ method, url })),
+    cases.map(({ method, upstream }) => ({ method, url: upstream })),
+  );
+
+  const deniedMalformedId = await GET(
+    new Request("http://web.local/api/v1/brand-profiles/not-a-uuid"),
+    { params: Promise.resolve({ path: ["brand-profiles", "not-a-uuid"] }) },
+  );
+  const uppercaseProfileId = profileId.toUpperCase();
+  const deniedNonCanonicalId = await GET(
+    new Request(
+      `http://web.local/api/v1/brand-profiles/${uppercaseProfileId}`,
+    ),
+    {
+      params: Promise.resolve({
+        path: ["brand-profiles", uppercaseProfileId],
+      }),
+    },
+  );
+  const deniedUnknownAction = await POST(
+    new Request(
+      `http://web.local/api/v1/brand-profiles/${profileId}:force-publish`,
+      { method: "POST" },
+    ),
+    {
+      params: Promise.resolve({
+        path: ["brand-profiles", `${profileId}:force-publish`],
+      }),
+    },
+  );
+  const deniedNestedHistory = await GET(
+    new Request(
+      `http://web.local/api/v1/brand-profiles/${profileId}/versions/2/members`,
+    ),
+    {
+      params: Promise.resolve({
+        path: ["brand-profiles", profileId, "versions", "2", "members"],
+      }),
+    },
+  );
+  assert.equal(deniedMalformedId.status, 404);
+  assert.equal(deniedNonCanonicalId.status, 404);
+  assert.equal(deniedUnknownAction.status, 404);
+  assert.equal(deniedNestedHistory.status, 404);
+  assert.equal(upstreamRequests.length, cases.length);
+});
+
+test("enforces a two-item Brand Profile page before crossing the bounded response seam", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const upstreamUrls = [];
+  const boundedPage = {
+    items: [maximumBrandProfile(1), maximumBrandProfile(2)],
+    next_cursor: null,
+  };
+  const boundedBytes = Buffer.byteLength(JSON.stringify(boundedPage));
+  const boundedHistoryBytes = Buffer.byteLength(
+    JSON.stringify({
+      items: [
+        maximumBrandProfileVersion(1),
+        maximumBrandProfileVersion(2),
+      ],
+      next_cursor: null,
+    }),
+  );
+  assert.ok(boundedBytes > 1024 * 1024);
+  assert.ok(boundedBytes < 2 * 1024 * 1024);
+  assert.ok(boundedHistoryBytes > boundedBytes);
+  assert.ok(boundedHistoryBytes < 2 * 1024 * 1024);
+  globalThis.fetch = async (input) => {
+    upstreamUrls.push(String(input));
+    return Response.json(boundedPage);
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const defaulted = await GET(
+    new Request(
+      "http://web.local/api/v1/brand-profiles?brand=Northstar+Labs",
+      { headers: { "x-workspace-id": "workspace-1" } },
+    ),
+    { params: Promise.resolve({ path: ["brand-profiles"] }) },
+  );
+  const unsafe = await GET(
+    new Request(
+      "http://web.local/api/v1/brand-profiles?brand=Northstar+Labs&limit=3",
+      { headers: { "x-workspace-id": "workspace-1" } },
+    ),
+    { params: Promise.resolve({ path: ["brand-profiles"] }) },
+  );
+
+  assert.equal(defaulted.status, 200);
+  assert.equal(Buffer.byteLength(await defaulted.text()), boundedBytes);
+  assert.deepEqual(upstreamUrls, [
+    "http://api:8000/api/v1/brand-profiles?brand=Northstar+Labs&limit=2",
+  ]);
+  assert.equal(unsafe.status, 400);
+  assert.equal(
+    (await unsafe.json()).code,
+    "BRAND_PROFILE_PAGE_LIMIT_UNSAFE",
+  );
+});
+
+test("keeps the hard response cap when a malformed upstream exceeds even the safe Brand Profile page", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const oversizedPage = {
+    items: [
+      maximumBrandProfile(1),
+      maximumBrandProfile(2),
+      maximumBrandProfile(3),
+    ],
+    next_cursor: null,
+  };
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(oversizedPage)) >
+      2 * 1024 * 1024,
+  );
+  globalThis.fetch = async () => Response.json(oversizedPage);
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const response = await GET(
+    new Request(
+      `http://web.local/api/v1/brand-profiles/${BRAND_PROFILE_ID}/versions?limit=2`,
+      { headers: { "x-workspace-id": "workspace-1" } },
+    ),
+    {
+      params: Promise.resolve({
+        path: ["brand-profiles", BRAND_PROFILE_ID, "versions"],
+      }),
+    },
+  );
+
+  assert.equal(response.status, 502);
+  assert.equal(
+    (await response.json()).code,
+    "UPSTREAM_RESPONSE_TOO_LARGE",
+  );
 });
 
 test("proxies bounded ProductBrief history summaries without full field payloads", async (context) => {

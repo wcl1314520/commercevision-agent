@@ -530,6 +530,13 @@ class RightsRecordModel(Base):
             name="uq_rights_records_workspace_id_asset",
         ),
         UniqueConstraint(
+            "workspace_id",
+            "id",
+            "asset_id",
+            "version_number",
+            name="uq_rights_records_exact_version",
+        ),
+        UniqueConstraint(
             "asset_id",
             "version_number",
             name="uq_rights_records_asset_version",
@@ -1383,6 +1390,7 @@ class AuditEventModel(Base):
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
+from . import brand_profile_models as _brand_profile_models  # noqa: E402, F401, I001
 from . import product_brief_models as _product_brief_models  # noqa: E402, F401, I001
 
 

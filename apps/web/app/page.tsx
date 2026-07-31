@@ -23,11 +23,61 @@ import type {
   SKUUpdateRequestV1,
 } from "../lib/generated/catalog-api";
 import { AssetUploadWorkbench } from "./asset-upload-workbench";
+import { BrandProfileWorkbench } from "./brand-profile-workbench";
+import type { BrandProfileIdentityChangeGuard } from "../lib/brand-profile-editor-state";
 import { productBriefSourceFor } from "../lib/product-brief-workbench-state";
 import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
 import { ProductBriefWorkbench } from "./product-brief-workbench";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
+
+type PendingProductIdentityChange =
+  | {
+      kind: "select-product";
+      productId: string;
+    }
+  | {
+      kind: "save-product-brand";
+      productId: string;
+      request: ProductUpdateRequestV1;
+    }
+  | {
+      kind: "accept-product-snapshot";
+      product: ProductResponseV1;
+    };
+
+type ProductSnapshotAcceptance = "accepted" | "held" | "stale";
+
+function productIdentityChangeCopy(
+  pending: PendingProductIdentityChange,
+): {
+  description: string;
+  confirmLabel: string;
+  cancelLabel: string;
+} {
+  if (pending.kind === "select-product") {
+    return {
+      description:
+        "切换商品会卸载当前品牌档案工作台并丢弃本地更改；请明确确认或留在当前商品。",
+      confirmLabel: "丢弃品牌档案更改并切换商品",
+      cancelLabel: "留在当前商品",
+    };
+  }
+  if (pending.kind === "save-product-brand") {
+    return {
+      description:
+        "保存新的商品品牌会切换品牌档案身份并丢弃当前本地更改；服务端写入会在明确确认后才开始。",
+      confirmLabel: "丢弃品牌档案更改并保存商品品牌",
+      cancelLabel: "保留品牌档案更改，暂不保存商品",
+    };
+  }
+  return {
+    description:
+      "服务端返回了新的商品品牌；接纳该快照会切换品牌档案身份并丢弃当前本地更改。",
+    confirmLabel: "丢弃品牌档案更改并接纳商品品牌更新",
+    cancelLabel: "保留品牌档案更改，暂不接纳商品品牌更新",
+  };
+}
 
 const emptyProductForm: ProductForm = {
   source_namespace: "MANUAL",
@@ -396,7 +446,82 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [productBriefSource, setProductBriefSource] =
     useState<ProductBriefSourceSelection | null>(null);
+  const [
+    brandProfileIdentityChangeGuard,
+    setBrandProfileIdentityChangeGuard,
+  ] = useState<BrandProfileIdentityChangeGuard>("clear");
+  const [
+    pendingProductIdentityChange,
+    setPendingProductIdentityChange,
+  ] = useState<PendingProductIdentityChange | null>(null);
   const detailRequestGenerationRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(selectedId);
+  const selectedProductRef = useRef<ProductResponseV1 | null>(
+    selectedProduct,
+  );
+  const brandProfileIdentityChangeGuardRef =
+    useRef<BrandProfileIdentityChangeGuard>(
+      brandProfileIdentityChangeGuard,
+    );
+  selectedIdRef.current = selectedId;
+  selectedProductRef.current = selectedProduct;
+  brandProfileIdentityChangeGuardRef.current =
+    brandProfileIdentityChangeGuard;
+
+  const publishBrandProfileIdentityChangeGuard = useCallback(
+    (guard: BrandProfileIdentityChangeGuard) => {
+      brandProfileIdentityChangeGuardRef.current = guard;
+      setBrandProfileIdentityChangeGuard(guard);
+    },
+    [],
+  );
+
+  const commitProductSnapshot = useCallback(
+    (product: ProductResponseV1) => {
+      selectedProductRef.current = product;
+      setSelectedProduct(product);
+      setProductForm(productDraft(product));
+      setSkuDrafts(
+        Object.fromEntries(
+          (product.skus ?? []).map((sku) => [sku.id, skuDraft(sku)]),
+        ),
+      );
+      setDetailState("ready");
+      setDetailError(null);
+    },
+    [],
+  );
+
+  const acceptProductSnapshot = useCallback(
+    (
+      product: ProductResponseV1,
+      { identityChangeAuthorized = false } = {},
+    ): ProductSnapshotAcceptance => {
+      if (product.id !== selectedIdRef.current) return "stale";
+      const current = selectedProductRef.current;
+      const changesActiveBrand =
+        current?.id === product.id && current.brand !== product.brand;
+      if (
+        changesActiveBrand &&
+        !identityChangeAuthorized &&
+        brandProfileIdentityChangeGuardRef.current !== "clear"
+      ) {
+        setPendingProductIdentityChange({
+          kind: "accept-product-snapshot",
+          product,
+        });
+        setDetailState("ready");
+        setDetailError(null);
+        return "held";
+      }
+      setPendingProductIdentityChange((pending) =>
+        pending?.kind === "accept-product-snapshot" ? null : pending,
+      );
+      commitProductSnapshot(product);
+      return "accepted";
+    },
+    [commitProductSnapshot],
+  );
 
   const loadProducts = useCallback(async () => {
     setListState("loading");
@@ -412,27 +537,28 @@ export default function Home() {
     }
   }, []);
 
-  const loadProduct = useCallback(async (productId: string) => {
-    const generation = ++detailRequestGenerationRef.current;
-    setDetailState("loading");
-    setDetailError(null);
-    try {
-      const product = await api.getProduct(productId);
-      if (generation !== detailRequestGenerationRef.current) return;
-      setSelectedProduct(product);
-      setProductForm(productDraft(product));
-      setSkuDrafts(
-        Object.fromEntries(
-          (product.skus ?? []).map((sku) => [sku.id, skuDraft(sku)]),
-        ),
-      );
-      setDetailState("ready");
-    } catch (error) {
-      if (generation !== detailRequestGenerationRef.current) return;
-      setDetailState("error");
-      setDetailError(messageFor(error));
-    }
-  }, []);
+  const loadProduct = useCallback(
+    async (productId: string) => {
+      const generation = ++detailRequestGenerationRef.current;
+      setDetailState("loading");
+      setDetailError(null);
+      try {
+        const product = await api.getProduct(productId);
+        if (generation !== detailRequestGenerationRef.current) return;
+        const acceptance = acceptProductSnapshot(product);
+        if (acceptance === "held") {
+          setNotice(
+            "检测到商品品牌已更新；品牌档案本地更改已保留，请明确决定是否接纳新品牌。",
+          );
+        }
+      } catch (error) {
+        if (generation !== detailRequestGenerationRef.current) return;
+        setDetailState("error");
+        setDetailError(messageFor(error));
+      }
+    },
+    [acceptProductSnapshot],
+  );
 
   useEffect(() => {
     void loadProducts();
@@ -442,6 +568,7 @@ export default function Home() {
     if (selectedId) void loadProduct(selectedId);
     else {
       detailRequestGenerationRef.current += 1;
+      selectedProductRef.current = null;
       setSelectedProduct(null);
     }
   }, [loadProduct, selectedId]);
@@ -450,28 +577,106 @@ export default function Home() {
     setProductBriefSource(null);
   }, [selectedProduct?.id]);
 
-  const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selectedProduct) return;
+  const requestProductSelection = useCallback(
+    (productId: string) => {
+      if (productId === selectedId) {
+        setPendingProductIdentityChange(null);
+        return;
+      }
+      if (brandProfileIdentityChangeGuard !== "clear") {
+        setPendingProductIdentityChange({
+          kind: "select-product",
+          productId,
+        });
+        return;
+      }
+      setPendingProductIdentityChange(null);
+      selectedIdRef.current = productId;
+      setSelectedId(productId);
+    },
+    [brandProfileIdentityChangeGuard, selectedId],
+  );
+
+  const performProductSave = async (
+    productId: string,
+    request: ProductUpdateRequestV1,
+    identityChangeAuthorized = false,
+  ) => {
     setBusy("product");
     setNotice(null);
     try {
       const updated = await api.updateProduct(
-        selectedProduct.id,
-        productUpdateRequest(productForm, selectedProduct.version),
+        productId,
+        request,
       );
-      setSelectedProduct(updated);
-      setProductForm(productDraft(updated));
-      setNotice("商品已保存");
+      const acceptance = acceptProductSnapshot(updated, {
+        identityChangeAuthorized,
+      });
+      if (acceptance === "accepted") {
+        setNotice("商品已保存");
+      } else if (acceptance === "held") {
+        setNotice(
+          "商品已保存，但服务端品牌身份变更尚未接纳；品牌档案本地更改已保留。",
+        );
+      }
       await loadProducts();
     } catch (error) {
       setNotice(messageFor(error));
       if (error instanceof CatalogApiError && error.envelope?.code === "VERSION_CONFLICT") {
-        await loadProduct(selectedProduct.id);
+        await loadProduct(productId);
       }
     } finally {
       setBusy(null);
     }
+  };
+
+  const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedProduct) return;
+    const request = productUpdateRequest(
+      productForm,
+      selectedProduct.version,
+    );
+    if (
+      request.brand !== selectedProduct.brand &&
+      brandProfileIdentityChangeGuardRef.current !== "clear"
+    ) {
+      setPendingProductIdentityChange({
+        kind: "save-product-brand",
+        productId: selectedProduct.id,
+        request,
+      });
+      return;
+    }
+    await performProductSave(selectedProduct.id, request);
+  };
+
+  const confirmProductIdentityChange = () => {
+    const pending = pendingProductIdentityChange;
+    if (
+      !pending ||
+      brandProfileIdentityChangeGuardRef.current === "frozen"
+    ) {
+      return;
+    }
+    setPendingProductIdentityChange(null);
+    if (pending.kind === "select-product") {
+      selectedIdRef.current = pending.productId;
+      setSelectedId(pending.productId);
+      return;
+    }
+    if (pending.kind === "save-product-brand") {
+      void performProductSave(
+        pending.productId,
+        pending.request,
+        true,
+      );
+      return;
+    }
+    acceptProductSnapshot(pending.product, {
+      identityChangeAuthorized: true,
+    });
+    setNotice("已接纳商品品牌更新，并丢弃原品牌档案的本地更改。");
   };
 
   const createProduct = async (event: FormEvent<HTMLFormElement>) => {
@@ -483,7 +688,7 @@ export default function Home() {
       setProductForm(emptyProductForm);
       setNotice("商品已创建");
       await loadProducts();
-      setSelectedId(created.id);
+      requestProductSelection(created.id);
     } catch (error) {
       setNotice(messageFor(error));
     } finally {
@@ -555,6 +760,10 @@ export default function Home() {
     () => selectedProduct?.title ?? "未选择商品",
     [selectedProduct],
   );
+  const pendingProductIdentityChangeCopy =
+    pendingProductIdentityChange === null
+      ? null
+      : productIdentityChangeCopy(pendingProductIdentityChange);
 
   return (
     <div className="workbench">
@@ -624,7 +833,7 @@ export default function Home() {
             ) : null}
             {listState === "ready" ? (
               <ProductList
-                onSelect={setSelectedId}
+                onSelect={requestProductSelection}
                 products={products}
                 selectedId={selectedId}
               />
@@ -632,6 +841,43 @@ export default function Home() {
           </aside>
 
           <section className="catalog-main" aria-labelledby="detail-heading">
+            {pendingProductIdentityChange &&
+            pendingProductIdentityChangeCopy ? (
+              <div className="brief-stale-banner" role="alert">
+                <div>
+                  <strong>
+                    {brandProfileIdentityChangeGuard === "frozen"
+                      ? "品牌档案仍有待对账命令"
+                      : "品牌档案存在未保存的本地更改"}
+                  </strong>
+                  <span>
+                    {brandProfileIdentityChangeGuard === "frozen"
+                      ? "在原命令完成恢复或被明确处置前，不能切换商品或接纳新的品牌身份。"
+                      : pendingProductIdentityChangeCopy.description}
+                  </span>
+                </div>
+                <div className="brand-profile-toolbar-actions">
+                  {brandProfileIdentityChangeGuard !== "frozen" ? (
+                    <button
+                      className="button button-danger"
+                      onClick={confirmProductIdentityChange}
+                      type="button"
+                    >
+                      {pendingProductIdentityChangeCopy.confirmLabel}
+                    </button>
+                  ) : null}
+                  <button
+                    className="button button-secondary"
+                    onClick={() =>
+                      setPendingProductIdentityChange(null)
+                    }
+                    type="button"
+                  >
+                    {pendingProductIdentityChangeCopy.cancelLabel}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {detailState === "loading" ? (
               <div className="panel loading-panel" aria-label="商品详情加载中">
                 <span className="loading-bar wide" />
@@ -647,7 +893,7 @@ export default function Home() {
                 />
               </div>
             ) : null}
-            {detailState === "ready" && selectedProduct ? (
+            {selectedProduct?.id === selectedId ? (
               <>
                 <section className="panel" aria-labelledby="detail-heading">
                   <div className="panel-heading">
@@ -668,6 +914,14 @@ export default function Home() {
                     </div>
                   </form>
                 </section>
+
+                <BrandProfileWorkbench
+                  brand={selectedProduct.brand}
+                  key={`brand-profile-${selectedProduct.brand}`}
+                  onIdentityChangeGuardChange={
+                    publishBrandProfileIdentityChangeGuard
+                  }
+                />
 
                 <AssetUploadWorkbench
                   categoryCode={selectedProduct.category_code}

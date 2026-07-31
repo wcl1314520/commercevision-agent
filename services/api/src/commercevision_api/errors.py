@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from commercevision_application import BrandProfilePublicationRejected
 from commercevision_contracts import ErrorResponse
 from commercevision_domain import (
     AdminRequiredError,
@@ -83,7 +84,7 @@ def install_error_handlers(app: FastAPI) -> None:
             message=str(exc),
             category=category,
             retryable=retryable,
-            details={},
+            details=_domain_error_details(exc),
             request_id=request.state.request_id,
             trace_id=request.state.trace_id,
         )
@@ -162,6 +163,8 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
         return 422, "UNSUPPORTED_ASSET_KIND", "validation", False
     if isinstance(exc, StorageUnavailableError):
         return 503, "STORAGE_UNAVAILABLE", "transient", True
+    if isinstance(exc, BrandProfilePublicationRejected):
+        return 422, "BRAND_PROFILE_PUBLICATION_REJECTED", "validation", False
     if isinstance(exc, IdempotencyConflictError):
         return 409, "IDEMPOTENCY_CONFLICT", "conflict", False
     if isinstance(exc, DuplicateExternalIdentifierError):
@@ -185,3 +188,9 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
     if isinstance(exc, (LeaseConflictError, RetryNotReadyError)):
         return 409, "EXECUTION_BUSY", "transient", True
     return 422, "DOMAIN_ERROR", "domain", False
+
+
+def _domain_error_details(exc: DomainError) -> dict[str, object]:
+    if isinstance(exc, BrandProfilePublicationRejected):
+        return {"issues": [issue.model_dump(mode="json") for issue in exc.issues]}
+    return {}

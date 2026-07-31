@@ -501,6 +501,27 @@ class Settings(BaseSettings):
     )
     trusted_principal_max_age_seconds: int = Field(default=300, ge=30, le=3600)
     trusted_principal_future_skew_seconds: int = Field(default=30, ge=0, le=300)
+    brand_profile_cursor_max_age_seconds: int = Field(
+        default=86_400,
+        ge=60,
+        le=604_800,
+    )
+    brand_profile_cursor_future_skew_seconds: int = Field(default=30, ge=0, le=300)
+
+    @field_validator(
+        "trusted_principal_previous_key_id",
+        "trusted_principal_previous_hmac_secret",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_empty_previous_trusted_principal_key(
+        cls,
+        value: object,
+    ) -> object:
+        # Docker Compose represents an unset optional rotation pair as empty
+        # strings. Treat only the exact empty value as absent; whitespace and
+        # partial pairs remain invalid configuration.
+        return None if value == "" else value
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:13000"])
     mcp_transport: Literal["stdio", "sse", "streamable-http"] = "streamable-http"

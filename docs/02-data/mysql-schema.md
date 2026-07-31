@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-29 |
+| 最后更新 | 2026-07-30 |
 | 适用版本 | Schema v1 |
 
 ## 设计原则
@@ -318,16 +318,108 @@ ProductBrief identity 防止普通运行时 `DELETE`；上述历史事实表同�
 身份，在 MySQL 复验 deadline 后执行受控删除和对象存储对账。不得使用普通连接可伪造的
 session variable 作为删除授权。
 
-## 配置
+## Brand Profile
+
+Brand Profile 使用“可变 identity/head + 不可变 publication + 不可变 member”三表模型。
+`brand_profiles.version` 是草稿和 current head 的乐观锁版本；发布版本号由
+`current_version_number + 1` 产生，二者不是同一个版本概念。
 
 ### `brand_profiles`
 
 - `id`
 - `workspace_id`
-- `name`
-- `rules_json`
+- `brand`
+- `profile_key`
+- `state`
+- `draft_json`
+- `draft_sha256`
+- `current_version_id`
+- `current_version_number`
 - `version`
-- `status`
+- `stale_at`
+- `created_by`
+- `created_at`
+- `updated_by`
+- `updated_at`
+
+`workspace_id + brand + profile_key` 使用二进制精确唯一约束，同一 Workspace 内不能创建第二个
+同名 identity。`state` 只允许 `DRAFT`、`ACTIVE`、`NEEDS_REPUBLISH`、`ARCHIVED`。
+`current_version_id` 与 `current_version_number` 必须同时为空头或同时指向一个正版本；
+`DRAFT` 不得有 current publication，`ACTIVE` 和 `NEEDS_REPUBLISH` 必须有。
+只有 `NEEDS_REPUBLISH` 可以保存非空 `stale_at`。
+
+`draft_json` 保存完整规范化草稿：规则、批准颜色、必需标记、禁止元素、语气约束、文案约束、
+用途、Provider、派生要求和选中的 Asset Version/角色。`draft_sha256` 是该规范化草稿的
+小写 SHA-256；Persistence 读取时重新计算并在不匹配时失败关闭。草稿与 head 只能通过
+`WHERE workspace_id + id + version` 的 CAS 更新；
+并发胜者之外的更新返回版本冲突，不能静默覆盖。
+
+current head 使用
+`workspace_id + id + current_version_id + current_version_number` 复合外键，精确指向同一
+Profile 的 `brand_profile_versions` 行。该外键在版本表创建后添加以打破建表环。
+普通运行时 `DELETE brand_profiles` 由数据库 Trigger 拒绝，避免绕过子表 append-only 栅栏
+擦除整个发布历史。
+
+### `brand_profile_versions`
+
+- `id`
+- `workspace_id`
+- `profile_id`
+- `version_number`
+- `content_json`
+- `content_sha256`
+- `purpose`
+- `provider`
+- `requires_derivative`
+- `published_by`
+- `published_at`
+
+`profile_id + version_number` 唯一；`workspace_id + profile_id` 以 `RESTRICT` 复合外键绑定
+identity。`content_json` 保存发布时的完整草稿快照，`content_sha256` 对草稿和按 ordinal
+排列的精确 member facts 一起做规范化哈希。用途、Provider 和派生要求同时提升为列，供当前
+授权重验和失效收敛使用。版本行由数据库 Trigger 拒绝 `UPDATE` 和 `DELETE`。
+
+### `brand_profile_members`
+
+- `workspace_id`
+- `profile_id`
+- `profile_version_id`
+- `profile_version_number`
+- `ordinal`
+- `asset_id`
+- `asset_version_id`
+- `role`
+- `rights_record_id`
+- `rights_record_version`
+
+主键是 `profile_version_id + ordinal`；同一 publication 内 `asset_version_id` 唯一。
+角色只允许 `LOGO`、`REQUIRED_MARK`、`VISUAL_REFERENCE`、`PROMPT_TEMPLATE`、
+`MODEL_CONFIGURATION`、`LORA`。三个 Workspace 前置复合外键分别绑定同一 Profile
+publication、精确 Asset Version 与发布时使用的精确 Rights Record version，全部
+`ON DELETE RESTRICT`。数据库 Trigger 拒绝 member 的 `UPDATE` 和 `DELETE`。
+
+`workspace_id + asset_id + profile_id + profile_version_id` 索引支持 Rights/Asset 变化后只
+定位引用该 Asset 的 current publications。发布事务先锁 Profile head，再按稳定 Asset ID
+顺序锁定选中的 Asset/current Rights authority，锁后读取同一 MySQL
+`UTC_TIMESTAMP(6)`，完成 Foundation retention、current Asset Version、用途、Provider、
+派生许可与有效期重验；随后在同一事务追加 version/member、CAS 推进 head、写 Audit、
+Idempotency 和 Outbox。这个锁序使发布与 Rights 替换、撤销、到期或 Asset 删除串行化。
+
+历史版本始终可读，但 member 表中的 Rights 引用只是发布时证据，不是持续授权。历史读取在
+一个数据库一致性边界内读取当前 Asset/current Rights 快照及数据库决定时间，分别返回
+`currently_usable`、当前 reason code 与当前 Rights identity。后续检索和 Provider 调用仍须
+重新执行当前授权判断，不能用历史 member 或页面中的旧绿色状态授权。
+
+Rights 变更、到期和 Asset 删除完成事件只触发关闭式收敛：Worker 重新读取 current head 与
+live Asset/Rights authority，仍受影响的 `ACTIVE` head 才以 CAS 转为
+`NEEDS_REPUBLISH`。事件发生时间只用于审计和因果关联；`stale_at`、状态版本与
+`updated_at` 使用取得所需行锁后的数据库时间。重复或乱序事件、已被新 publication 取代的
+旧引用，以及 authority 已恢复的事件均为幂等 no-op，绝不能把旧授权写回。
+
+迁移 downgrade 只有在三张表均为空时才允许；存在任何 identity 或历史事实即失败关闭，不会
+为回退而删除不可变发布证据。
+
+## 配置
 
 ### `prompt_templates`
 

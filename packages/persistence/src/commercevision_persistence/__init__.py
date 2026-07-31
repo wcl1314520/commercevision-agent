@@ -1,6 +1,7 @@
 """MySQL infrastructure shared by CommerceVision services."""
 
 from .assets import SqlAlchemyAssetUnitOfWork
+from .brand_profiles import SqlAlchemyBrandProfileUnitOfWork
 from .catalog import SqlAlchemyCatalogUnitOfWork
 from .checkpointer import MySQLCheckpointSaver
 from .database import (
@@ -22,6 +23,7 @@ __all__ = [
     "Database",
     "MySQLCheckpointSaver",
     "SqlAlchemyAssetUnitOfWork",
+    "SqlAlchemyBrandProfileUnitOfWork",
     "SqlAlchemyCatalogUnitOfWork",
     "SqlAlchemyOperationUnitOfWork",
     "SqlAlchemyOperatorUnitOfWork",

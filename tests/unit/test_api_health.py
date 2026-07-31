@@ -1,11 +1,147 @@
 import asyncio
+import secrets
 
 import commercevision_api.main as api_main
 import commercevision_api.readiness as readiness
 import httpx
+import pytest
 from commercevision_api.main import create_app
 from commercevision_contracts import Settings
 from fastapi.testclient import TestClient
+
+
+def _production_api_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "service_name": "control-api",
+        "environment": "production",
+        "worker_queues": ["commercevision.workflow"],
+        "object_store_endpoint": "https://storage.internal.example",
+        "object_store_presign_endpoint": "https://assets.example",
+        "object_store_secret_key": "production-object-store-secret",
+        "object_store_require_encryption": True,
+        "readiness_probe_external": False,
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def test_production_api_rejects_missing_trusted_principal_key_before_startup() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="production Control API requires a current trusted-principal key",
+    ):
+        create_app(_production_api_settings())
+
+
+def test_production_api_rejects_whitespace_only_trusted_principal_secret() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="production Control API trusted-principal key is not production-safe",
+    ):
+        create_app(
+            _production_api_settings(
+                trusted_principal_current_key_id="gateway-current",
+                trusted_principal_current_hmac_secret=" " * 32,
+            )
+        )
+
+
+def test_production_api_rejects_public_local_trust_material_without_disclosure() -> None:
+    public_local_secret = "local-web-gateway-secret-change-before-production"
+
+    with pytest.raises(
+        RuntimeError,
+        match="production Control API trusted-principal key is not production-safe",
+    ) as error:
+        create_app(
+            _production_api_settings(
+                trusted_principal_current_key_id="local-web-gateway",
+                trusted_principal_current_hmac_secret=public_local_secret,
+            )
+        )
+
+    assert public_local_secret not in str(error.value)
+
+
+def test_production_api_rejects_public_local_secret_under_a_different_key_id() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="production Control API trusted-principal key is not production-safe",
+    ):
+        create_app(
+            _production_api_settings(
+                trusted_principal_current_key_id="renamed-production-gateway",
+                trusted_principal_current_hmac_secret=(
+                    "local-web-gateway-secret-change-before-production"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "previous_key_id,previous_secret",
+    [
+        (
+            "gateway-previous",
+            "local-web-gateway-secret-change-before-production",
+        ),
+        ("gateway-previous", " " * 32),
+    ],
+)
+def test_production_api_rejects_unsafe_previous_trusted_principal_key_without_disclosure(
+    previous_key_id: str,
+    previous_secret: str,
+) -> None:
+    current_secret = secrets.token_urlsafe(32)
+
+    with pytest.raises(
+        RuntimeError,
+        match="production Control API trusted-principal key is not production-safe",
+    ) as error:
+        create_app(
+            _production_api_settings(
+                trusted_principal_current_key_id="gateway-current",
+                trusted_principal_current_hmac_secret=current_secret,
+                trusted_principal_previous_key_id=previous_key_id,
+                trusted_principal_previous_hmac_secret=previous_secret,
+            )
+        )
+
+    assert current_secret not in str(error.value)
+    assert previous_secret not in str(error.value)
+
+
+def test_production_api_starts_with_complete_trusted_principal_current_key() -> None:
+    production_secret = secrets.token_urlsafe(32)
+    app = create_app(
+        _production_api_settings(
+            trusted_principal_current_key_id="gateway-current",
+            trusted_principal_current_hmac_secret=production_secret,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["configuration"] == "ok"
+
+
+def test_production_api_starts_with_two_complete_trusted_principal_keys() -> None:
+    app = create_app(
+        _production_api_settings(
+            trusted_principal_current_key_id="gateway-current",
+            trusted_principal_current_hmac_secret=secrets.token_urlsafe(32),
+            trusted_principal_previous_key_id="gateway-previous",
+            trusted_principal_previous_hmac_secret=secrets.token_urlsafe(32),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["configuration"] == "ok"
 
 
 def test_liveness_contract() -> None:

@@ -5481,6 +5481,13 @@ test("keeps the bound recovery identity when a ProductBrief load changes Operati
       });
       return;
     }
+    if (path === "/api/v1/brand-profiles") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ items: [], next_cursor: null }),
+      });
+      return;
+    }
     auxiliaryRequests += 1;
     await route.fulfill({ status: 500, body: "auxiliary read must not run" });
   });

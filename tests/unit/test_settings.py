@@ -669,6 +669,54 @@ def test_trusted_principal_rotation_configuration_is_atomic_and_distinct() -> No
         )
 
 
+def test_brand_profile_cursor_lifetime_defaults_and_bounds_are_explicit() -> None:
+    settings = Settings()
+
+    assert settings.brand_profile_cursor_max_age_seconds == 86_400
+    assert settings.brand_profile_cursor_future_skew_seconds == 30
+    assert (
+        Settings(
+            brand_profile_cursor_max_age_seconds=60,
+            brand_profile_cursor_future_skew_seconds=0,
+        ).brand_profile_cursor_max_age_seconds
+        == 60
+    )
+    assert (
+        Settings(
+            brand_profile_cursor_max_age_seconds=604_800,
+            brand_profile_cursor_future_skew_seconds=300,
+        ).brand_profile_cursor_future_skew_seconds
+        == 300
+    )
+
+    for invalid in (
+        {"brand_profile_cursor_max_age_seconds": 59},
+        {"brand_profile_cursor_max_age_seconds": 604_801},
+        {"brand_profile_cursor_future_skew_seconds": -1},
+        {"brand_profile_cursor_future_skew_seconds": 301},
+    ):
+        with pytest.raises(ValidationError):
+            Settings(**invalid)
+
+
+def test_empty_compose_previous_trusted_principal_pair_is_absent_but_not_partial() -> None:
+    settings = Settings(
+        trusted_principal_previous_key_id="",
+        trusted_principal_previous_hmac_secret="",
+    )
+
+    assert settings.trusted_principal_previous_key_id is None
+    assert settings.trusted_principal_previous_hmac_secret is None
+
+    with pytest.raises(ValidationError):
+        Settings(
+            trusted_principal_current_key_id="gateway-current",
+            trusted_principal_current_hmac_secret=("current-secret-00000000000000000001"),
+            trusted_principal_previous_key_id="gateway-previous",
+            trusted_principal_previous_hmac_secret="",
+        )
+
+
 def test_settings_reject_unknown_mcp_transport() -> None:
     with pytest.raises(ValidationError):
         Settings(mcp_transport="websocket")

@@ -12,10 +12,13 @@ export default defineConfig({
     headless: true,
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "node tests/start-e2e-server.mjs",
-    reuseExistingServer: false,
-    url: "http://127.0.0.1:3100",
-    timeout: 120000,
-  },
+  webServer:
+    process.env.COMMERCEVISION_E2E_EXTERNAL_SERVER === "1"
+      ? undefined
+      : {
+          command: "node tests/start-e2e-server.mjs",
+          reuseExistingServer: false,
+          url: "http://127.0.0.1:3100",
+          timeout: 120000,
+        },
 });

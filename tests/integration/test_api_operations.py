@@ -359,7 +359,7 @@ def test_trusted_principal_actor_id_uses_bounded_unicode_character_length(
         )
         for _actor_id in accepted_actor_ids
     ]
-    rejected_actor_ids = ["", "a" * 129, "操" * 129]
+    rejected_actor_ids = ["", "a" * 129, "操" * 129, "brand\u0085admin"]
     headers = {"X-Workspace-Id": workspace_id}
 
     with TestClient(
@@ -426,7 +426,7 @@ def test_trusted_principal_actor_id_uses_bounded_unicode_character_length(
 
     assert [response.status_code for response in accepted] == [200, 200]
     assert [response.status_code for response in accepted_replays] == [202, 202]
-    assert [response.status_code for response in rejected] == [401, 401, 401]
+    assert [response.status_code for response in rejected] == [401] * len(rejected_actor_ids)
     assert all(response.json()["code"] == "AUTHENTICATION_REQUIRED" for response in rejected)
     assert rejected_replay.status_code == 401
     assert rejected_replay.json()["code"] == "AUTHENTICATION_REQUIRED"

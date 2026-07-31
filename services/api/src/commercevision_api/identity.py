@@ -9,6 +9,7 @@ import hmac
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from unicodedata import category
 
 from commercevision_application import AuthenticatedPrincipal
 from commercevision_domain import (
@@ -145,7 +146,12 @@ class PrincipalAccessPolicy:
 
 
 def _valid_actor_id(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip()) and len(value) <= _MAX_ACTOR_ID_CHARACTERS
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and len(value) <= _MAX_ACTOR_ID_CHARACTERS
+        and all(category(character) != "Cc" for character in value)
+    )
 
 
 def _valid_workspace_id_list(value: object) -> bool:

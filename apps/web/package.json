@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "e2e": "playwright test",
+    "e2e": "node tests/run-e2e.mjs",
     "start": "next start",
     "lint": "eslint .",
     "test:proxy": "node --experimental-strip-types --test tests/proxy-route.test.mjs",
-    "test:unit": "vitest run --config tests/vitest.config.ts tests/asset-api.test.mjs tests/asset-upload-policy.test.mjs tests/operation-polling.test.mjs tests/product-brief-api.test.mjs tests/product-brief-persistence.test.mjs tests/product-brief-workbench.test.mjs tests/upload-workflow.test.mjs tests/validation-presentation.test.mjs",
+    "test:unit": "vitest run --config tests/vitest.config.ts tests/asset-api.test.mjs tests/asset-upload-policy.test.mjs tests/brand-profile-api.test.mjs tests/brand-profile-ui-state.test.mjs tests/brand-profile-workbench.test.mjs tests/e2e-server-process.test.mjs tests/operation-polling.test.mjs tests/product-brief-api.test.mjs tests/product-brief-persistence.test.mjs tests/product-brief-workbench.test.mjs tests/upload-workflow.test.mjs tests/validation-presentation.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

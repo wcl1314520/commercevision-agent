@@ -154,6 +154,8 @@ trusted_principal_previous_key_id: null
 trusted_principal_previous_hmac_secret: null
 trusted_principal_max_age_seconds: 300
 trusted_principal_future_skew_seconds: 30
+brand_profile_cursor_max_age_seconds: 86400
+brand_profile_cursor_future_skew_seconds: 30
 worker_required_operation_kinds: []
 cors_origins:
   - http://localhost:13000

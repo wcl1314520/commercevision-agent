@@ -36,13 +36,17 @@ def _verify_c2pa_from_daemonized_billiard_child(
             memory_limit_bytes=128 * 1024 * 1024,
             file_descriptor_limit=32,
         )
+        timeout_seconds = 3.0 if os.name == "nt" else 1.5
         adapter = C2paProvenanceAdapter(
             reader_boundary=boundary,
             sdk_version="fixture-c2pa",
             trust_config_version="trust-v1",
             trust_anchors_pem="anchor",
             trust_eku_policy="1.3.6.1.5.5.7.3.4",
-            timeout_seconds=1.5,
+            # A fresh interpreter must import the native boundary on every
+            # invocation. Windows process creation is measurably slower under
+            # concurrent test load, while production keeps a 10-second default.
+            timeout_seconds=timeout_seconds,
             maximum_concurrency=1,
             maximum_asset_bytes=1024,
             maximum_report_bytes=1024,
@@ -83,17 +87,21 @@ def _verify_c2pa_from_daemonized_billiard_child(
             {
                 "daemon": current_process().daemon,
                 "malformed_failure_codes": malformed.failure_codes,
+                "malformed_latency_ms": malformed.latency_ms,
                 "malformed_status": malformed.status.value if malformed.status else None,
                 "recovered_failure_code": recovered.failure_code,
                 "recovered_failure_codes": recovered.failure_codes,
+                "recovered_latencies_ms": tuple(result.latency_ms for result in recovered_attempts),
                 "recovered_outcome": recovered.outcome.value,
                 "recovered_status": recovered.status.value if recovered.status else None,
                 "recovered_transient_codes": tuple(
                     result.failure_code for result in recovered_attempts[:-1]
                 ),
                 "timed_out_code": timed_out.failure_code,
+                "timeout_budget_seconds": timeout_seconds,
                 "timeout_elapsed": timeout_elapsed,
                 "unavailable_failure_code": unavailable.failure_code,
+                "unavailable_latency_ms": unavailable.latency_ms,
                 "unavailable_outcome": unavailable.outcome.value,
             }
         )
@@ -557,17 +565,17 @@ def test_c2pa_subprocess_works_in_daemonized_prefork_child_and_reclaims_capacity
     assert "error" not in result, result
     assert result["daemon"] is True
     assert result["timed_out_code"] == "PROVENANCE_TIMEOUT"
-    assert result["timeout_elapsed"] < 3
+    assert result["timeout_elapsed"] < result["timeout_budget_seconds"] + 1.5
     assert result["recovered_outcome"] == ProvenanceVerificationOutcome.EVIDENCE.value
     assert result["recovered_status"] == ProvenanceEvidenceStatus.VERIFIED.value, result
     assert set(result["recovered_transient_codes"]) <= {
         "PROVENANCE_READER_UNAVAILABLE",
         "PROVENANCE_TIMEOUT",
     }
-    assert result["malformed_status"] == ProvenanceEvidenceStatus.CONFLICTING.value
+    assert result["malformed_status"] == ProvenanceEvidenceStatus.CONFLICTING.value, result
     assert result["malformed_failure_codes"] == ("MALFORMED_CREDENTIAL",)
     assert result["unavailable_outcome"] == ProvenanceVerificationOutcome.RETRYABLE_FAILURE.value
-    assert result["unavailable_failure_code"] == "PROVENANCE_READER_UNAVAILABLE"
+    assert result["unavailable_failure_code"] == "PROVENANCE_READER_UNAVAILABLE", result
     assert "native payload" not in repr(result)
     assert "native reader unavailable detail" not in repr(result)
 

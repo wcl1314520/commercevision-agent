@@ -327,6 +327,12 @@ services:
       CV_ASSET_VALIDATION_MAX_ATTEMPTS: ${CV_ASSET_VALIDATION_MAX_ATTEMPTS:-5}
       CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID: ${CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID:-local-web-gateway}
       CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET: ${CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET:-local-web-gateway-secret-change-before-production}
+      CV_TRUSTED_PRINCIPAL_PREVIOUS_KEY_ID: ${CV_TRUSTED_PRINCIPAL_PREVIOUS_KEY_ID:-}
+      CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET: ${CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET:-}
+      CV_TRUSTED_PRINCIPAL_MAX_AGE_SECONDS: ${CV_TRUSTED_PRINCIPAL_MAX_AGE_SECONDS:-300}
+      CV_TRUSTED_PRINCIPAL_FUTURE_SKEW_SECONDS: ${CV_TRUSTED_PRINCIPAL_FUTURE_SKEW_SECONDS:-30}
+      CV_BRAND_PROFILE_CURSOR_MAX_AGE_SECONDS: ${CV_BRAND_PROFILE_CURSOR_MAX_AGE_SECONDS:-86400}
+      CV_BRAND_PROFILE_CURSOR_FUTURE_SKEW_SECONDS: ${CV_BRAND_PROFILE_CURSOR_FUTURE_SKEW_SECONDS:-30}
     ports:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_API_HOST_PORT:-18000}:8000"
     depends_on:
@@ -456,6 +462,7 @@ services:
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
+      CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
       CV_SCHEDULER_HOST: 0.0.0.0
       CV_SCHEDULER_PORT: "8002"
       CV_RIGHTS_EXPIRY_SCAN_INTERVAL_SECONDS: ${CV_RIGHTS_EXPIRY_SCAN_INTERVAL_SECONDS:-10}
@@ -467,13 +474,15 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/live', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/ready', timeout=3)",
         ]
       interval: 10s
       timeout: 5s

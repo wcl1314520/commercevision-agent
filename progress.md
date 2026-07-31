@@ -714,3 +714,150 @@
   `ERROR/CRITICAL/Traceback/RuntimeWarning` 为 0，`scripts/verify_phase0.py` 全项通过。
 - 最终只读闭环结论：Ops 与 Web 为 `APPROVE`，后端无 Required/P0/P1；最后一个短于 72 小时
   deadline 的 P2 测试覆盖已补齐。Ticket 07 本地验收完成，Ticket 08 未启动。
+
+# 2026-07-30 Ticket 07 远程验收与 Ticket 08 启动
+
+- Ticket 07 单一实现提交 `26245f9` 已推送到 `origin/main`；本地 `HEAD` 与 `origin/main`
+  完全一致，工作树干净。
+- GitHub Actions 运行 `30482611560` 已全部通过：Python checks、Web checks、
+  Container builds、Security/Gitleaks 与 SBOM 均为 `success`。
+- Ticket 08 已按独立上下文启动；当前只恢复锁定规格、领域语言、Rights/Asset 现有能力和
+  HTTP/Web 接缝，不复用 Ticket 07 的隐式实现假设。
+- Ticket 08 发布门禁固定为：不可变 Brand Profile 版本、发布时当前 Rights 重检、历史内容与
+  当前可用性分离、Rights/Asset 变化驱动 `NEEDS_REPUBLISH`、跨 Workspace 隔离、并发发布
+  乐观锁，以及 OpenAPI/Web 完整纵向流程。
+- 三个只读独立审计已并行启动，分别覆盖领域/迁移、Rights/Event 传播和 HTTP/Web 契约；
+  审计结果用于确定首批公开接缝 RED tests，尚未修改生产实现。
+- Ticket 08 第一条 Domain TDD 红灯已观察：`tests/unit/test_brand_profile_domain.py` 在收集时
+  因 `BrandColor` 等 Brand Profile 领域类型尚不存在而失败；红灯覆盖不可变发布、精确
+  Asset/Rights 内容哈希、乐观草稿更新、迟到失效事件围栏和二进制精确身份。
+
+# 2026-07-30 Codex Windows 沙箱恢复
+
+- `CreateProcessAsUserW failed: 1312` 已定位为 Microsoft Store/MSIX PowerShell 的
+  `WindowsApps\pwsh.exe` 无法由 `CodexSandboxOffline` 令牌启动；不是仓库权限或项目代码问题。
+- 已用官方 MSI 安装并校验 PowerShell `7.6.4`，`pwsh.exe` Authenticode 状态为 `Valid`；
+  Codex 完整重启后命令路径为 `C:\Program Files\PowerShell\7\pwsh.exe`。
+- 修复后以受限身份 `laptop-5jnpnl1v\codexsandboxoffline` 连续执行 20 次独立命令，
+  结果为 `20/20` 成功，未降低 `[windows] sandbox = "elevated"` 的安全边界。
+- `uv` 后续统一使用授权项目根下的隔离缓存
+  `D:\个人项目\电商生图agent\.codex-uv-cache`；pytest 禁用不可写的旧 `.pytest_cache`
+  provider，避免把正常的用户级缓存拒绝误判成沙箱启动故障。
+- Ticket 08 Domain focused gate 在恢复后通过：`9 passed`。
+
+# 2026-07-30 Ticket 08 纵向实现继续
+
+- 三个共享工作区 Worker 已恢复：Application/HTTP、MySQL/Alembic、Rights Event/Worker
+  各自保留独立文件所有权；主控负责 Web/BFF、接口收拢和最终门禁。
+- Contracts 与 Application persistence seam 已先行落盘：mutation 回包不缓存动态
+  usability，Version GET 才按当前 Asset/Rights 事实重新决策；UoW 组合三组窄端口。
+- Web BFF 的 Brand Profile 精确 allowlist 完成一轮 RED→GREEN：新增集合 GET/POST、
+  identity GET、draft PUT、validate/publish POST、分页版本列表与按发布序号读取；未知 action、
+  非 UUID 和嵌套历史路径仍返回 404。Focused proxy 从 `18 passed, 1 failed` 收敛为
+  `19 passed`。
+- Web API client 从缺失模块 RED 收敛为 GREEN，覆盖创建/草稿更新/校验/发布、opaque cursor、
+  不可变发布序号、调用方取消和稳定 409 envelope；全量 Web unit 由原 `122 passed` 增至
+  `127 passed`。
+- Workbench controller 从缺失模块 RED 收敛为 GREEN，公开接缝覆盖租户/品牌切换后的迟到响应、
+  optimistic mutation 精确回包、409 本地草稿保留与显式恢复/丢弃、validation 版本绑定、
+  bounded cursor 去重和同一历史版本的动态 usability 刷新；全量 Web unit 现为 `133 passed`。
+- Windows 下 `pnpm --filter ... exec vitest` 未解析 workspace 本地 binary；未重复该调用，
+  改用仓库锁定的 `test:unit` script 执行同一真实测试集。
+- Ticket 08 Application/API worker 已完成锁 profile → 稳定顺序锁 Asset → 单次 MySQL
+  `database_now()` → 最终 Rights 复核；幂等 publish replay 重新水合当前 identity/head，不缓存
+  `ACTIVE` 动态可用性。其 focused unit/contract 为 `40 passed`，MySQL 为 `8 passed`，
+  API 回归为 `20 passed`。
+- Ticket 08 Persistence worker 已完成三表模型、exact composite FK、binary identity、CAS、
+  append-only/identity-delete triggers、单调分页、live-head invalidation fence 和拒绝有历史数据的
+  downgrade；真实 MySQL/migration/runtime privilege 为 `11 passed`，Application + MySQL +
+  migration roundtrip 为 `18 passed`，并显式声明 `commercevision-application` 依赖。
+- Web 第六轮审查的首批 8 个公开接缝 RED 均按预期失败，覆盖 validate 缺少 Actor、
+  跨 Workspace/错误 UUID/枚举/超限分页未 fail-closed、create 未绑定 profile key、
+  mutation 未撤销旧 validation、dirty refresh 丢失冲突语义和非破坏刷新切换 profile。
+- Web API 边界新增有界运行时 decoder，校验 Workspace/Brand/Profile identity、canonical UUID、
+  枚举、UTC 时间、完整 Draft、列表上限/cursor、历史成员 exact mapping 和当前 Rights 结果；
+  validate 的 `X-Actor-Id` 与 Idempotency-Key 已解耦。Controller 绑定 create profile key +
+  baseline selection，并在 mutation 开始即撤销 validation、保留 dirty refresh。
+- 上述 RED 转 GREEN 后，全量 Web unit 为 `147 passed`。TypeScript 当前仅等待并行 UI worker
+  合入 `profileKey` 新契约及将测试夹具 `ALLOWED` 改为 `AUTHORIZED`；ESLint 无 error，
+  decoder 的单个未使用 helper warning 已删除。
+- Python 分段基线已重新建立：完整 unit 在把 `TEMP/TMP` 指向工作区外层可写隔离目录后为
+  `707 passed`；首次 28 个错误全部来自 Windows pytest `tmp_path` 无法写入用户 Temp，
+  与业务代码无关。完整 contract 最终为 `166 passed, 1 skipped`。
+- Contract 门禁曾稳定复现 Windows 高负载下 C2PA 隔离子进程的 1.5 秒启动预算耗尽；
+  保持 Linux 1.5 秒严格预算和生产 10 秒默认不变，只把 Windows 测试装置预算设为 3 秒并
+  输出相对预算的耗时诊断。目标循环 `5/5` 通过后完整 contract 转绿。
+- Brand Profile 路径参数已用 RED test 证明 OpenAPI 原先错误宣称大写 UUID 合法；公开
+  schema 改为 lowercase canonical UUID pattern，route/contract `6 passed`，OpenAPI 与
+  TypeScript 类型已重新生成且生成器 `--check` 通过。
+- 第六轮后端独立审查没有 P0，但发现历史版本当前可用性的数据库时点竞态、使用 Host
+  event time 造成永久漏失效、Asset 删除事件缺少 Brand Profile 纵向消费路径，以及
+  Rights 子表查询缺少显式 Workspace/Asset 谓词。Persistence/Worker 修复正在以真实 MySQL
+  并发、慢时钟和重放测试闭合；完整 integration 门禁在这些修复落地前暂不启动。
+- 主控追加 Contract/Domain RED 证明 Pydantic 会把 `true`、`3.0` 和 `"3"` 静默转换为
+  optimistic version，且 draft 会把数字/字符串转换为 derivative flag；13 个目标断言按预期
+  失败。所有 Brand Profile 命令与响应整数/布尔字段改为 strict，Domain 聚合同时拒绝 bool、
+  float 和 string 版本，目标套件转为 `26 passed`。
+- Web Controller RED 证明重新校验期间旧 validation 仍可见，且后续历史页 `[4]` 可被追加到
+  已有 `[3,2,1]`。`beginValidation` 现在原子撤销旧结论；history 接缝允许重叠去重但拒绝任何
+  不低于既有尾部的新版本，并在当前响应协议违例时清除 loading，目标套件 `10 passed`。
+- BFF RED 证明 Brand Profile 正则的大小写不敏感标志仍会把大写 UUID 上送至已要求
+  lowercase canonical UUID 的 API，缺少身份头时甚至先返回 403 而不是本地 404。五条 Brand
+  Profile path allowlist 已改为大小写敏感，BFF 全套 `19 passed`；既有其他资源策略未改变。
+- Ticket 08 第六轮后端修复现已完成：历史 usability 在同一 `FOR SHARE` 批次返回
+  `snapshots + decided_at`；失效统一按 Profile head → Asset/current Rights → 单次数据库时间
+  加锁，并把慢时钟事件时间降为审计事实；typed `asset.delete.completed` 已由 Worker
+  fail-closed 校验 Workspace/Aggregate/generation 后走同一 CAS 失效路径。门禁为完整 unit
+  `731 passed`、contract `166 passed, 1 skipped`、Brand Profile focused `67 passed`、
+  migration/真实 MySQL/runtime privilege `14 passed`。
+- Ticket 08 Web 已把 Controller 改为 `subscribe + useSyncExternalStore` 单一快照源，并将
+  未确认命令提升为显式 authority：durable pending record 存在期间冻结编辑、校验、切换和刷新，
+  只有精确恢复/清理后解锁，避免下一条写命令覆盖唯一恢复记录。最终 Web unit `154 passed`、
+  proxy `19 passed`、typecheck/lint/build 通过、Brand Profile Playwright `7 passed`。
+- 补充独立后端审查无 P0/P1，提出 3 个 P2 与 1 个 Required。事件 identity/publisher 严格化
+  与 create 幂等 scope 已按 `9 failed, 18 passed` RED → `27 passed` GREEN 修复；Ruff
+  import-order Required 同步关闭。游标修复不是扩充 JSON 字段，而是新增查询绑定、HMAC
+  防篡改、current/previous 轮换和统一错误的深模块，核心 `50 passed`，正在接入组合根。
+- 分组 integration 定位确认单体门禁先前的失败来自两处跨 Ticket 迁移测试硬编码：
+  Operation migration 的 workspace collation 集合未包含三张 Brand Profile 表；Provider
+  Artifact “失败前无 DDL”测试从 `head` 跨越后续非事务 DDL 再检查旧迁移。两项均先稳定复现
+  RED，再分别以扩充 head 集合及固定到被测 revision 边界修复，focused 为 `1 passed` 与
+  `4 passed`；已完成的其它分组累计未再出现业务失败。
+
+# 2026-07-31 Ticket 08 最终本地发布门禁
+
+- 按交接顺序完整恢复 `AGENTS.md`、三份 planning 文件、`CONTEXT.md`、`PLAN.md`、Phase 2
+  spec、Ticket 08、Brand Profile Runbook 与 ADR-006/007；未重新规划或重复已完成实现。
+- Git 基线核验通过：`HEAD` 与 `origin/main` 均为
+  `26245f9b604255befc8ab9a0a9fdc429bd676591`，分支为 `main`；恢复时为 42 个 tracked
+  modified、48 个 untracked、0 staged，和 Ticket 08 交接快照完全一致。
+- 最终 Python 证据：unit `812 passed`；contract `167 passed, 1 skipped`；integration
+  四组 `151 + 68 + 152 + 90 = 461 passed, 2 skipped`；Brand Profile MySQL/Trusted Actor
+  focused `15 passed`；Asset Rights/runtime MySQL `30 passed`。显式 skip 仅为真实 Alibaba
+  OSS 与 live ClamAV 接缝。Ruff format/check 与 Python 依赖审计均通过，无已知漏洞。
+- 最终 Web 证据：unit `176 passed`、BFF proxy `21 passed`、全量 Playwright `87 passed`
+  （Brand Profile `16` 条）；TypeScript、ESLint、生成 API 类型、production build 和 pnpm
+  audit 全部通过，无已知漏洞。
+- 数据库与静态门禁通过：Alembic 单一 head 为 `b8e1d4f7a203`，parent 为
+  `a4c8e7f3b219`；`alembic check` 无 drift，upgrade/downgrade/re-upgrade、运行时 DML-only、
+  OpenAPI 重导出、生成 TypeScript、Compose 自定义 URL-safe RabbitMQ 凭证和
+  `git diff --check` 均通过。
+- Backend、Ops、Web 三路最终独立审查均无剩余 P0/P1/P2/Required；本轮没有修改生产代码，
+  因此不重复整轮语义审查。
+- 最新 Compose 应用实例已证明不是旧容器：API、Worker、Scheduler、MCP、Web、Migrate 和
+  Object Storage Init 的容器 `.Image`、Compose image label、当前本地 tag ID 与 repo digest
+  全部精确一致，且本地不存在更新的同服务 tagged/untagged image。五个长期应用服务 healthy，
+  两个一次性任务 `Exited (0)`。
+- HTTP 验收全部返回 200：API `/health/ready` 的 configuration/MySQL/Valkey/RabbitMQ/
+  Object Storage/Milvus 均为 `ok`；Web `/` 返回 UTF-8 `zh-CN` 页面；Scheduler
+  `/health/ready` 为 `ok` 且 `last_error=null`；MCP `/health/live` 为 `ok`。
+- `uv run python scripts/verify_phase0.py` 完整通过 Web、API live/ready、Scheduler、MCP、
+  MinIO、Milvus、OTel、MySQL、Valkey 和 RabbitMQ 共 11 项检查。
+- 本轮轻量复核通过：Ruff `289 files already formatted`、Ruff lint、生成 Web 类型
+  `--check`、`docker compose config --quiet` 和 `git diff --check`。运行态日志交接证据为
+  348 行、`ERROR_SIGNATURES=0`。
+- 范围审计确认 `apps/web/debug.log` 的 17 行全部是 Chromium GPU SharedImage runtime
+  diagnostics，不含应用业务日志；已用仓库本地 `.git/info/exclude` 安全排除，未删除或覆盖。
+  其余 47 个 untracked 文件均属于 Brand Profile 或共享 E2E 基础设施。
+- Ticket 08 已达到本地完成条件并更新为 `complete`；下一步只允许形成单一实现提交、推送并
+  等待对应 GitHub Actions 全绿。Ticket 09 继续保持 `pending`。

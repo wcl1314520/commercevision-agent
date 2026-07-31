@@ -3,6 +3,7 @@ import {
   TrustedPrincipalConfigurationError,
   WorkspaceBoundaryError,
 } from "../../../../lib/trusted-principal.ts";
+import { BRAND_PROFILE_SAFE_PAGE_SIZE } from "../../../../lib/brand-profile-transport-limits.ts";
 
 const DEFAULT_API_PROXY_URL = "http://api:8000";
 const DEFAULT_API_PROXY_TIMEOUT_MS = 15_000;
@@ -35,6 +36,21 @@ const PRODUCT_BRIEF_OPERATION_STATUS_PATH = new RegExp(
   `^/product-briefs/${UUID_PATH_SEGMENT}/operations/${UUID_PATH_SEGMENT}$`,
   "i",
 );
+const BRAND_PROFILE_READ_PATH = new RegExp(
+  `^/brand-profiles/${UUID_PATH_SEGMENT}$`,
+);
+const BRAND_PROFILE_DRAFT_PATH = new RegExp(
+  `^/brand-profiles/${UUID_PATH_SEGMENT}/draft$`,
+);
+const BRAND_PROFILE_MUTATION_PATH = new RegExp(
+  `^/brand-profiles/${UUID_PATH_SEGMENT}:(validate|publish)$`,
+);
+const BRAND_PROFILE_VERSIONS_PATH = new RegExp(
+  `^/brand-profiles/${UUID_PATH_SEGMENT}/versions$`,
+);
+const BRAND_PROFILE_VERSION_PATH = new RegExp(
+  `^/brand-profiles/${UUID_PATH_SEGMENT}/versions/[1-9][0-9]*$`,
+);
 const FORWARDED_HEADERS = [
   "accept",
   "content-type",
@@ -53,7 +69,7 @@ class UpstreamResponseTooLargeError extends Error {}
 
 function encodeApiPathSegment(segment: string): string {
   const action =
-    /^(.*):(abort|analyze|block|check|confirm|finalize|replace|revise|revoke)$/.exec(
+    /^(.*):(abort|analyze|block|check|confirm|finalize|publish|replace|revise|revoke|validate)$/.exec(
       segment,
     );
   if (action) {
@@ -199,6 +215,14 @@ function apiMethodAllowed(path: string, method: string): boolean {
     return method === "GET";
   }
   if (PRODUCT_BRIEF_OPERATION_STATUS_PATH.test(path)) return method === "GET";
+  if (path === "/brand-profiles") {
+    return method === "GET" || method === "POST";
+  }
+  if (BRAND_PROFILE_READ_PATH.test(path)) return method === "GET";
+  if (BRAND_PROFILE_DRAFT_PATH.test(path)) return method === "PUT";
+  if (BRAND_PROFILE_MUTATION_PATH.test(path)) return method === "POST";
+  if (BRAND_PROFILE_VERSIONS_PATH.test(path)) return method === "GET";
+  if (BRAND_PROFILE_VERSION_PATH.test(path)) return method === "GET";
   return false;
 }
 
@@ -255,6 +279,43 @@ function notAllowedResponse(request: Request, path: string, method: string): Res
   return response;
 }
 
+function enforceBrandProfilePageBoundary(
+  request: Request,
+  path: string,
+  target: URL,
+): Response | null {
+  if (
+    request.method !== "GET" ||
+    (path !== "/brand-profiles" &&
+      !BRAND_PROFILE_VERSIONS_PATH.test(path))
+  ) {
+    return null;
+  }
+  const limits = target.searchParams.getAll("limit");
+  if (limits.length === 0) {
+    target.searchParams.set(
+      "limit",
+      String(BRAND_PROFILE_SAFE_PAGE_SIZE),
+    );
+    return null;
+  }
+  if (
+    limits.length !== 1 ||
+    !/^[1-9][0-9]*$/.test(limits[0]) ||
+    Number(limits[0]) > BRAND_PROFILE_SAFE_PAGE_SIZE
+  ) {
+    return errorResponse(
+      request,
+      400,
+      "BRAND_PROFILE_PAGE_LIMIT_UNSAFE",
+      `Brand Profile page limit must be between 1 and ${BRAND_PROFILE_SAFE_PAGE_SIZE}`,
+      "validation",
+      false,
+    );
+  }
+  return null;
+}
+
 async function proxyApi(request: Request, context: RouteContext): Promise<Response> {
   const { path: segments } = await context.params;
   const path = `/${segments.map(encodeApiPathSegment).join("/")}`;
@@ -279,6 +340,12 @@ async function proxyApi(request: Request, context: RouteContext): Promise<Respon
   }
   target.pathname = `${target.pathname}/api/v1${path}`.replace(/\/{2,}/g, "/");
   target.search = new URL(request.url).search;
+  const pageBoundaryFailure = enforceBrandProfilePageBoundary(
+    request,
+    path,
+    target,
+  );
+  if (pageBoundaryFailure) return pageBoundaryFailure;
 
   let principal: { actorId: string; token: string };
   try {

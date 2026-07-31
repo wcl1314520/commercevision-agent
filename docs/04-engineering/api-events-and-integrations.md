@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-25 |
+| 最后更新 | 2026-07-30 |
 | 适用版本 | API v1 |
 
 ## API 原则
@@ -79,6 +79,48 @@ Finalize 分为三个事务边界：MySQL 认领 Lease；事务外 HEAD、受限
 Session 和 Outbox。存储不可用或条件读取冲突会释放 Lease 并保留同一幂等请求供重试；对象
 长度、Checksum、MIME、格式或解码证明不匹配会稳定终止该 Session，并在 Presigned URL
 失效后进入同一个耐久清理与复核流程。
+
+### Brand Profile
+
+```text
+POST   /api/v1/brand-profiles
+GET    /api/v1/brand-profiles
+GET    /api/v1/brand-profiles/{profileId}
+PUT    /api/v1/brand-profiles/{profileId}/draft
+POST   /api/v1/brand-profiles/{profileId}:validate
+POST   /api/v1/brand-profiles/{profileId}:publish
+GET    /api/v1/brand-profiles/{profileId}/versions
+GET    /api/v1/brand-profiles/{profileId}/versions/{versionNumber}
+```
+
+创建、更新草稿、校验和发布要求 Workspace 管理员；列表、identity 与不可变历史读取只要求
+Workspace 成员。`X-Workspace-Id` 仍只选择租户，`X-Actor-Id` 必须与签名
+`X-Trusted-Principal` 中的 actor 完全一致。`profileId` 只接受 canonical lowercase UUID；
+跨 Workspace ID 与不存在 ID 对已授权成员统一返回 `404 NOT_FOUND`。
+
+创建、更新草稿和发布必须携带 `Idempotency-Key`。幂等 Scope 包含操作类型、完整
+Workspace 哈希和 Profile identity；相同 key + 相同请求返回原结果或对账后的当前 Profile，
+相同 key + 不同请求返回 `409 IDEMPOTENCY_CONFLICT`。创建响应为 `201`，发布响应为 `201`，
+草稿更新为同步 `200`。`:validate` 是无持久副作用的当前授权评估，因此不领取幂等记录。
+
+更新、校验和发布请求都携带 `expected_version`，以 `brand_profiles.version` 做乐观并发。
+过期版本返回 `409 VERSION_CONFLICT`；调用方必须重新读取 Profile，不能自动把旧草稿套用到
+新 head。发布在同一 MySQL 事务中重新锁定并校验每个选中 Asset Version 的 Foundation
+retention、当前 Asset Version、用途、Provider、派生许可和有效期。任一 member 不合法时
+返回 `422 BRAND_PROFILE_PUBLICATION_REJECTED`，`details.issues[]` 包含
+`asset_version_id`、角色、稳定 reason code 与安全消息；不会创建部分 publication。
+
+发布成功追加一个不可变 Brand Profile Version，记录规范化 `content_sha256`、完整草稿、
+精确 Asset Version、发布时 Rights Record ID/version、publisher 与数据库时间，并原子推进
+identity head。历史列表按 version number 稳定游标分页，Profile 列表按
+`created_at + id` 稳定游标分页；两者默认 20、最大 100。
+
+历史响应将发布时证据与当前权限明确分开：每个 member 同时返回
+`published_rights_record_id/version`、`currently_usable`、`current_reason_code`、
+可选 current Rights Record identity 和 `decided_at`。`decided_at` 与当前 Asset/Rights
+快照来自同一个数据库一致性边界。该字段只是读取时快照；检索或 Provider 调用必须在实际使用
+前再次查询 MySQL 当前可用性。`NEEDS_REPUBLISH` 和历史 `currently_usable=true` 都不能替代
+最终授权检查。
 
 ### Configuration
 
@@ -240,14 +282,35 @@ Upload Session、Asset、Asset Version、对象事实和 Validation Operation。
 作为 Aggregate，供审计和进度观察者消费；它不替代 `asset.validation.requested` Command，
 也不创建第二个业务重试权威。
 
-Ticket 04 只创建和传递该 Durable Operation，并完成 finalize 所必需的对象完整性、受限
-流式 SHA-256 与安全图片解码证明。恶意软件扫描、内容安全判定、来源/权利校验以及使 Asset
-进入可用状态属于 Ticket 05 及后续工作；本 Ticket 不把这些检查标记为已完成。
-在 Ticket 05 注册 `ASSET_VALIDATION` Executor 前，本地 Compose Worker 订阅 Workflow 和
-Maintenance Queue。这样 Upload Session 到期和终止后的隔离对象都能耐久收敛；
-Asset Queue 暂不绑定消费者，校验事件保留在 RabbitMQ 和 MySQL Outbox 中，不会因为缺少
-Executor 被错误标记为终态失败。Worker/Event 集成门禁通过显式注入的确定性 Executor 验证
-Inbox 去重与 Durable Operation 重试权威。
+Ticket 04 创建并传递该 Durable Operation，后续 Ticket 已注册 `ASSET_VALIDATION`、
+`ASSET_DELETION` 和 `PRODUCT_BRIEF_ANALYSIS` Executor。当前 Compose Worker 显式订阅
+Workflow、Asset 和 Maintenance Queue，并在启动时把三个 Operation kind 作为必需能力；
+任一 Executor 缺失即失败关闭。Index Queue 由后续索引 Ticket 接管。所有消费者仍通过
+Inbox 去重，并以 Durable Operation 而不是 Celery retry 作为唯一业务重试权威。
+
+Ticket 08 发布 `brand-profile.published` v1 到 Asset Queue。它是 strict typed
+Observation，Payload 只包含 Workspace、Profile ID、不可变 Profile Version ID/number、
+`content_sha256`、member count 和 publisher；对象位置、规则正文和 Rights 明细不进入消息。
+Envelope 的 Aggregate 是 BrandProfile identity，Worker 校验 Workspace、Aggregate type/ID
+后只记录观察事实，不创建第二套发布权威。Envelope `aggregate_version` 是 mutable Profile
+head 的乐观锁版本；Payload `profile_version_number` 是 append-only publication 序号，二者
+不得混为同一个计数器。
+
+`asset.rights.changed` 与 `asset.rights.expired` v1 同时驱动 Brand Profile 失效收敛。
+Worker 先验证 Workspace 与 `aggregate_type=Asset`，再用 MySQL live authority 重验引用该
+Asset 的 current Profile heads。事件时间只作因果/审计信息；Profile locks、Asset/current
+Rights lock 和锁后 `UTC_TIMESTAMP(6)` 决定是否写入 `NEEDS_REPUBLISH`。重复、乱序、已被
+新 publication 取代或 live authority 仍满足的事件都是 Inbox 幂等 no-op，不能按旧 Payload
+恢复授权。
+
+`asset.delete.completed` v1 是 Maintenance Queue 上的 forward-compatible typed
+Observation。Payload 固定要求 Workspace、Asset ID、精确 Asset Version ID、
+`retention_class=FOUNDATION` 和正整数 `deletion_generation`；v1 消费者忽略未来新增字段。
+Worker 验证 Workspace、Asset Aggregate identity、retention class，并要求 Envelope
+`aggregate_version == deletion_generation` 后，复用同一个 live-authority 失效接口。重复
+delivery 不重复推进 Profile version，旧删除代次也不能删除或失效后来创建的 Asset Version；
+Ticket 13 的删除执行器负责产生实际完成事件，Ticket 08 只定义安全消费与 Brand Profile
+收敛。
 
 未知事件类型、已知事件的不支持版本、未绑定处理器和格式错误的 Payload 都先发布至
 Maintenance Queue，再由 Worker 记录为永久失败并写入 DLQ；不会静默成功。

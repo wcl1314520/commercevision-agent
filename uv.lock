@@ -709,6 +709,7 @@ source = { editable = "packages/persistence" }
 dependencies = [
     { name = "aiomysql" },
     { name = "alembic" },
+    { name = "commercevision-application" },
     { name = "commercevision-contracts" },
     { name = "commercevision-domain" },
     { name = "langgraph-checkpoint" },
@@ -720,6 +721,7 @@ dependencies = [
 requires-dist = [
     { name = "aiomysql", specifier = ">=0.2,<1" },
     { name = "alembic", specifier = ">=1.16,<2" },
+    { name = "commercevision-application", editable = "packages/application" },
     { name = "commercevision-contracts", editable = "packages/contracts" },
     { name = "commercevision-domain", editable = "packages/domain" },
     { name = "langgraph-checkpoint", specifier = ">=4.1.1,<5" },

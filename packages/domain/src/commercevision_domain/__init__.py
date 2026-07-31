@@ -32,6 +32,18 @@ from .assets import (
     ValidationVerdict,
     evaluate_current_usability,
 )
+from .brand_profiles import (
+    BrandColor,
+    BrandProfile,
+    BrandProfileDraft,
+    BrandProfileMemberRole,
+    BrandProfileMemberSelection,
+    BrandProfilePublishedMember,
+    BrandProfileState,
+    BrandProfileVersion,
+    BrandRule,
+    BrandRuleScope,
+)
 from .catalog import SKU, DuplicateExternalIdentifierError, Product
 from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
 from .operations import (
@@ -124,6 +136,16 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalType",
     "AttemptStatus",
+    "BrandColor",
+    "BrandProfile",
+    "BrandProfileDraft",
+    "BrandProfileMemberRole",
+    "BrandProfileMemberSelection",
+    "BrandProfilePublishedMember",
+    "BrandProfileState",
+    "BrandProfileVersion",
+    "BrandRule",
+    "BrandRuleScope",
     "ConcurrencyError",
     "CurrentUsabilityDecision",
     "DataIntegrityError",

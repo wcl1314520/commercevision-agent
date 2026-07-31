@@ -90,6 +90,128 @@ export interface AssetVersionResponseV1 {
   created_at: string;
 }
 
+export interface BrandColorV1 {
+  name: string;
+  value: string;
+}
+
+export interface BrandProfileCreateRequestV1 {
+  brand: string;
+  profile_key: string;
+  draft: BrandProfileDraftV1;
+}
+
+export interface BrandProfileDraftV1 {
+  rules: Array<BrandRuleV1>;
+  approved_colors: Array<BrandColorV1>;
+  required_marks: Array<string>;
+  prohibited_elements: Array<string>;
+  tone_constraints: Array<string>;
+  copy_constraints: Array<string>;
+  purpose: string;
+  provider: string;
+  requires_derivative: boolean;
+  selected_assets: Array<BrandProfileMemberSelectionV1>;
+}
+
+export interface BrandProfileListResponseV1 {
+  items: Array<BrandProfileResponseV1>;
+  next_cursor?: string | null;
+}
+
+export type BrandProfileMemberRole = "LOGO" | "REQUIRED_MARK" | "VISUAL_REFERENCE" | "PROMPT_TEMPLATE" | "MODEL_CONFIGURATION" | "LORA";
+
+export interface BrandProfileMemberSelectionV1 {
+  asset_version_id: string;
+  role: BrandProfileMemberRole;
+}
+
+export interface BrandProfilePublishRequestV1 {
+  expected_version: number;
+}
+
+export interface BrandProfilePublishedMemberV1 {
+  ordinal: number;
+  asset_id: string;
+  asset_version_id: string;
+  role: BrandProfileMemberRole;
+  published_rights_record_id: string;
+  published_rights_record_version: number;
+  currently_usable: boolean;
+  current_reason_code: RightsDecisionCode;
+  current_rights_record_id?: string | null;
+  current_rights_record_version?: number | null;
+  decided_at: string;
+}
+
+export interface BrandProfileResponseV1 {
+  id: string;
+  workspace_id: string;
+  brand: string;
+  profile_key: string;
+  state: BrandProfileState;
+  draft: BrandProfileDraftV1;
+  current_version_id: string | null;
+  current_version_number: number;
+  version: number;
+  stale_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+export type BrandProfileState = "DRAFT" | "ACTIVE" | "NEEDS_REPUBLISH" | "ARCHIVED";
+
+export interface BrandProfileUpdateDraftRequestV1 {
+  expected_version: number;
+  draft: BrandProfileDraftV1;
+}
+
+export interface BrandProfileValidateRequestV1 {
+  expected_version: number;
+}
+
+export interface BrandProfileValidationIssueV1 {
+  asset_version_id: string;
+  role: BrandProfileMemberRole;
+  reason_code: string;
+  message: string;
+}
+
+export interface BrandProfileValidationResponseV1 {
+  profile_id: string;
+  profile_version: number;
+  valid: boolean;
+  decided_at: string;
+  issues: Array<BrandProfileValidationIssueV1>;
+}
+
+export interface BrandProfileVersionListResponseV1 {
+  items: Array<BrandProfileVersionResponseV1>;
+  next_cursor?: string | null;
+}
+
+export interface BrandProfileVersionResponseV1 {
+  id: string;
+  workspace_id: string;
+  profile_id: string;
+  version_number: number;
+  draft: BrandProfileDraftV1;
+  content_sha256: string;
+  published_by: string;
+  published_at: string;
+  members: Array<BrandProfilePublishedMemberV1>;
+}
+
+export type BrandRuleScope = "VISUAL" | "COPY" | "COMPOSITION" | "LEGAL" | "GENERAL";
+
+export interface BrandRuleV1 {
+  code: string;
+  scope: BrandRuleScope;
+  instruction: string;
+}
+
 export interface CatalogDeleteRequestV1 {
   expected_version: number;
 }

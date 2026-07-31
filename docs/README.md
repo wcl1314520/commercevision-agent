@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-07-30 |
 | 适用版本 | Project Definition v1 |
 
 ## 00 产品
@@ -45,6 +45,7 @@
 - [Asset Validation Runbook](runbooks/asset-validation.md)
 - [Asset Rights Runbook](runbooks/asset-rights.md)
 - [ProductBrief Vision 与人工确认 Runbook](runbooks/product-brief.md)
+- [Brand Profile 发布与失效收敛 Runbook](runbooks/brand-profile.md)
 
 ## 06 路线图
 

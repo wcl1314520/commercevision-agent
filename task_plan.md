@@ -104,8 +104,15 @@
 - Ticket 07 已完成：Vision ProductBrief、原始 Provider Artifact Ledger、Durable HITL、
   Workflow continuation、Web 工作台、运行态 readiness、迁移与生产 Runbook 均通过红绿 TDD、
   多轮三路独立终审和全部本地发布门禁。
-- Ticket 07 的单一实现提交必须在远程 GitHub Actions 全绿后才允许进入 Ticket 08；
-  Ticket 08 尚未开始。
+- Ticket 07 单一实现提交为 `26245f9`；GitHub Actions 运行 `30482611560` 的 Python、Web、
+  Container builds、Gitleaks 与 SBOM 全部通过。
+- Ticket 08 本地实现与发布门禁已完成：Brand Profile 草稿、校验、不可变发布版本、历史
+  current usability、Rights/Asset 失效收敛、HTTP/Web、MySQL/Alembic、Worker、Runbook 和
+  生产配置均已闭合。
+- Ticket 08 完整 Python/Web/迁移/容器/安全门禁和 Backend/Ops/Web 三路独立终审均通过，
+  无剩余 P0/P1/P2/Required；本 Ticket 必须作为一个单一实现提交推送。
+- Ticket 08 只有在该提交对应的 GitHub Actions 全部绿色后才最终放行；Ticket 09 保持
+  `pending`，不得提前启动。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

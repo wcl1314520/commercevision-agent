@@ -11,8 +11,9 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from .asset_routes import asset_router, upload_router
+from .brand_profile_routes import router as brand_profile_router
 from .catalog_routes import router as catalog_router
-from .container import ApiContainer
+from .container import ApiContainer, ApiTrustKeyRing
 from .errors import install_error_handlers
 from .operation_routes import router as operation_router
 from .product_brief_routes import router as product_brief_router
@@ -22,12 +23,16 @@ from .workflow_routes import router as workflow_router
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     runtime_settings = settings or load_settings("control-api")
+    trust_key_ring = ApiTrustKeyRing.from_settings(runtime_settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         configure_logging(runtime_settings.log_level)
         logger = get_logger("commercevision.api")
-        container = ApiContainer.build(runtime_settings)
+        container = ApiContainer.build(
+            runtime_settings,
+            trust_key_ring=trust_key_ring,
+        )
         api.state.container = container
         logger.info(
             "service_started",
@@ -118,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     api.include_router(upload_router)
     api.include_router(asset_router)
+    api.include_router(brand_profile_router)
     api.include_router(catalog_router)
     api.include_router(operation_router)
     api.include_router(product_brief_router)

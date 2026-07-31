@@ -15,6 +15,9 @@ from commercevision_agent_core import (
     build_fixture_graph,
 )
 from commercevision_application import (
+    BrandProfileDeletionLineageError,
+    BrandProfileInvalidationApplicationService,
+    BrandProfileInvalidationPort,
     DurableNodeLifecycle,
     DurableOperationWorker,
     EventRoutingError,
@@ -36,6 +39,7 @@ from commercevision_application import (
 )
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
+    ASSET_DELETE_COMPLETED_V1,
     ASSET_DELETE_REQUESTED_V1,
     ASSET_RIGHTS_CHANGED_V1,
     ASSET_RIGHTS_EXPIRED_V1,
@@ -43,6 +47,7 @@ from commercevision_contracts.events import (
     ASSET_VALIDATION_COMPLETED_V1,
     ASSET_VALIDATION_FAILED_V1,
     ASSET_VALIDATION_REQUESTED_V1,
+    BRAND_PROFILE_PUBLISHED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
     OPERATION_RECOVERY_REQUESTED_V1,
     PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
@@ -56,12 +61,14 @@ from commercevision_contracts.events import (
     WORKFLOW_NODE_STARTED_V1,
     WORKFLOW_RESUME_REQUESTED_V1,
     WORKFLOW_RUN_REQUESTED_V1,
+    AssetDeleteCompletedPayload,
     AssetDeleteRequestedPayload,
     AssetRightsChangedPayload,
     AssetUploadFinalizedPayload,
     AssetValidationCompletedPayload,
     AssetValidationFailedPayload,
     AssetValidationRequestedPayload,
+    BrandProfilePublishedPayload,
     EventQueue,
     EventType,
     ProductBriefAwaitingConfirmationPayload,
@@ -77,6 +84,7 @@ from commercevision_domain import (
     NotFoundError,
     OperationKind,
     StorageLocationClass,
+    canonicalize_uuid,
 )
 from commercevision_domain.messaging import OutboxEvent
 from commercevision_object_storage import (
@@ -87,6 +95,7 @@ from commercevision_persistence import (
     Database,
     MySQLCheckpointSaver,
     SqlAlchemyAssetUnitOfWork,
+    SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyUnitOfWork,
     create_database,
@@ -120,6 +129,7 @@ class WorkerRuntime:
     operation_executors: OperationExecutorRegistry
     object_storage: ObjectStorage | None
     resources: tuple[object, ...]
+    brand_profile_invalidation: BrandProfileInvalidationPort | None = None
     lifecycle: DurableNodeLifecycle | None = None
 
     @classmethod
@@ -128,6 +138,7 @@ class WorkerRuntime:
         settings: Settings,
         *,
         operation_executors: Mapping[OperationKind, OperationExecutor] | None = None,
+        brand_profile_invalidation: BrandProfileInvalidationPort | None = None,
     ) -> WorkerRuntime:
         configured_executors = dict(operation_executors or {})
         missing_executors = set(settings.worker_required_operation_kinds).difference(
@@ -137,6 +148,10 @@ class WorkerRuntime:
             missing = ", ".join(sorted(kind.value for kind in missing_executors))
             raise RuntimeError(f"required operation executors are unavailable: {missing}")
         database = create_database(settings)
+        if brand_profile_invalidation is None:
+            brand_profile_invalidation = BrandProfileInvalidationApplicationService(
+                lambda: SqlAlchemyBrandProfileUnitOfWork(database.session_factory)
+            )
         object_storage = (
             build_object_storage(settings) if settings.worker_requires_object_storage else None
         )
@@ -283,6 +298,7 @@ class WorkerRuntime:
             agent=FixtureAgentRuntime(graph, checkpointer),
             operation_worker=operation_worker,
             operation_executors=executor_registry,
+            brand_profile_invalidation=brand_profile_invalidation,
             object_storage=object_storage,
             resources=tuple(resources),
             lifecycle=lifecycle,
@@ -344,12 +360,20 @@ class WorkerRuntime:
             handler=runtime._handle_asset_delete,
         )
         runtime.event_router.register_handler(
+            contract=ASSET_DELETE_COMPLETED_V1,
+            handler=runtime._handle_foundation_asset_deleted,
+        )
+        runtime.event_router.register_handler(
             contract=ASSET_RIGHTS_CHANGED_V1,
-            handler=runtime._observe_asset_rights_changed,
+            handler=runtime._handle_asset_rights_changed,
         )
         runtime.event_router.register_handler(
             contract=ASSET_RIGHTS_EXPIRED_V1,
-            handler=runtime._observe_asset_rights_changed,
+            handler=runtime._handle_asset_rights_changed,
+        )
+        runtime.event_router.register_handler(
+            contract=BRAND_PROFILE_PUBLISHED_V1,
+            handler=runtime._observe_brand_profile_published,
         )
         runtime.event_router.register_handler(
             contract=PRODUCT_BRIEF_REQUESTED_V1,
@@ -848,6 +872,41 @@ class WorkerRuntime:
             operation_id=payload.operation_id,
         )
 
+    def _handle_foundation_asset_deleted(self, event: OutboxEvent) -> None:
+        payload = ASSET_DELETE_COMPLETED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, AssetDeleteCompletedPayload):
+            raise TypeError("Asset deletion completion contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Asset deletion workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "Asset"
+            or event.envelope.aggregate_id != payload.asset_id
+        ):
+            raise EventRoutingError(
+                "Asset deletion identity does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        if event.envelope.aggregate_version != payload.deletion_generation:
+            raise EventRoutingError(
+                "Asset deletion generation does not match its Outbox aggregate version",
+                reason="deletion_generation_mismatch",
+            )
+        if self.brand_profile_invalidation is None:
+            raise RuntimeError("Brand Profile invalidation is not configured")
+        try:
+            self.brand_profile_invalidation.invalidate_foundation_asset_deletion(
+                workspace_id=payload.workspace_id,
+                asset_id=payload.asset_id,
+                asset_version_id=payload.asset_version_id,
+                deletion_generation=payload.deletion_generation,
+                occurred_at=event.envelope.occurred_at,
+            )
+        except BrandProfileDeletionLineageError as exc:
+            raise EventRoutingError(str(exc), reason=exc.reason) from exc
+
     def _handle_product_brief_analysis(self, event: OutboxEvent) -> None:
         payload = PRODUCT_BRIEF_REQUESTED_V1.validate_payload(event.envelope.payload)
         if not isinstance(payload, ProductBriefRequestedPayload):
@@ -922,8 +981,7 @@ class WorkerRuntime:
                 reason="aggregate_mismatch",
             )
 
-    @staticmethod
-    def _observe_asset_rights_changed(event: OutboxEvent) -> None:
+    def _handle_asset_rights_changed(self, event: OutboxEvent) -> None:
         contract = (
             ASSET_RIGHTS_EXPIRED_V1
             if event.envelope.event_type == EventType.ASSET_RIGHTS_EXPIRED.value
@@ -943,6 +1001,41 @@ class WorkerRuntime:
         ):
             raise EventRoutingError(
                 "Asset rights identity does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        try:
+            canonical_asset_id = canonicalize_uuid(payload.asset_id)
+        except (TypeError, ValueError):
+            canonical_asset_id = None
+        if canonical_asset_id != payload.asset_id:
+            raise EventRoutingError(
+                "Asset rights event requires a canonical Asset identity",
+                reason="malformed_asset_identity",
+            )
+        if self.brand_profile_invalidation is None:
+            raise RuntimeError("Brand Profile invalidation is not configured")
+        self.brand_profile_invalidation.invalidate_asset(
+            workspace_id=payload.workspace_id,
+            asset_id=payload.asset_id,
+            occurred_at=event.envelope.occurred_at,
+        )
+
+    @staticmethod
+    def _observe_brand_profile_published(event: OutboxEvent) -> None:
+        payload = BRAND_PROFILE_PUBLISHED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, BrandProfilePublishedPayload):
+            raise TypeError("Brand Profile publication contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Brand Profile workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "BrandProfile"
+            or event.envelope.aggregate_id != payload.profile_id
+        ):
+            raise EventRoutingError(
+                "Brand Profile identity does not match its Outbox aggregate",
                 reason="aggregate_mismatch",
             )
 

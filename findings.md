@@ -349,3 +349,131 @@
 - 默认 deterministic Compose 不能依赖 Git 外的 Secret 文件。仓库内空白 fixture 只保证
   clean clone 的 bind source 存在，不是凭据；切换 Alibaba 时必须显式挂载真实只读 Secret，
   缺失或空白在 Worker 接收任务前失败关闭。
+
+## Ticket 08 初始不变量
+
+- Brand Profile 的历史内容与当前授权是两个不同事实：历史版本保留发布时的精确
+  Asset Version/Rights Record 引用供审计，但任何读取或后续检索都必须依据 MySQL 当前
+  Asset/Rights 状态重新计算成员可用性，历史版本本身永远不能授权已失效成员。
+- 发布是一个带乐观版本的短事务：锁定 Brand Profile 身份与所有选中成员，使用同一事务的
+  MySQL 当前时间重新验证 Workspace、Foundation retention class、Asset 状态、当前
+  Rights Record、用途、Provider、派生权限和有效期，再原子追加不可变版本并切换当前指针。
+- Rights replacement、revocation、expiry 或 Asset deletion 不能改写历史版本；它们需要让
+  受影响的当前 Brand Profile 进入 `NEEDS_REPUBLISH`。同一变化重放必须幂等，且不得把已经
+  `ARCHIVED` 或已由新版本修复的档案错误降级。
+- Brand Profile 持久化应按 Identity/Draft、Published Version/Member 和当前可用性查询拆为
+  窄端口，由同一 UoW 组合以保留发布事务一致性；不可把资产授权判断埋进 Web、路由或
+  Repository 的宽泛 JSON 查询。
+- Ticket 08 的首批 RED tests 必须从公开 Domain、HTTP 和真实 MySQL 接缝证明：并发发布只有
+  一个胜者、无效成员发布失败、发布后 Rights 变化立即改变当前可用性并标记重发、跨
+  Workspace 标识始终返回不可枚举错误。
+
+## Windows 沙箱 1312 根因与稳定修复
+
+- Codex 沙箱令牌本身可正常启动 `cmd.exe`、Windows PowerShell 5.1 和 `whoami.exe`；
+  失败只发生在 Microsoft Store/MSIX 的 App Execution Alias
+  `C:\Users\23163\AppData\Local\Microsoft\WindowsApps\pwsh.exe`，因此重启 runner、
+  放宽仓库权限或降低沙箱级别都不能解决根因。
+- 官方 MSI 把 Win32 PowerShell 安装到 `C:\Program Files\PowerShell\7\pwsh.exe` 并写入
+  machine PATH。Codex 必须完整重启才能继承新的 PATH；仅重启 command runner 仍会继承
+  Desktop 主进程缓存的旧路径。
+- 修复验收必须同时证明：实际 `pwsh` 路径、PowerShell 版本、受限沙箱身份，以及多次
+  独立 SpawnChild 均成功。单次 `pwsh --version` 不能证明 1312 已稳定消失。
+
+## Ticket 08 Web 接缝恢复
+
+- Ticket 08 的浏览器测试接缝已经由验收条件固定为 Brand Profile HTTP client、Workbench
+  controller 和公开页面；这些测试只观察版本冲突保留本地草稿、权威读取替换、历史 cursor
+  去重、迟到响应隔离以及历史内容与当前成员可用性的分离，不探测 React 或 Repository 内部实现。
+- 现有 Web BFF 采用精确方法/路径 allowlist，并由服务端注入受信 Principal；Brand Profile
+  只能扩展这套窄入口，不得让浏览器构造可信身份，也不得用宽前缀放行未知 action。
+- 本轮恢复时一次组合状态命令在递归 `Get-ChildItem` 阶段超过 10 秒，但前置 Git 基线读取已经
+  完成；后续文件枚举改用 `rg --files`。一次 `wait_agent` 使用了低于工具下限的 1 秒参数，
+  后续固定使用至少 10 秒，不重复无效调用。
+- 现有 BFF 把控制面请求体限制为 1 MiB、响应限制为 2 MiB，并以 UUID/action 正则逐路径放行；
+  Brand Profile 历史必须继续 cursor 分页并保持在同一有界读取面，不能借新工作台放宽限制。
+- Domain 已将 Brand Profile 身份明确为 `workspace_id + brand + profile_key`，其中 `brand` 是
+  严格的展示名称、`profile_key` 是规范 token；Web 只能使用服务端返回的乐观 `version` 发命令，
+  不能把当前发布版本号当作身份版本，也不能在客户端规范化这些键后静默重试。
+- Application seam 已落为同一 UoW 下的三组窄端口：Identity/Draft、不可变 Publication、
+  Asset Authority。mutation 响应只返回身份/当前 head；只有 Version GET 重新计算并返回
+  `published_rights_*` 与 `current_*`，从接口层防止幂等缓存把旧 usability 当作当前授权。
+- Web 草稿需要覆盖 Domain 的完整受控字段：规则、色板、必需标记、禁止元素、语气、文案约束、
+  purpose、provider、派生权限和最多 64 个精确 Asset Version 选择；UI 可以提供逐项编辑器，
+  但发送时必须是严格结构化契约，不能用任意 JSON 作为逃逸面。
+- 首版 HTTP route 的 publish 未显式返回 201，且 `profile_id` 仍是裸 `str`；这会分别削弱
+  “新不可变版本已创建”的响应契约和 OpenAPI 的 canonical UUID 约束，已要求 Application
+  Worker 用 route/contract RED tests 收紧。Web client 对 publish 状态保持 fail-closed 201。
+- Pydantic 带默认值的 `next_cursor` 在生成 TypeScript 中是可选的 `string | null | undefined`；
+  Workbench controller 必须在接口进入点归一为内部严格的 `string | null`，不能让第三种状态向
+  分页状态机扩散。
+- Persistence focused 测试发现 publication/validation 若在取得 Asset locks 之前采样数据库时间，
+  等锁期间自然到期的 Rights 可能被旧时钟误授权；权威 `database_now()` 必须在全部成员锁定后、
+  最终授权判断前采样。
+- TypeScript 类型不能替代不可信 HTTP 响应的运行时契约。Brand Profile Web decoder 必须在数据
+  进入 Controller 前校验租户/品牌/档案身份、canonical UUID、状态与 Rights 枚举、数组上限、
+  opaque cursor、冻结 Draft/member 映射及 `currently_usable ↔ AUTHORIZED`，协议违例统一映射
+  为 fail-closed 502。
+- 同一品牌创建第二个 `profile_key` 时，create command 不能假定当前没有已选档案。安全 token
+  需要同时绑定请求的 `profile_key` 与命令开始时的当前 profile id/version；只有 baseline
+  未漂移且响应 key 精确匹配时，Controller 才能切换到新档案。
+- mutation 请求一旦发出就可能跨越 Rights/版本变化，因此旧的绿色 validation 不再具有发布
+  授权意义；在命令开始时递增 validation generation 并清空结果，比只在特定 422 分支清理更
+  能覆盖超时、响应丢失和迟到回包。
+- 历史 Brand Profile 的内容快照与“此刻是否仍可使用”必须来自一个一致的数据库观察边界。
+  在 `READ COMMITTED` 下先读 Asset/Rights、再单独采样 `database_now()` 会把旧授权事实与
+  新时间拼接成虚假 `currently_usable=true`；持久化端口应在稳定成员锁内返回快照与同一次
+  MySQL `UTC_TIMESTAMP(6)`，Application 不得再次采样。
+- Brand Profile 失效不能以 API/Worker 主机生成的 `event.occurred_at` 作为数据库顺序或
+  `published_at` 上界。安全算法是在同一事务中稳定锁定当前 Profile head 与 Asset/current
+  Rights，随后采样 MySQL 当前时间并以“当前 head 仍精确引用已经失效的 authority”执行 CAS；
+  事件时间只用于审计，慢主机时钟不得造成永久漏失效。
+- Asset 物理删除由后续 Retention Ticket 执行，但 Ticket 08 必须先定义并消费类型化、
+  可演进的 `asset.delete.completed` observation。Payload 要绑定 Workspace、Asset 和删除
+  generation；重复投递必须幂等，错误 Workspace/Aggregate 必须失败关闭，当前引用该 Asset
+  的 Profile 才能进入 `NEEDS_REPUBLISH`。
+- Windows 上 C2PA Contract 的进程隔离预算必须区分 native/interpreter 冷启动与真正泄漏。
+  本地 1.5 秒在全套并发负载下可重复耗尽，而 3 秒预算连续五轮通过；Linux 仍保持 1.5 秒，
+  生产 Adapter 的 10 秒截止时间与硬终止/容量回收语义未放宽。
+- Pydantic 的默认整数/布尔解析会接受 `true -> 1`、`3.0 -> 3`、`"3" -> 3` 和
+  `"false" -> false`。Optimistic version 与授权派生开关是控制面语义，必须在字段上显式
+  `strict=True`，并由 Domain 构造器再次拒绝 Python `bool`（它是 `int` 子类）、float 和 string。
+- Keyset 历史分页的有序性不能只在单页内验证。客户端追加页应允许服务端边界重叠并去重，
+  但所有新的 version number 必须严格低于既有尾部；否则乱序响应会破坏审计历史和后续 cursor
+  推理。当前 token 下的协议违例还必须结束 loading，不能把工作台永久留在加载态。
+- Canonical UUID 必须在 OpenAPI、API route 和 Web BFF 三层表达相同。BFF 的 `[0-9a-f]`
+  正则若带 `i` flag，会让大写 alias 穿过 allowlist 后才在 API 失败，产生 403/422/404 顺序差异
+  和不必要的上游流量；Brand Profile 路径应在代理边界直接按 lowercase pattern 拒绝。
+- Opaque keyset cursor 不是授权边界，但可伪造或跨查询复用的 cursor 仍会静默跳过审计结果。
+  Brand Profile cursor 因此必须绑定完整查询 identity（Profile 列表为 Workspace + 可选 Brand，
+  Version 列表为 Workspace + Profile）、cursor kind 与排序 schema，并用域分隔派生的
+  HMAC-SHA256 current/previous key 验证；旧 unsigned JSON cursor 不能在未发布的 Ticket 08
+  中保留兼容逃逸面。解码失败对外统一为无细节的 invalid cursor，且必须在 Repository 查询前发生。
+- Alembic 在 MySQL 上执行非事务 DDL。某一旧 migration 的“失败前无任何变化”测试若从未来
+  `head` 开始 downgrade，会先合法删除所有后续 revision 的对象，再到达被测 fail-closed guard，
+  因而无法证明目标 migration 自身的原子前置检查。此类测试必须从被测 revision 本身开始并
+  downgrade 到其直接 parent；head roundtrip 应由独立链路测试负责。
+
+## Ticket 08 最终生产不变量
+
+- Brand Profile 历史内容和当前授权必须保持两个独立事实。历史 member 永久保留发布时的
+  Asset Version/Rights Record identity；每次读取和后续使用都在稳定锁内重新读取当前
+  Asset/Rights authority，并在取得全部锁后用独立语句采样 MySQL 当前时间。先采样时间再等待
+  锁会把等待期间已经到期的 Rights 错误授权。
+- 发布、校验和失效共享同一 authority seam：Profile head、Asset/current Rights 按稳定顺序
+  锁定，最终判断使用一次数据库时间。Rights identity replacement 即使许可文本等价，也会使
+  当前 publication 进入 `NEEDS_REPUBLISH`；迟到、重复或旧 generation 事件不能污染新 head。
+- Brand Profile keyset cursor 必须绑定 Workspace、查询种类、Brand/Profile identity、排序
+  schema、签发时间和 keyset boundary，并使用 current/previous 根密钥经独立域派生的
+  HMAC-SHA256。生产 API 对 current 和 previous trust key 执行同等安全校验，禁止空值和公开
+  本地默认 secret；配置不安全时必须在构造数据库、对象存储或 readiness 资源前失败关闭。
+- 浏览器 pending command 是 mutation 的 durable authority，而不是 UI 缓存。记录必须绑定
+  Workspace、Brand、Profile ID、不可变 profile key、action、expected versions、完整 payload、
+  command/payload digest、幂等键和 attempted draft；preflight 读取失败、409、408/429/5xx、
+  取消或响应丢失都保留未确认命令证据，只有精确对账或操作人显式清理后才解锁。
+- Web 的 2 MiB BFF 响应硬上限与 Brand Profile 历史分页上限共同构成读取安全边界；一页最多
+  两个不可变 publication，历史状态必须显式区分 unloaded/loading/error/ready。权限 403、
+  retention 410、租户身份漂移和持久恢复协议违例均失败关闭管理员能力，不把错误伪装为空历史。
+- Trusted actor、Domain 和事件中的 Actor ID 统一拒绝 Unicode `Cc` 控制字符；malformed Asset
+  UUID 事件属于永久路由失败。Worker 关闭保持逐项 best-effort 并聚合错误，Scheduler/API/Worker
+  使用同一个 RabbitMQ 密码派生连接，避免单个进程在表面健康的异构凭证下脱离可靠消息链。

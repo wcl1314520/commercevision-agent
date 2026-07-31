@@ -659,17 +659,23 @@ def test_workflow_only_runtime_does_not_construct_object_storage(monkeypatch) ->
 
 
 def test_worker_binds_known_upload_observation_without_weakening_event_routing() -> None:
+    class NoOpBrandProfileInvalidation:
+        @staticmethod
+        def invalidate_asset(**_kwargs: object) -> None:
+            return None
+
     runtime = WorkerRuntime.build(
         Settings(
             environment="ci",
             worker_queues=["commercevision.workflow"],
-        )
+        ),
+        brand_profile_invalidation=NoOpBrandProfileInvalidation(),  # type: ignore[arg-type]
     )
     payload = AssetUploadFinalizedPayload(
         workspace_id="catalog-workspace",
         upload_session_id="upload-session-1",
-        asset_id="asset-1",
-        asset_version_id="asset-version-1",
+        asset_id="018f5f4d-7c11-7d11-8a11-111111111111",
+        asset_version_id="018f5f4d-7c11-7d11-8a11-222222222222",
         object_fact_id="object-fact-1",
         validation_operation_id="operation-1",
     )

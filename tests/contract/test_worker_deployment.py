@@ -334,6 +334,25 @@ def test_compose_worker_consumes_asset_product_brief_and_maintenance_work() -> N
     ]
 
 
+def test_compose_scheduler_uses_the_shared_authenticated_rabbitmq_boundary() -> None:
+    services = _compose_services()
+    rabbitmq_url = "amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//"
+    assert services["rabbitmq"]["environment"]["RABBITMQ_DEFAULT_PASS"] == (
+        "${CV_RABBITMQ_PASSWORD:-commercevision}"
+    )
+    for service_name in ("api", "worker", "scheduler"):
+        assert services[service_name]["environment"]["CV_RABBITMQ_URL"] == rabbitmq_url
+
+    scheduler = services["scheduler"]
+    assert scheduler["depends_on"]["rabbitmq"] == {"condition": "service_healthy"}
+    scheduler_healthcheck = " ".join(scheduler["healthcheck"]["test"])
+    assert "/health/ready" in scheduler_healthcheck
+    assert "/health/live" not in scheduler_healthcheck
+
+    example_environment = (_REPOSITORY_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "CV_RABBITMQ_PASSWORD=commercevision" in example_environment
+
+
 def test_compose_shares_product_brief_policy_without_exposing_worker_secret() -> None:
     services = _compose_services()
     api_environment = services["api"]["environment"]

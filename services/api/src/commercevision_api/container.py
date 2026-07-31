@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from commercevision_application import (
     AssetRegistryApplicationService,
     AssetRightsApplicationService,
+    BrandProfileApplicationService,
+    BrandProfileCursorCodec,
     CatalogApplicationService,
     DeadLetterOperatorService,
     OperationApplicationService,
@@ -32,6 +34,7 @@ from commercevision_observability import ProductBriefTelemetry
 from commercevision_persistence import (
     Database,
     SqlAlchemyAssetUnitOfWork,
+    SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyCatalogUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyOperatorUnitOfWork,
@@ -44,12 +47,78 @@ from commercevision_persistence import (
 
 from .identity import PrincipalAccessPolicy, SignedTrustedPrincipalResolver
 
+_PUBLIC_LOCAL_TRUST_KEY_PAIRS = frozenset(
+    {
+        (
+            "local-web-gateway",
+            "local-web-gateway-secret-change-before-production",
+        ),
+    }
+)
+_PUBLIC_LOCAL_TRUST_SECRETS = frozenset(secret for _, secret in _PUBLIC_LOCAL_TRUST_KEY_PAIRS)
+
+
+def _is_production_safe_trust_pair(key_id: str | None, secret: str | None) -> bool:
+    if key_id is None or secret is None or not key_id.strip() or not secret.strip():
+        return False
+    return (
+        key_id,
+        secret,
+    ) not in _PUBLIC_LOCAL_TRUST_KEY_PAIRS and secret not in _PUBLIC_LOCAL_TRUST_SECRETS
+
+
+class ApiTrustConfigurationError(RuntimeError):
+    """Raised when the Control API cannot establish its inbound trust boundary."""
+
+
+@dataclass(frozen=True, slots=True)
+class ApiTrustKeyRing:
+    """Validated key material shared by principal verification and cursor signing."""
+
+    current_key_id: str | None
+    current_secret: str | None = field(repr=False)
+    previous_key_id: str | None
+    previous_secret: str | None = field(repr=False)
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> ApiTrustKeyRing:
+        current_secret = settings.trusted_principal_current_hmac_secret
+        previous_secret = settings.trusted_principal_previous_hmac_secret
+        key_ring = cls(
+            current_key_id=settings.trusted_principal_current_key_id,
+            current_secret=(
+                current_secret.get_secret_value() if current_secret is not None else None
+            ),
+            previous_key_id=settings.trusted_principal_previous_key_id,
+            previous_secret=(
+                previous_secret.get_secret_value() if previous_secret is not None else None
+            ),
+        )
+        if settings.environment == "production":
+            if key_ring.current_key_id is None or key_ring.current_secret is None:
+                raise ApiTrustConfigurationError(
+                    "production Control API requires a current trusted-principal key"
+                )
+            configured_pairs = (
+                (key_ring.current_key_id, key_ring.current_secret),
+                (key_ring.previous_key_id, key_ring.previous_secret),
+            )
+            for key_id, secret in configured_pairs:
+                if key_id is None and secret is None:
+                    continue
+                if not _is_production_safe_trust_pair(key_id, secret):
+                    raise ApiTrustConfigurationError(
+                        "production Control API trusted-principal key is not production-safe"
+                    )
+        return key_ring
+
 
 @dataclass(slots=True)
 class ApiContainer:
     database: Database
     assets: AssetRegistryApplicationService
     rights: AssetRightsApplicationService
+    brand_profiles: BrandProfileApplicationService
     catalog: CatalogApplicationService
     operations: OperationApplicationService
     product_briefs: ProductBriefApplicationService
@@ -61,7 +130,12 @@ class ApiContainer:
     object_storage_readiness: ObjectStorageReadiness
 
     @classmethod
-    def build(cls, settings: Settings) -> ApiContainer:
+    def build(
+        cls,
+        settings: Settings,
+        *,
+        trust_key_ring: ApiTrustKeyRing,
+    ) -> ApiContainer:
         database = create_database(settings)
 
         def uow_factory() -> SqlAlchemyUnitOfWork:
@@ -73,6 +147,9 @@ class ApiContainer:
         def asset_uow_factory() -> SqlAlchemyAssetUnitOfWork:
             return SqlAlchemyAssetUnitOfWork(database.session_factory)
 
+        def brand_profile_uow_factory() -> SqlAlchemyBrandProfileUnitOfWork:
+            return SqlAlchemyBrandProfileUnitOfWork(database.session_factory)
+
         def operation_uow_factory() -> SqlAlchemyOperationUnitOfWork:
             return SqlAlchemyOperationUnitOfWork(database.session_factory)
 
@@ -83,19 +160,21 @@ class ApiContainer:
             return SqlAlchemyProductBriefUnitOfWork(database.session_factory)
 
         access_policy = PrincipalAccessPolicy()
-        current_secret = settings.trusted_principal_current_hmac_secret
-        previous_secret = settings.trusted_principal_previous_hmac_secret
         principal_resolver = SignedTrustedPrincipalResolver(
-            current_key_id=settings.trusted_principal_current_key_id,
-            current_secret=(
-                current_secret.get_secret_value() if current_secret is not None else None
-            ),
-            previous_key_id=settings.trusted_principal_previous_key_id,
-            previous_secret=(
-                previous_secret.get_secret_value() if previous_secret is not None else None
-            ),
+            current_key_id=trust_key_ring.current_key_id,
+            current_secret=trust_key_ring.current_secret,
+            previous_key_id=trust_key_ring.previous_key_id,
+            previous_secret=trust_key_ring.previous_secret,
             max_age_seconds=settings.trusted_principal_max_age_seconds,
             future_skew_seconds=settings.trusted_principal_future_skew_seconds,
+        )
+        brand_profile_cursor_codec = BrandProfileCursorCodec(
+            current_key_id=trust_key_ring.current_key_id,
+            current_secret=trust_key_ring.current_secret,
+            previous_key_id=trust_key_ring.previous_key_id,
+            previous_secret=trust_key_ring.previous_secret,
+            max_age_seconds=settings.brand_profile_cursor_max_age_seconds,
+            future_skew_seconds=settings.brand_profile_cursor_future_skew_seconds,
         )
         object_storage = build_object_storage(settings)
         integrity_verifier = UploadIntegrityVerifier(
@@ -151,6 +230,10 @@ class ApiContainer:
                 lease_owner=f"{socket.gethostname()}:{settings.service_name}",
             ),
             rights=AssetRightsApplicationService(uow_factory=asset_uow_factory),
+            brand_profiles=BrandProfileApplicationService(
+                uow_factory=brand_profile_uow_factory,
+                cursor_codec=brand_profile_cursor_codec,
+            ),
             catalog=CatalogApplicationService(uow_factory=catalog_uow_factory),
             operations=OperationApplicationService(
                 uow_factory=operation_uow_factory,
