@@ -5225,13 +5225,15 @@ test("ignores an authoritative 410 after the selected product changes", async ({
 
   await page.getByRole("button", { name: /Second Product/ }).click();
   await expect(page.getByLabel("品牌值")).toHaveCount(0);
-  expect(
-    await page.evaluate((productId) =>
-      sessionStorage.getItem(
-        `commercevision.product-brief.v2:catalog-demo:${productId}`,
-      ),
-    PRODUCT_B_ID),
-  ).toBeNull();
+  await expect
+    .poll(() =>
+      page.evaluate((productId) =>
+        sessionStorage.getItem(
+          `commercevision.product-brief.v2:catalog-demo:${productId}`,
+        ),
+      PRODUCT_B_ID),
+    )
+    .toBeNull();
   await page.getByLabel("商品理解 ID").fill(NEXT_BRIEF_ID);
   await page.getByRole("button", { name: "载入", exact: true }).click();
   await expect(page.getByLabel("品牌值")).toHaveValue(

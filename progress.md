@@ -1265,3 +1265,7 @@
 - Workspace 以显式 `uv` override 固定 `cryptography >=50,<51`，并由 Alibaba 内容安全、OSS、C2PA、
   MCP 身份/工具契约 `132 passed` 证明运行时兼容；Python audit 恢复无已知漏洞。该安全兼容补丁必须由
   新的精确 SHA CI 全绿后才能放行 Ticket 15。
+- 安全补丁 CI `30857652241` 的 Python 全量 pytest/audit/OpenAPI、Container 和 Gitleaks/SBOM 全绿；
+  Web 仅有一个既有 ProductBrief E2E 在商品切换后立即读取 sessionStorage，偶发早于 React cleanup effect。
+  同一失败用例独立 20 次和本地全套均通过，证明确认为测试时序边界而非 cleanup 丢失；断言改为有界
+  `expect.poll` 后再次定点 `20 passed`、完整 E2E `90 passed`、ESLint 通过。最终仍需新 SHA CI 全绿。
