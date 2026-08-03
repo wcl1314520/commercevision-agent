@@ -1125,3 +1125,30 @@
   （无已知漏洞）、Compose config、OpenAPI 重导出、Web generated API types、`git diff --check`
   全部通过；Alembic 唯一 head 为 `f5a1c3e7b902` 且 `alembic check` 无 drift。变更文件凭证前缀
   扫描无命中，安全/正确性/性能/可维护性/简化五轴终审无剩余阻断项。
+- Ticket 10 单一提交 `f1d8bf0a71ffb181b6aa59c9b0f66d4dc9d2c169` 已推送并由精确 GitHub
+  Actions `30800574595` 验证全绿：Python、Web、Container builds、Gitleaks/SBOM 均成功。
+  Ticket 11 的 blockers 已全部清除，现按冻结工单进入 Rights-first hybrid retrieval 实现。
+
+# 2026-08-03 Ticket 11 Rights-first hybrid retrieval 收口
+
+- 结构化 Retrieval Query、MySQL 当前权利 eligible/final fence、IMAGE/PRODUCT_FUSED Dense、CJK
+  FULLTEXT、Brand Profile、显式引用、versioned RRF、受界 rerank、按 Version/Asset/hash 去重与
+  Citation 证据已落地；selected 与全部 replacement 候选只做一次最终 MySQL 当前权利复核。
+- eligible set 与 `candidate_limit` 已彻底解耦：Dense catalog、FULLTEXT、Brand Profile 和 Milvus
+  均按 1000 ID 分块并确定性全局归并；真实 MySQL 用 1001 个 distractor 跨块证明合法候选不会在
+  进入 ANN 前被截断。融合后的总候选池再受 `candidate_limit` 约束，并保留必需品牌成员。
+- Retained Retrieval Run 保存规范 Query hash、策略、候选收敛计数、耗时、降级和精确 Citation；
+  预览 capability 只保存 SHA-256，交换绑定 Workspace/Requester/Run/Rank、使用数据库时间并再次
+  复核当前权利。URL、Header、MIME 与 10 MiB 边界失败关闭，浏览器 Blob URL 在 60 秒内、替换、
+  新检索或卸载时撤销。
+- Retrieval Explorer 已接入商品工作台，展示过滤器、通道、RRF/原始分数、Rights 版本、决策时间、
+  eligible→fused→final 收敛、耗时与 degradation；375px 浏览器验收无横向溢出，交互目标不小于
+  44px，受控预览不把签名 URL 写入 DOM/持久化状态。
+- 本地发布证据：Python unit `977 passed`；contract `178 passed, 1 skipped`（仅既有真实 Alibaba
+  OSS live contract）；PRODUCT_FUSED + Retrieval + Alembic roundtrip 真实 MySQL `22 passed`；
+  Web unit `189 passed`、BFF `22 passed`、Playwright `90 passed`，TypeScript、ESLint、生成类型与
+  production build 全部通过。Alembic head `a3f8c2d9e714`、schema drift 和 upgrade/downgrade/
+  re-upgrade 均通过。
+- 依赖审计（Python/pnpm）无已知漏洞，Compose config、Ruff、OpenAPI/TypeScript 生成物和
+  `git diff --check` 已通过。代码简化与 Standards/Spec/安全/正确性/性能/可维护性多轴终审未发现
+  剩余阻断项；Ticket 12 MCP 未启动。

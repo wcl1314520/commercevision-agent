@@ -29,6 +29,14 @@ from .product_briefs import (
     SqlAlchemyProviderArtifactTargetReadinessQuery,
 )
 from .product_search import MySqlProductLexicalSearch, ProductLexicalHit
+from .retrieval import MySqlRetrievalAuthority
+from .retrieval_runs import MySqlRetrievalPreviewService, MySqlRetrievalRunStore
+from .retrieval_sources import (
+    MySqlBrandProfileRetrievalSource,
+    MySqlDenseRetrievalCatalog,
+    MySqlLexicalRetrievalSource,
+    MySqlRetrievalQueryImageReference,
+)
 from .unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
@@ -44,6 +52,13 @@ __all__ = [
     "ProductFusedIndexNotApplicable",
     "MySqlProductLexicalSearch",
     "ProductLexicalHit",
+    "MySqlRetrievalAuthority",
+    "MySqlRetrievalPreviewService",
+    "MySqlRetrievalRunStore",
+    "MySqlBrandProfileRetrievalSource",
+    "MySqlDenseRetrievalCatalog",
+    "MySqlLexicalRetrievalSource",
+    "MySqlRetrievalQueryImageReference",
     "SqlAlchemyImageIndexStatusQueries",
     "MySqlExactImageReference",
     "SqlAlchemyAssetUnitOfWork",

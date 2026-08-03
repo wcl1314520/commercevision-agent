@@ -18,6 +18,7 @@ from commercevision_application import (
     ProductBriefApplicationService,
     ProductBriefPolicy,
     ProductBriefViewApplicationService,
+    RetrievalApplicationService,
     ValidationDataTransferPolicy,
     VisionDataTransferPolicy,
     WorkflowApplicationService,
@@ -34,6 +35,8 @@ from commercevision_object_storage import (
 from commercevision_observability import ProductBriefTelemetry
 from commercevision_persistence import (
     Database,
+    MySqlRetrievalPreviewService,
+    MySqlRetrievalRunStore,
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyCatalogUnitOfWork,
@@ -48,6 +51,7 @@ from commercevision_persistence import (
 )
 
 from .identity import PrincipalAccessPolicy, SignedTrustedPrincipalResolver
+from .retrieval_runtime import build_retrieval
 
 _PUBLIC_LOCAL_TRUST_KEY_PAIRS = frozenset(
     {
@@ -131,6 +135,10 @@ class ApiContainer:
     access_policy: PrincipalAccessPolicy
     object_storage_readiness: ObjectStorageReadiness
     image_index_status: ImageIndexStatusApplicationService
+    retrieval: RetrievalApplicationService
+    retrieval_runs: MySqlRetrievalRunStore
+    retrieval_previews: MySqlRetrievalPreviewService
+    retrieval_closeables: tuple[object, ...]
 
     @classmethod
     def build(
@@ -180,6 +188,11 @@ class ApiContainer:
             future_skew_seconds=settings.brand_profile_cursor_future_skew_seconds,
         )
         object_storage = build_object_storage(settings)
+        built_retrieval = build_retrieval(
+            settings=settings,
+            database=database,
+            storage=object_storage,
+        )
         integrity_verifier = UploadIntegrityVerifier(
             storage=object_storage,
             transaction_active=is_unit_of_work_active,
@@ -264,8 +277,28 @@ class ApiContainer:
             image_index_status=ImageIndexStatusApplicationService(
                 SqlAlchemyImageIndexStatusQueries(database.session_factory)
             ),
+            retrieval=built_retrieval.service,
+            retrieval_runs=built_retrieval.runs,
+            retrieval_previews=built_retrieval.previews,
+            retrieval_closeables=built_retrieval.closeables,
         )
 
     def close(self) -> None:
-        close_object_storage(self.object_storage_readiness)
-        self.database.dispose()
+        failures: list[Exception] = []
+        for resource in reversed(self.retrieval_closeables):
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as exc:
+                    failures.append(exc)
+        try:
+            close_object_storage(self.object_storage_readiness)
+        except Exception as exc:
+            failures.append(exc)
+        try:
+            self.database.dispose()
+        except Exception as exc:
+            failures.append(exc)
+        if failures:
+            raise ExceptionGroup("Control API resource cleanup failed", failures)

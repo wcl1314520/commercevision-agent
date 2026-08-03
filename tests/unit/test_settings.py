@@ -10,6 +10,27 @@ def test_settings_reject_unknown_environment() -> None:
         Settings(environment="invalid")
 
 
+def test_retrieval_settings_enforce_short_lived_preview_and_retention_bounds() -> None:
+    settings = Settings(
+        retrieval_preview_token_lifetime_seconds=30,
+        retrieval_preview_reference_lifetime_seconds=60,
+        retrieval_run_retention_seconds=61,
+    )
+
+    assert settings.retrieval_rrf_k == 60
+    assert settings.retrieval_preview_token_lifetime_seconds == 30
+    assert settings.retrieval_preview_reference_lifetime_seconds == 60
+
+    for invalid in (
+        {"retrieval_preview_token_lifetime_seconds": 29},
+        {"retrieval_preview_reference_lifetime_seconds": 61},
+        {"retrieval_run_retention_seconds": 60},
+        {"retrieval_milvus_maximum_filter_ids": 1001},
+    ):
+        with pytest.raises(ValidationError):
+            Settings(**invalid)
+
+
 def test_vision_transfer_and_provider_configuration_deny_by_default() -> None:
     settings = Settings()
 

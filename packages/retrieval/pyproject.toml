@@ -5,12 +5,14 @@ description = "Embedding, vector search, and reranking boundary"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "commercevision-contracts",
+  "commercevision-domain",
   "pymilvus==2.4.15",
   "setuptools>=83",
 ]
 
 [tool.uv.sources]
 commercevision-contracts = { workspace = true }
+commercevision-domain = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

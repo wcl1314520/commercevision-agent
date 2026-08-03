@@ -732,6 +732,82 @@ test("only exact Brand Profile command and immutable history paths cross the HTT
   assert.equal(upstreamRequests.length, cases.length);
 });
 
+test("only exact retrieval run and bounded preview paths cross the signed proxy seam", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const upstreamRequests = [];
+  globalThis.fetch = async (input, init) => {
+    upstreamRequests.push({ method: init.method, url: String(input) });
+    return Response.json({ ok: true });
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const runId = "019f8a00-0000-7000-8000-000000000071";
+  const headers = {
+    "content-type": "application/json",
+    "x-workspace-id": "workspace-1",
+  };
+  const cases = [
+    {
+      handler: POST,
+      method: "POST",
+      path: ["retrieval-runs"],
+      url: "http://web.local/api/v1/retrieval-runs",
+      upstream: "http://api:8000/api/v1/retrieval-runs",
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["retrieval-runs", runId],
+      url: `http://web.local/api/v1/retrieval-runs/${runId}`,
+      upstream: `http://api:8000/api/v1/retrieval-runs/${runId}`,
+    },
+    {
+      handler: POST,
+      method: "POST",
+      path: ["retrieval-runs", runId, "results", "1:preview"],
+      url: `http://web.local/api/v1/retrieval-runs/${runId}/results/1:preview`,
+      upstream: `http://api:8000/api/v1/retrieval-runs/${runId}/results/1:preview`,
+    },
+  ];
+
+  for (const item of cases) {
+    const response = await item.handler(
+      new Request(item.url, {
+        method: item.method,
+        headers,
+        body: item.method === "POST" ? "{}" : undefined,
+      }),
+      { params: Promise.resolve({ path: item.path }) },
+    );
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(
+    upstreamRequests.map(({ method, url }) => ({ method, url })),
+    cases.map(({ method, upstream }) => ({ method, url: upstream })),
+  );
+
+  for (const deniedPath of [
+    ["retrieval-runs", "not-a-uuid"],
+    ["retrieval-runs", runId.toUpperCase()],
+    ["retrieval-runs", runId, "results", "0:preview"],
+    ["retrieval-runs", runId, "results", "51:preview"],
+    ["retrieval-runs", runId, "results", "1:download"],
+  ]) {
+    const response = await POST(
+      new Request(`http://web.local/api/v1/${deniedPath.join("/")}`, {
+        method: "POST",
+        headers,
+        body: "{}",
+      }),
+      { params: Promise.resolve({ path: deniedPath }) },
+    );
+    assert.equal(response.status, 404);
+  }
+  assert.equal(upstreamRequests.length, cases.length);
+});
+
 test("enforces a two-item Brand Profile page before crossing the bounded response seam", async (context) => {
   const originalFetch = globalThis.fetch;
   const upstreamUrls = [];

@@ -143,7 +143,7 @@ class EmbeddingProviderRequestV1(IndexingContractV1):
     vector_kind: VectorKind
     expected_dimension: int = Field(ge=1, le=32_768)
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    images: list[EmbeddingImageInputV1] = Field(min_length=1, max_length=16)
+    images: list[EmbeddingImageInputV1] = Field(max_length=16)
     controlled_text: str | None = Field(default=None, min_length=1, max_length=32 * 1024)
 
     @field_validator("controlled_text")
@@ -159,13 +159,15 @@ class EmbeddingProviderRequestV1(IndexingContractV1):
     @model_validator(mode="after")
     def validate_vector_kind_input(self) -> EmbeddingProviderRequestV1:
         if self.vector_kind is VectorKind.IMAGE:
+            if not self.images:
+                raise ValueError("IMAGE embedding requires at least one image")
             if self.controlled_text is not None:
                 raise ValueError("IMAGE embedding cannot contain controlled text")
         elif self.vector_kind is VectorKind.PRODUCT_FUSED:
-            if self.controlled_text is None:
-                raise ValueError("PRODUCT_FUSED embedding requires controlled text")
-            if len(self.images) != 1:
-                raise ValueError("PRODUCT_FUSED embedding requires exactly one image")
+            if self.controlled_text is None and not self.images:
+                raise ValueError("PRODUCT_FUSED embedding requires text or an image")
+            if len(self.images) > 1:
+                raise ValueError("PRODUCT_FUSED embedding accepts at most one image")
         return self
 
 
@@ -179,7 +181,7 @@ class EmbeddingVectorV1(IndexingContractV1):
 
 
 class EmbeddingProviderResultV1(IndexingContractV1):
-    vectors: list[EmbeddingVectorV1]
+    vectors: list[EmbeddingVectorV1] = Field(min_length=1)
     provider: str = Field(min_length=1, max_length=64)
     provider_request_id: str = Field(min_length=1, max_length=256)
     actual_model: str = Field(min_length=1, max_length=256)
@@ -189,7 +191,10 @@ class EmbeddingProviderResultV1(IndexingContractV1):
     def validate_for(self, request: EmbeddingProviderRequestV1) -> None:
         if self.provider != request.provider:
             raise ValueError("embedding result provider does not match the configured provider")
-        if len(self.vectors) != len(request.images):
+        expected_vectors = (
+            1 if request.vector_kind is VectorKind.PRODUCT_FUSED else len(request.images)
+        )
+        if len(self.vectors) != expected_vectors:
             raise ValueError("embedding result count does not match the request")
         for vector in self.vectors:
             if len(vector.values) != request.expected_dimension:

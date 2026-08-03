@@ -425,6 +425,13 @@ class Settings(BaseSettings):
     embedding_model_configuration_version: str = "image-embedding-config-v1"
     embedding_preprocessing_version: str = "image-preprocess-v1"
     product_fused_preprocessing_version: str = "product-fused-v1"
+    retrieval_policy_version: str = "retrieval-policy-v1"
+    retrieval_rrf_k: int = Field(default=60, ge=1, le=10_000)
+    retrieval_maximum_business_adjustment: float = Field(default=0.25, ge=0, le=1)
+    retrieval_milvus_maximum_filter_ids: int = Field(default=1000, ge=1, le=1000)
+    retrieval_run_retention_seconds: int = Field(default=86_400, ge=61, le=2_592_000)
+    retrieval_preview_token_lifetime_seconds: int = Field(default=45, ge=30, le=60)
+    retrieval_preview_reference_lifetime_seconds: int = Field(default=45, ge=30, le=60)
     embedding_collection_schema_version: int = Field(default=1, ge=1, le=2_147_483_647)
     embedding_collection_index_spec_version: str = "hnsw-cosine-v1"
     image_index_temporary_reference_lifetime_seconds: int = Field(
@@ -1499,6 +1506,8 @@ class Settings(BaseSettings):
             raise ValueError("C2PA trust anchors and EKU policy must be configured together")
         if self.asset_provenance_adapter == "c2pa" and (c2pa_anchors is None or c2pa_eku is None):
             raise ValueError("C2PA trust anchors and EKU policy are required")
+        if self.retrieval_run_retention_seconds <= self.retrieval_preview_token_lifetime_seconds:
+            raise ValueError("Retrieval Run retention must exceed preview token lifetime")
         if self.environment == "production" and self.worker_requires_asset_validation:
             if OperationKind.ASSET_VALIDATION not in self.worker_required_operation_kinds:
                 raise ValueError("production Asset workers must require ASSET_VALIDATION")

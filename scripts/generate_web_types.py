@@ -77,6 +77,14 @@ SCHEMAS = (
     "ProductResponseV1",
     "ProductSummaryResponseV1",
     "ProductUpdateRequestV1",
+    "RetrievalChannel",
+    "RetrievalCitationV1",
+    "RetrievalDegradationV1",
+    "RetrievalPreviewExchangeV1",
+    "RetrievalQueryV1",
+    "RetrievalResponseV1",
+    "RetrievalScoreBreakdownV1",
+    "RetrievalTemporaryReferenceV1",
     "RetentionClass",
     "RightsDecisionCode",
     "RightsHistoryResponseV1",
@@ -99,6 +107,7 @@ SCHEMAS = (
     "ValidationOperationSummaryV1",
     "ValidationStage",
     "ValidationVerdict",
+    "VectorKind",
     "WorkflowStatus",
 )
 

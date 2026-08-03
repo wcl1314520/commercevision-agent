@@ -127,6 +127,14 @@ embedding_pinned_revision: fixture-epoch-v1
 embedding_dimension: 256
 embedding_model_configuration_version: image-embedding-config-v1
 embedding_preprocessing_version: image-preprocess-v1
+product_fused_preprocessing_version: product-fused-v1
+retrieval_policy_version: retrieval-policy-v1
+retrieval_rrf_k: 60
+retrieval_maximum_business_adjustment: 0.25
+retrieval_milvus_maximum_filter_ids: 1000
+retrieval_run_retention_seconds: 86400
+retrieval_preview_token_lifetime_seconds: 45
+retrieval_preview_reference_lifetime_seconds: 45
 embedding_collection_schema_version: 1
 embedding_collection_index_spec_version: hnsw-cosine-v1
 image_index_temporary_reference_lifetime_seconds: 60

@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-08-03 |
 | 适用版本 | Retrieval v1 |
 
 ## 记忆分层
@@ -101,6 +101,12 @@ MySQL 过滤：
 - 资产状态。
 - 是否允许派生生成。
 
+该查询先形成唯一的 eligible Asset Version 集合；所有 Dense、FULLTEXT、Brand Profile 与
+显式引用通道都只能在该集合内召回。Milvus 过滤表达式超限时按完整 eligible Embedding Record
+集合分块查询并全局归并，禁止退化为无过滤 ANN。`candidate_limit` 只限制融合候选池，不能用来
+截断 eligible set；MySQL Dense catalog、FULLTEXT 与 Brand Profile 交集也按 1000 个 ID 分块并
+全局归并，因此 eligible set 超过单次 `IN`/Milvus 表达式预算时仍保持完整。
+
 ### 3. 候选召回
 
 - Milvus Dense 图像/多模态向量。
@@ -110,18 +116,17 @@ MySQL 过滤：
 
 ### 4. 融合与重排
 
-初始策略：
+融合只使用版本化通道排名：
 
 ```text
-final_score =
-  dense_similarity
-  + lexical_rank
-  + business_performance
-  + human_quality
-  + freshness
+rrf_score(asset) = Σ channel_weight / (rrf_k + channel_rank)
+final_score(asset) = rrf_score(asset) + bounded_business_adjustment
 ```
 
-实际使用 RRF 或版本化加权策略。权重必须进入 `retrieval_policy_version`，不能散落在代码中。
+Cosine、FULLTEXT relevance 等原始分数只进入 Citation 解释，不跨分数空间直接相加。`rrf_k`、
+通道权重与业务调整上限必须进入 `retrieval_policy_version`，不能散落在代码中。可选 reranker
+只能返回已融合候选的完整排列，不能新增或删除 ID。融合去重后的总候选池必须受
+`candidate_limit` 约束；截断时保持融合相对顺序，并优先保留全部必需 Brand Profile 成员。
 
 ### 5. 上下文裁剪
 
@@ -130,6 +135,22 @@ final_score =
 - 展示引用和使用理由。
 - 相似素材去重。
 - 低置信度结果不自动进入 Prompt。
+
+去重后，将全部待选结果与替补候选一次性提交给 MySQL 做当前权利复核，再按当前 Rights Record
+生成 Citation。Milvus 或可选 reranker 不可用时返回显式 degradation，并将
+`complete_hybrid=false`；不得以空通道或静默 fallback 冒充完整混合检索。
+
+## Retrieval Run 与受控预览
+
+- `retrieval_runs` 短期保存结构化查询、规范哈希、策略版本、eligible/fused/final 候选计数、
+  检索耗时、降级事实与过期时间。
+- `retrieval_results` 保存顺序、Asset/Version、Rights Record 版本、通道、RRF 分解、原因与
+  MySQL 决策时间；原始预览 token 只返回一次，数据库仅保存 SHA-256。
+- 预览交换同时绑定 Workspace、原请求者、Run、Rank 与 30–60 秒 opaque token，并再次查询
+  当前 MySQL 权利与精确受控对象。撤权、过期、跨请求者或对象身份变化统一返回不可用。
+- 交换后对象引用仍只有 30–60 秒有效；浏览器只接受受支持且不超过 10 MiB 的图片响应，按
+  required headers 获取对象并使用短期 Blob URL，不把签名 URL 留在页面标记或持久化状态；
+  Blob URL 最迟在引用到期、结果替换或页面卸载时主动撤销。
 
 ## 检索评测
 

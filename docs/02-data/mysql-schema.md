@@ -562,6 +562,30 @@ live Asset/Rights authority，仍受影响的 `ACTIVE` head 才以 CAS 转为
 
 ## 生成与评测
 
+### `retrieval_runs`
+
+- `id`、`workspace_id`、`requester_id`
+- `query_json`、`query_sha256`
+- `retrieval_policy_version`、`complete_hybrid`、`degradations_json`
+- `eligible_asset_version_count`、`fused_candidate_count`、
+  `final_authorized_candidate_count`、`latency_ms`
+- `created_at`、`expires_at`
+- `(workspace_id, id)` 是复合身份；候选计数满足
+  `eligible >= fused >= final_authorized >= 0`。
+
+Retrieval Run 是短期可审计事实，保存受控结构化 Query，不保存对象凭证或 Provider 原始响应。
+
+### `retrieval_results`
+
+- 主键 `(retrieval_run_id, result_rank)`
+- `workspace_id`、`asset_id`、`asset_version_id`
+- `rights_record_id`、`rights_record_version`、`brand_profile_version`
+- `channels_json`、`score_json`、`reason`、`decided_at`
+- `preview_token_sha256`、`preview_expires_at`、`created_at`
+
+Result 通过 `(workspace_id, retrieval_run_id)` 归属 Run。数据库只保存高熵 preview token 的
+SHA-256；原始 token 只在创建 Run 的响应中返回，读取已保留 Run 不会重新发放 token。
+
 ### `generation_attempts`
 
 - `id`

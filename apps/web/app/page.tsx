@@ -28,6 +28,7 @@ import type { BrandProfileIdentityChangeGuard } from "../lib/brand-profile-edito
 import { productBriefSourceFor } from "../lib/product-brief-workbench-state";
 import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
 import { ProductBriefWorkbench } from "./product-brief-workbench";
+import { RetrievalExplorer } from "./retrieval-explorer";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 
@@ -937,6 +938,13 @@ export default function Home() {
                     selectedProduct.id,
                     productBriefSource,
                   )}
+                />
+
+                <RetrievalExplorer
+                  brand={selectedProduct.brand}
+                  category={selectedProduct.category_code}
+                  key={`retrieval-${selectedProduct.id}-${selectedProduct.version}`}
+                  productId={selectedProduct.id}
                 />
 
                 <section className="panel" aria-labelledby="sku-heading">

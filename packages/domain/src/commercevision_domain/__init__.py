@@ -95,6 +95,16 @@ from .retention import (
     TASK_RETENTION_MAX_HOURS,
     canonical_task_retention_deadline,
 )
+from .retrieval import (
+    ReciprocalRankedCandidate,
+    RetrievalCandidate,
+    RetrievalChannel,
+    RetrievalPolicy,
+    apply_bounded_rerank,
+    bound_retrieval_candidates,
+    deduplicate_retrieval_candidates,
+    reciprocal_rank_fuse,
+)
 from .workflow.entities import Approval, Workflow, WorkflowAttempt, WorkflowStep
 from .workflow.enums import (
     ApprovalDecision,
@@ -257,4 +267,12 @@ __all__ = [
     "build_controlled_product_text",
     "compute_product_fused_input_hash",
     "serialize_controlled_product_sections",
+    "ReciprocalRankedCandidate",
+    "RetrievalCandidate",
+    "RetrievalChannel",
+    "RetrievalPolicy",
+    "apply_bounded_rerank",
+    "bound_retrieval_candidates",
+    "deduplicate_retrieval_candidates",
+    "reciprocal_rank_fuse",
 ]

@@ -5,13 +5,18 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from commercevision_contracts import EmbeddingProviderResultV1, EmbeddingVectorV1
+from commercevision_contracts import (
+    EmbeddingProviderResultV1,
+    EmbeddingVectorV1,
+    RetrievalQueryV1,
+)
 from commercevision_contracts.events import (
     AssetIndexDeleteRequestedPayload,
     AssetIndexRequestedPayload,
 )
 from commercevision_domain import CollectionSpec, VectorKind, new_uuid7
 from commercevision_persistence import (
+    MySqlDenseRetrievalCatalog,
     MySqlIndexingAuthority,
     MySqlProductFusedIndexRequestService,
     MySqlProductLexicalSearch,
@@ -1065,6 +1070,56 @@ def test_cjk_fulltext_returns_literal_chinese_english_and_mixed_queries(
     assert hits[0].asset_version_id == asset_version_id
     assert hits[0].embedding_record_id == requested.embedding_record_id
     assert hits[0].score > 0
+
+    distractors = tuple(new_uuid7() for _ in range(1_001))
+    eligible_hits = MySqlProductLexicalSearch(integration_database.session_factory).search_eligible(
+        workspace_id=WORKSPACE,
+        query=query,
+        eligible_asset_version_ids=(*distractors, asset_version_id),
+        limit=10,
+    )
+    excluded_hits = MySqlProductLexicalSearch(integration_database.session_factory).search_eligible(
+        workspace_id=WORKSPACE,
+        query=query,
+        eligible_asset_version_ids=distractors,
+        limit=10,
+    )
+
+    assert [hit.asset_version_id for hit in eligible_hits] == [asset_version_id]
+    assert excluded_hits == ()
+
+    retrieval_query = RetrievalQueryV1.model_validate_json(
+        json.dumps(
+            {
+                "workspace_id": WORKSPACE,
+                "requester_id": "agent:retrieval-test",
+                "product_id": brief_id,
+                "purpose": "CREATIVE_REFERENCE",
+                "provider": PROVIDER,
+                "requires_derivative": False,
+                "roles": [],
+                "vector_kinds": ["PRODUCT_FUSED"],
+                "query_text": query,
+                "explicit_reference_asset_version_ids": [],
+                "result_limit": 1,
+                "candidate_limit": 10,
+                "retrieval_policy_version": "retrieval-policy-v1",
+            },
+            ensure_ascii=False,
+        )
+    )
+    dense_target = MySqlDenseRetrievalCatalog(integration_database.session_factory).load_target(
+        retrieval_query,
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        eligible_asset_version_ids=(*distractors, asset_version_id),
+    )
+
+    assert dense_target is not None
+    assert dense_target.collection_name == target.collection_spec.physical_name
+    assert dense_target.dimension == 4
+    assert [
+        (item.embedding_record_id, item.asset_version_id) for item in dense_target.candidates
+    ] == [(requested.embedding_record_id, asset_version_id)]
 
 
 def test_cjk_fulltext_hides_an_indexed_task_document_after_retention_expiry(

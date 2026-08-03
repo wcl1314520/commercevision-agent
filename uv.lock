@@ -574,6 +574,8 @@ dependencies = [
     { name = "commercevision-object-storage" },
     { name = "commercevision-observability" },
     { name = "commercevision-persistence" },
+    { name = "commercevision-providers" },
+    { name = "commercevision-retrieval" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "redis" },
@@ -591,6 +593,8 @@ requires-dist = [
     { name = "commercevision-object-storage", editable = "packages/object-storage" },
     { name = "commercevision-observability", editable = "packages/observability" },
     { name = "commercevision-persistence", editable = "packages/persistence" },
+    { name = "commercevision-providers", editable = "packages/providers" },
+    { name = "commercevision-retrieval", editable = "packages/retrieval" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "redis", specifier = ">=5,<7" },
@@ -759,6 +763,7 @@ version = "0.1.0"
 source = { editable = "packages/retrieval" }
 dependencies = [
     { name = "commercevision-contracts" },
+    { name = "commercevision-domain" },
     { name = "pymilvus" },
     { name = "setuptools" },
 ]
@@ -766,6 +771,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "commercevision-contracts", editable = "packages/contracts" },
+    { name = "commercevision-domain", editable = "packages/domain" },
     { name = "pymilvus", specifier = "==2.4.15" },
     { name = "setuptools", specifier = ">=83" },
 ]

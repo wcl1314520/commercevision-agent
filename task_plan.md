@@ -124,6 +124,11 @@
   完整落地并通过本地发布门禁：unit/contract `1120 passed, 1 skipped`、PRODUCT_FUSED/Milvus/
   migration `28 passed`、完整 Phase 1 IMAGE MySQL 兼容 `36 passed`。当前只允许形成单一提交、
   推送并等待精确 GitHub Actions 全绿，未启动 Ticket 11。
+- Ticket 10 单一提交 `f1d8bf0` 对应 GitHub Actions `30800574595` 已全绿，Ticket 11 正式解锁。
+- Ticket 11 已闭合 structured Retrieval Query、MySQL eligible/final rights fence、完整 eligible
+  分块 dense、lexical/brand/explicit recall、versioned RRF、受界 rerank/去重、Retained Run、
+  30–60 秒 controlled preview、API 与 Web Retrieval Explorer；当前正在完成全量门禁与独立终审，
+  未启动 Ticket 12 MCP。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

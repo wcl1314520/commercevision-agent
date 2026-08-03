@@ -520,6 +520,83 @@ export interface ProductUpdateRequestV1 {
   expires_at?: string | null;
 }
 
+export type RetrievalChannel = "IMAGE_DENSE" | "PRODUCT_FUSED_DENSE" | "LEXICAL" | "BRAND_PROFILE" | "EXPLICIT";
+
+export interface RetrievalCitationV1 {
+  asset_id: string;
+  asset_version_id: string;
+  rights_record_id: string;
+  rights_record_version: number;
+  retrieval_policy_version: string;
+  brand_profile_version?: number | null;
+  channels: [RetrievalChannel, ...Array<RetrievalChannel>];
+  score: RetrievalScoreBreakdownV1;
+  rank: number;
+  reason: string;
+  decided_at: string;
+  preview_reference_token?: string | null;
+}
+
+export interface RetrievalDegradationV1 {
+  component: string;
+  code: string;
+  message: string;
+}
+
+export interface RetrievalPreviewExchangeV1 {
+  preview_reference_token: string;
+}
+
+export interface RetrievalQueryV1 {
+  workspace_id: string;
+  requester_id: string;
+  product_id?: string | null;
+  product_brief_id?: string | null;
+  category?: string | null;
+  brand?: string | null;
+  purpose: string;
+  provider: string;
+  requires_derivative: boolean;
+  roles?: Array<string>;
+  vector_kinds: [VectorKind, ...Array<VectorKind>];
+  query_text?: string | null;
+  query_image_asset_version_id?: string | null;
+  explicit_reference_asset_version_ids?: Array<string>;
+  brand_profile_id?: string | null;
+  brand_profile_version?: number | null;
+  result_limit: number;
+  candidate_limit: number;
+  retrieval_policy_version: string;
+}
+
+export interface RetrievalResponseV1 {
+  retrieval_run_id?: string | null;
+  retrieval_policy_version: string;
+  complete_hybrid: boolean;
+  degradations: Array<RetrievalDegradationV1>;
+  eligible_asset_version_count: number;
+  fused_candidate_count: number;
+  final_authorized_candidate_count: number;
+  latency_ms: number;
+  citations: Array<RetrievalCitationV1>;
+}
+
+export interface RetrievalScoreBreakdownV1 {
+  channel_ranks: Record<string, unknown>;
+  channel_raw_scores?: Record<string, unknown>;
+  reciprocal_rank_fusion: number;
+  business_adjustment: number;
+  final_score: number;
+  rerank_position?: number | null;
+}
+
+export interface RetrievalTemporaryReferenceV1 {
+  method: "GET";
+  url: string;
+  required_headers?: Record<string, unknown>;
+  expires_at: string;
+}
+
 export type RetentionClass = "TASK" | "FOUNDATION";
 
 export type RightsDecisionCode = "AUTHORIZED" | "NO_CURRENT_RIGHTS" | "RIGHTS_REVOKED" | "RIGHTS_NOT_YET_VALID" | "RIGHTS_EXPIRED" | "RIGHTS_ASSET_VERSION_MISMATCH" | "ASSET_VERSION_NOT_CURRENT" | "ASSET_NOT_AVAILABLE" | "ASSET_RETENTION_EXPIRED" | "ASSET_BLOCKED" | "ADMINISTRATIVELY_BLOCKED" | "USE_NOT_ALLOWED" | "PROVIDER_NOT_ALLOWED" | "DERIVATIVE_NOT_ALLOWED";
@@ -744,6 +821,8 @@ export interface ValidationOperationSummaryV1 {
 export type ValidationStage = "LOCAL_FORMAT" | "MALWARE" | "CONTENT_SAFETY" | "PROVENANCE" | "PROMOTION";
 
 export type ValidationVerdict = "PASS" | "REVIEW" | "BLOCK" | "RETRYABLE_FAILURE" | "TERMINAL_FAILURE" | "NOT_APPLICABLE";
+
+export type VectorKind = "IMAGE" | "PRODUCT_FUSED";
 
 export type WorkflowStatus = "DRAFT" | "INGESTING" | "UNDERSTANDING" | "AWAITING_PRODUCT_CONFIRMATION" | "RETRIEVING" | "PLANNING" | "AWAITING_PLAN_APPROVAL" | "GENERATING" | "EVALUATING" | "REPAIRING" | "AWAITING_RESULT_APPROVAL" | "EXPORTING" | "COMPLETED" | "FAILED" | "CANCELLED";
 

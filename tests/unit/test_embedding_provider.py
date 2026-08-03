@@ -225,6 +225,68 @@ def test_alibaba_embedding_provider_uses_the_official_product_fusion_shape() -> 
     }
 
 
+def test_alibaba_product_fused_query_supports_text_without_an_image() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "output": {
+                    "embeddings": [{"index": 0, "embedding": [0.0625] * 256, "type": "fusion"}]
+                },
+                "usage": {"input_tokens": 8, "image_tokens": 0, "total_tokens": 8},
+                "request_id": "provider-text-query-1",
+            },
+        )
+
+    provider = AlibabaEmbeddingProvider(
+        api_key="api-key-must-not-leak",
+        endpoint="https://dashscope.aliyuncs.com/api/v1",
+        endpoint_region="cn-beijing",
+        model_id="qwen3-vl-embedding",
+        pinned_revision="embedding-eval-2026-07-31",
+        model_configuration_version="embedding-config-v1",
+        preprocessing_version="product-fused-v1",
+        connect_timeout_seconds=0.05,
+        read_timeout_seconds=0.05,
+        end_to_end_timeout_seconds=1,
+        maximum_concurrency=1,
+        maximum_response_bytes=64 * 1024,
+        allowed_image_origins=frozenset({"https://controlled.invalid"}),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        clock=lambda: NOW,
+    )
+    request = EmbeddingProviderRequestV1(
+        provider="alibaba-model-studio",
+        model_id="qwen3-vl-embedding",
+        pinned_revision="embedding-eval-2026-07-31",
+        model_configuration_version="embedding-config-v1",
+        preprocessing_version="product-fused-v1",
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        expected_dimension=256,
+        input_hash="d" * 64,
+        images=[],
+        controlled_text="find a red lipstick",
+    )
+    try:
+        result = provider.embed(request)
+    finally:
+        provider.close()
+
+    result.validate_for(request)
+    assert json.loads(captured[0].content) == {
+        "model": "qwen3-vl-embedding",
+        "input": {"contents": [{"text": "find a red lipstick"}]},
+        "parameters": {
+            "dimension": 256,
+            "enable_fusion": True,
+            "output_type": "dense",
+        },
+    }
+
+
 def test_deterministic_embedding_provider_exposes_normalized_fixture_failures() -> None:
     provider = DeterministicEmbeddingProvider(
         provider="deterministic",

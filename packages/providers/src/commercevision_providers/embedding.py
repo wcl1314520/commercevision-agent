@@ -128,18 +128,31 @@ class DeterministicEmbeddingProvider:
     def embed(self, request: EmbeddingProviderRequestV1) -> EmbeddingProviderResultV1:
         self._validate_request(request)
         self._raise_scenario()
-        vectors = [
-            EmbeddingVectorV1(
-                values=_normalized_fixture_vector(
-                    (
-                        f"{request.input_hash}:{image.asset_version_id}:"
-                        f"{image.content_sha256}:{index}"
-                    ).encode("ascii"),
-                    request.expected_dimension,
-                )
+        if request.vector_kind.value == "PRODUCT_FUSED":
+            image_identity = ":".join(
+                f"{image.asset_version_id}:{image.content_sha256}" for image in request.images
             )
-            for index, image in enumerate(request.images)
-        ]
+            seed = (
+                f"{request.input_hash}:{request.controlled_text or ''}:{image_identity}:fusion"
+            ).encode()
+            vectors = [
+                EmbeddingVectorV1(
+                    values=_normalized_fixture_vector(seed, request.expected_dimension)
+                )
+            ]
+        else:
+            vectors = [
+                EmbeddingVectorV1(
+                    values=_normalized_fixture_vector(
+                        (
+                            f"{request.input_hash}:{image.asset_version_id}:"
+                            f"{image.content_sha256}:{index}"
+                        ).encode("ascii"),
+                        request.expected_dimension,
+                    )
+                )
+                for index, image in enumerate(request.images)
+            ]
         result = EmbeddingProviderResultV1(
             vectors=vectors,
             provider=self._provider,
@@ -741,11 +754,12 @@ class AlibabaEmbeddingProvider:
                     raise ValueError
                 values.append(normalized)
             by_index[index] = EmbeddingVectorV1(values=values)
-        if set(by_index) != set(range(len(request.images))):
+        expected_count = 1 if request.vector_kind.value == "PRODUCT_FUSED" else len(request.images)
+        if set(by_index) != set(range(expected_count)):
             raise ValueError
         usage = self._normalize_usage(payload.get("usage"))
         return EmbeddingProviderResultV1(
-            vectors=[by_index[index] for index in range(len(request.images))],
+            vectors=[by_index[index] for index in range(expected_count)],
             provider=_PROVIDER,
             provider_request_id=request_id,
             # The official API does not expose a resolved model revision.

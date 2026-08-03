@@ -6566,6 +6566,445 @@
         }
       }
     },
+    "/api/v1/retrieval-runs": {
+      "post": {
+        "tags": [
+          "retrieval"
+        ],
+        "summary": "Execute Retrieval",
+        "operationId": "execute_retrieval_api_v1_retrieval_runs_post",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalQueryV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Retrieval Query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Retrieval Run or preview unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Retrieval request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Retrieval dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/retrieval-runs/{run_id}": {
+      "get": {
+        "tags": [
+          "retrieval"
+        ],
+        "summary": "Get Retrieval Run",
+        "operationId": "get_retrieval_run_api_v1_retrieval_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Retrieval Query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Retrieval Run or preview unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Retrieval request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Retrieval dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/retrieval-runs/{run_id}/results/{rank}:preview": {
+      "post": {
+        "tags": [
+          "retrieval"
+        ],
+        "summary": "Exchange Retrieval Preview",
+        "operationId": "exchange_retrieval_preview_api_v1_retrieval_runs__run_id__results__rank__preview_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "rank",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Rank"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalPreviewExchangeV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalTemporaryReferenceV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Retrieval Query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Retrieval Run or preview unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Retrieval request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Retrieval dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/workflows": {
       "post": {
         "tags": [
@@ -11473,6 +11912,497 @@
         ],
         "title": "RetentionStatus"
       },
+      "RetrievalChannel": {
+        "type": "string",
+        "enum": [
+          "IMAGE_DENSE",
+          "PRODUCT_FUSED_DENSE",
+          "LEXICAL",
+          "BRAND_PROFILE",
+          "EXPLICIT"
+        ],
+        "title": "RetrievalChannel"
+      },
+      "RetrievalCitationV1": {
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "title": "Asset Id"
+          },
+          "asset_version_id": {
+            "type": "string",
+            "title": "Asset Version Id"
+          },
+          "rights_record_id": {
+            "type": "string",
+            "title": "Rights Record Id"
+          },
+          "rights_record_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Rights Record Version"
+          },
+          "retrieval_policy_version": {
+            "type": "string",
+            "title": "Retrieval Policy Version"
+          },
+          "brand_profile_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Profile Version"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalChannel"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Channels"
+          },
+          "score": {
+            "$ref": "#/components/schemas/RetrievalScoreBreakdownV1"
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Rank"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Decided At"
+          },
+          "preview_reference_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 32,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Reference Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "asset_id",
+          "asset_version_id",
+          "rights_record_id",
+          "rights_record_version",
+          "retrieval_policy_version",
+          "channels",
+          "score",
+          "rank",
+          "reason",
+          "decided_at"
+        ],
+        "title": "RetrievalCitationV1"
+      },
+      "RetrievalDegradationV1": {
+        "properties": {
+          "component": {
+            "type": "string",
+            "title": "Component"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "component",
+          "code",
+          "message"
+        ],
+        "title": "RetrievalDegradationV1"
+      },
+      "RetrievalPreviewExchangeV1": {
+        "properties": {
+          "preview_reference_token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Preview Reference Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "preview_reference_token"
+        ],
+        "title": "RetrievalPreviewExchangeV1"
+      },
+      "RetrievalQueryV1": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "requester_id": {
+            "type": "string",
+            "title": "Requester Id"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "product_brief_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Brief Id"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "requires_derivative": {
+            "type": "boolean",
+            "title": "Requires Derivative"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Roles"
+          },
+          "vector_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/VectorKind"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Vector Kinds"
+          },
+          "query_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Text"
+          },
+          "query_image_asset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Image Asset Version Id"
+          },
+          "explicit_reference_asset_version_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Explicit Reference Asset Version Ids"
+          },
+          "brand_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Profile Id"
+          },
+          "brand_profile_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Profile Version"
+          },
+          "result_limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Result Limit"
+          },
+          "candidate_limit": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Candidate Limit"
+          },
+          "retrieval_policy_version": {
+            "type": "string",
+            "title": "Retrieval Policy Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "requester_id",
+          "purpose",
+          "provider",
+          "requires_derivative",
+          "vector_kinds",
+          "result_limit",
+          "candidate_limit",
+          "retrieval_policy_version"
+        ],
+        "title": "RetrievalQueryV1"
+      },
+      "RetrievalResponseV1": {
+        "properties": {
+          "retrieval_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Run Id"
+          },
+          "retrieval_policy_version": {
+            "type": "string",
+            "title": "Retrieval Policy Version"
+          },
+          "complete_hybrid": {
+            "type": "boolean",
+            "title": "Complete Hybrid"
+          },
+          "degradations": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalDegradationV1"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Degradations"
+          },
+          "eligible_asset_version_count": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Eligible Asset Version Count"
+          },
+          "fused_candidate_count": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Fused Candidate Count"
+          },
+          "final_authorized_candidate_count": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Final Authorized Candidate Count"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "maximum": 3600000.0,
+            "minimum": 0.0,
+            "title": "Latency Ms"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalCitationV1"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Citations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "retrieval_policy_version",
+          "complete_hybrid",
+          "degradations",
+          "eligible_asset_version_count",
+          "fused_candidate_count",
+          "final_authorized_candidate_count",
+          "latency_ms",
+          "citations"
+        ],
+        "title": "RetrievalResponseV1"
+      },
+      "RetrievalScoreBreakdownV1": {
+        "properties": {
+          "channel_ranks": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/RetrievalChannel"
+            },
+            "type": "object",
+            "title": "Channel Ranks"
+          },
+          "channel_raw_scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/RetrievalChannel"
+            },
+            "type": "object",
+            "title": "Channel Raw Scores"
+          },
+          "reciprocal_rank_fusion": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Reciprocal Rank Fusion"
+          },
+          "business_adjustment": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Business Adjustment"
+          },
+          "final_score": {
+            "type": "number",
+            "title": "Final Score"
+          },
+          "rerank_position": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Position"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "channel_ranks",
+          "reciprocal_rank_fusion",
+          "business_adjustment",
+          "final_score"
+        ],
+        "title": "RetrievalScoreBreakdownV1"
+      },
+      "RetrievalTemporaryReferenceV1": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "GET",
+            "title": "Method"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Url"
+          },
+          "required_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "maxProperties": 32,
+            "title": "Required Headers"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "method",
+          "url",
+          "expires_at"
+        ],
+        "title": "RetrievalTemporaryReferenceV1"
+      },
       "RightsDecisionCode": {
         "type": "string",
         "enum": [
@@ -12894,6 +13824,14 @@
           "NOT_APPLICABLE"
         ],
         "title": "ValidationVerdict"
+      },
+      "VectorKind": {
+        "type": "string",
+        "enum": [
+          "IMAGE",
+          "PRODUCT_FUSED"
+        ],
+        "title": "VectorKind"
       },
       "WorkflowAttemptResponse": {
         "properties": {

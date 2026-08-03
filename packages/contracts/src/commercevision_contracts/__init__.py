@@ -95,6 +95,15 @@ from .product_briefs import (
     ProductBriefVersionResponseV1,
     ProductBriefVersionSummaryResponseV1,
 )
+from .retrieval import (
+    RetrievalCitationV1,
+    RetrievalDegradationV1,
+    RetrievalPreviewExchangeV1,
+    RetrievalQueryV1,
+    RetrievalResponseV1,
+    RetrievalScoreBreakdownV1,
+    RetrievalTemporaryReferenceV1,
+)
 from .rights import (
     AssetAdministratorBlockRequestV1,
     RightsHistoryResponseV1,
@@ -207,6 +216,13 @@ __all__ = [
     "RightsRecordRevokeRequestV1",
     "RightsUsabilityRequestV1",
     "RightsUsabilityResponseV1",
+    "RetrievalCitationV1",
+    "RetrievalDegradationV1",
+    "RetrievalQueryV1",
+    "RetrievalPreviewExchangeV1",
+    "RetrievalResponseV1",
+    "RetrievalTemporaryReferenceV1",
+    "RetrievalScoreBreakdownV1",
     "ServiceMetadata",
     "Settings",
     "SKUCreateRequestV1",

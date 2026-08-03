@@ -51,6 +51,12 @@ const BRAND_PROFILE_VERSIONS_PATH = new RegExp(
 const BRAND_PROFILE_VERSION_PATH = new RegExp(
   `^/brand-profiles/${UUID_PATH_SEGMENT}/versions/[1-9][0-9]*$`,
 );
+const RETRIEVAL_RUN_PATH = new RegExp(
+  `^/retrieval-runs/${UUID_PATH_SEGMENT}$`,
+);
+const RETRIEVAL_PREVIEW_PATH = new RegExp(
+  `^/retrieval-runs/${UUID_PATH_SEGMENT}/results/(?:[1-9]|[1-4][0-9]|50):preview$`,
+);
 const FORWARDED_HEADERS = [
   "accept",
   "content-type",
@@ -69,7 +75,7 @@ class UpstreamResponseTooLargeError extends Error {}
 
 function encodeApiPathSegment(segment: string): string {
   const action =
-    /^(.*):(abort|analyze|block|check|confirm|finalize|publish|replace|revise|revoke|validate)$/.exec(
+    /^(.*):(abort|analyze|block|check|confirm|finalize|preview|publish|replace|revise|revoke|validate)$/.exec(
       segment,
     );
   if (action) {
@@ -224,6 +230,9 @@ function apiMethodAllowed(path: string, method: string): boolean {
   if (BRAND_PROFILE_MUTATION_PATH.test(path)) return method === "POST";
   if (BRAND_PROFILE_VERSIONS_PATH.test(path)) return method === "GET";
   if (BRAND_PROFILE_VERSION_PATH.test(path)) return method === "GET";
+  if (path === "/retrieval-runs") return method === "POST";
+  if (RETRIEVAL_RUN_PATH.test(path)) return method === "GET";
+  if (RETRIEVAL_PREVIEW_PATH.test(path)) return method === "POST";
   return false;
 }
 

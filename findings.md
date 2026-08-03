@@ -595,3 +595,19 @@
 - PRODUCT_FUSED 的稳定输入身份必须绑定 ProductBrief 本体而非确认版本：版本号是可推进的 provenance，
   不是受控内容。等价新版本只原子更新 Embedding/Search Document 的版本溯源与 retention；受控文本
   变化产生新 input hash 和 Record，不同 ProductBrief 即使内容相同也必须隔离。
+
+## Ticket 11 Rights-first 检索边界
+
+- `RetrievalQuery.query_text` 是自由检索信号，可做 NFKC、控制字符清理、空白折叠与 casefold；
+  `brand/category` 是 MySQL 业务过滤身份，只做安全规范化并保留大小写，禁止把全文规范化规则误用到
+  权威字段后造成合法候选静默归零。
+- 每个召回通道的 `candidate_limit` 不能替代融合后总候选上限；通道并集可能扩大到多倍。融合去重后
+  必须再次整体收敛到上限，并在保持 RRF 相对顺序的同时保留全部必需 Brand Profile 成员。
+- eligible set 与 candidate pool 是两个不同量级：前者必须完整，后者才受 1000 上限。Dense catalog、
+  FULLTEXT 和 Brand Profile 若在进入 Milvus 前把 eligible IDs 硬限为 1000，会让已实现的 ANN 分块
+  失去意义；各 MySQL 交集同样要分块，并在通道内部做确定性全局 top-k 归并。
+- Retrieval Citation、Response 与 Retained Run 必须使用同一策略版本；响应还必须保证连续 rank、
+  Asset Version 唯一、候选计数单调，以及 `complete_hybrid=true` 时不存在 degradation。
+- 短期对象引用不能因浏览器先下载为 Blob 而被无意延长。Retrieval Explorer 在新检索开始时取消
+  旧预览请求，并在引用到期、替换或卸载时撤销 Blob URL；同时只接受 JPEG/PNG/WebP 与 10 MiB
+  上限，签名 URL 和 opaque token 均不进入持久化状态。

@@ -116,7 +116,6 @@ def test_ann_request_accepts_deterministic_embedding_uuid5_identities() -> None:
 @pytest.mark.parametrize(
     "vectors",
     [
-        [],
         [EmbeddingVectorV1(values=[0.1, 0.2, 0.3])],
         [EmbeddingVectorV1.model_construct(values=[0.1, 0.2, 0.3, math.inf])],
         [
@@ -161,6 +160,18 @@ def test_embedding_result_rejects_wrong_count_dimension_or_non_finite_values(
         result.validate_for(request)
 
 
+def test_embedding_result_requires_at_least_one_vector() -> None:
+    with pytest.raises(ValidationError, match="at least 1 item"):
+        EmbeddingProviderResultV1(
+            vectors=[],
+            provider="fixture",
+            provider_request_id="request-1",
+            actual_model="qwen3-vl-embedding-2026-06-30",
+            latency_ms=12,
+            usage={},
+        )
+
+
 def test_embedding_input_keeps_temporary_credentials_secret_and_requires_utc_expiry() -> None:
     image = EmbeddingImageInputV1(
         asset_version_id=new_uuid7(),
@@ -184,7 +195,7 @@ def test_embedding_input_keeps_temporary_credentials_secret_and_requires_utc_exp
         )
 
 
-def test_embedding_request_separates_image_and_product_fused_text_contracts() -> None:
+def test_embedding_request_supports_product_fused_text_or_image_inputs() -> None:
     image = EmbeddingImageInputV1(
         asset_version_id=new_uuid7(),
         content_sha256="a" * 64,
@@ -210,8 +221,22 @@ def test_embedding_request_separates_image_and_product_fused_text_contracts() ->
     )
 
     assert fused.controlled_text == '{"title":"口红"}'
-    with pytest.raises(ValidationError, match="controlled text"):
-        EmbeddingProviderRequestV1(**common, vector_kind=VectorKind.PRODUCT_FUSED)
+    image_only = EmbeddingProviderRequestV1(
+        **common,
+        vector_kind=VectorKind.PRODUCT_FUSED,
+    )
+    text_only = EmbeddingProviderRequestV1(
+        **(common | {"images": []}),
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        controlled_text="口红",
+    )
+    assert image_only.images == [image]
+    assert text_only.controlled_text == "口红"
+    with pytest.raises(ValidationError, match="text or an image"):
+        EmbeddingProviderRequestV1(
+            **(common | {"images": []}),
+            vector_kind=VectorKind.PRODUCT_FUSED,
+        )
     with pytest.raises(ValidationError, match="controlled text"):
         EmbeddingProviderRequestV1(
             **common,

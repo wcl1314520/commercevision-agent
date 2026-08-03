@@ -1393,6 +1393,7 @@ class AuditEventModel(Base):
 from . import brand_profile_models as _brand_profile_models  # noqa: E402, F401, I001
 from . import indexing_models as _indexing_models  # noqa: E402, F401, I001
 from . import product_brief_models as _product_brief_models  # noqa: E402, F401, I001
+from . import retrieval_models as _retrieval_models  # noqa: E402, F401, I001
 
 
 # Reserved for Phase 4 cost accounting without a destructive type migration.
