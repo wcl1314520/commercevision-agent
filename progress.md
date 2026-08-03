@@ -1234,3 +1234,7 @@
 - Standards/Spec 与安全、正确性、性能、可维护性、简化五轴本地终审已完成；Provider 并发缺失竞态、
   稳定空扫描误计数、管理员删除后的二次数据库读取、协调器职责过宽、到期扫描索引和严格版本解析等
   审查发现均已按 TDD 修复，当前无剩余 P0/P1/P2/Required。只待单一提交、推送与远端 CI 全绿。
+- Ticket 13 主提交 `2b58bb1bb4a15faee28b7af0467734aca49fdfd1` 的 CI `30844827539` 中 Web、
+  Container、Gitleaks/SBOM 全绿，Python 完整矩阵仅有 2 个向后兼容契约失败：旧 migration 全表
+  collation 清单漏列 3 张新表；共享 Upload cleanup event 因扩展 Payload 多序列化两个 null 字段。
+  最小修复补齐清单并对旧事件 `exclude_none=True`，两个失败节点本地精确复现后 `2 passed`。

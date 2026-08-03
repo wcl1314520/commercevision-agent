@@ -120,7 +120,7 @@ def schedule_upload_cleanup(
             aggregate_id=operation.id,
             aggregate_version=operation.version,
             trace_id=trace_id,
-            payload=payload.model_dump(mode="json"),
+            payload=payload.model_dump(mode="json", exclude_none=True),
             now=now,
         ),
         available_at=available_at,

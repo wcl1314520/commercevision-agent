@@ -14,6 +14,8 @@ from sqlalchemy.engine import make_url
 pytestmark = pytest.mark.integration
 
 WORKSPACE_ID_TABLES = {
+    "asset_deletion_progress",
+    "asset_deletion_tombstones",
     "asset_objects",
     "asset_validation_results",
     "asset_versions",
@@ -40,6 +42,7 @@ WORKSPACE_ID_TABLES = {
     "product_brief_source_assets",
     "product_brief_versions",
     "product_briefs",
+    "provider_artifact_deletion_progress",
     "retrieval_results",
     "retrieval_runs",
     "rights_record_providers",
