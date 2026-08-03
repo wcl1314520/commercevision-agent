@@ -17,6 +17,10 @@ dev = [
 [tool.uv]
 package = false
 default-groups = ["dev"]
+# Alibaba Tea OpenAPI 0.4.5 caps cryptography below 49 despite using only
+# stable primitives. Security fixes for CVE-2026-69247 require 50.0.0;
+# adapter contract tests guard this deliberate metadata override.
+override-dependencies = ["cryptography>=50.0.0,<51"]
 
 [tool.uv.workspace]
 members = ["packages/*", "services/*"]

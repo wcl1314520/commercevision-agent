@@ -1259,3 +1259,9 @@
   一次完整 `uv run pytest` 在 20 分钟工具上限终止且无最终汇总，不计为通过；精确 SHA 的 CI 负责最终全量判定。
 - Standards/Spec 与安全、正确性、性能、可维护性、简化终审发现并修复验证水位竞态、同微秒事件漏回放、
   激活 placement 版本未递增、非法 Web 默认 embedding identity 和验证投影不变量不足；当前无剩余阻断项。
+- Ticket 14 首次远程 CI `30856355443` 的完整 pytest、Web、Container、Gitleaks/SBOM 均通过，随后
+  Python audit 因漏洞库新收录 `cryptography 48.0.1` 的三条 CVE 失败。最高修复版本要求 50.0.0，
+  但 Alibaba Tea OpenAPI 0.4.5 的保守元数据上限为 `<49` 且没有新版可升级。
+- Workspace 以显式 `uv` override 固定 `cryptography >=50,<51`，并由 Alibaba 内容安全、OSS、C2PA、
+  MCP 身份/工具契约 `132 passed` 证明运行时兼容；Python audit 恢复无已知漏洞。该安全兼容补丁必须由
+  新的精确 SHA CI 全绿后才能放行 Ticket 15。
