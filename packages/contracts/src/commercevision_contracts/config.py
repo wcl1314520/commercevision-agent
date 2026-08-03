@@ -597,6 +597,14 @@ class Settings(BaseSettings):
     mcp_transport: Literal["stdio", "sse", "streamable-http"] = "streamable-http"
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8001
+    mcp_tool_policy_version: str = Field(
+        default="mcp-tool-policy-v1",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    mcp_max_argument_bytes: int = Field(default=64 * 1024, ge=1_024, le=1024 * 1024)
+    mcp_max_output_bytes: int = Field(default=256 * 1024, ge=1_024, le=2 * 1024 * 1024)
     scheduler_host: str = "0.0.0.0"
     scheduler_port: int = 8002
 

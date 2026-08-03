@@ -1152,3 +1152,36 @@
 - 依赖审计（Python/pnpm）无已知漏洞，Compose config、Ruff、OpenAPI/TypeScript 生成物和
   `git diff --check` 已通过。代码简化与 Standards/Spec/安全/正确性/性能/可维护性多轴终审未发现
   剩余阻断项；Ticket 12 MCP 未启动。
+- Ticket 11 实现提交 `32d3affe74bf69f9eef71325a4f7ef4e81faaa12` 推送后的首轮 CI
+  `30811542093` 仅有旧 Operation migration 契约清单漏列 `retrieval_runs/retrieval_results`；
+  生产迁移本身及两表 `workspace_id` collation 均正确。失败在本地精确复现后以两行测试契约修复，
+  原测试转绿，Operation migration + 完整 migration roundtrip 为 `6 passed`。
+- 修复提交 `dccacecc91f8f5d3869d15142c0b728150fab21b` 对应 GitHub Actions
+  `30813127324` 已完成且全绿：Python、Web、Container builds、Security/Gitleaks 与 SBOM 均成功；
+  本地与远端 `main` 精确一致，Ticket 11 正式完成并解锁 Ticket 12。
+
+# 2026-08-03 Ticket 12 Product Catalog 与 Asset MCP 本地收口
+
+- 五个固定版本化 MCP 工具已作为现有 Application Service 的只读入站 Adapter 落地；公开参数
+  不包含 Workspace、actor、scope、purpose、provider、budget、URL、SQL、Bucket、对象 key、
+  文件路径、模型 ID 或 Secret reference，全部身份与预算来自服务端验签上下文。
+- HMAC trusted principal 支持 current/previous key 轮换、常量时间签名验证、签发时间与 32 KiB
+  token 上限；Tool Gateway 对 input/output、scope、参数/结果字节、tool/policy version 和稳定
+  idempotency key 统一失败关闭。跨 Workspace、额外字段、越权 scope、超预算和内部依赖错误均
+  映射为稳定公开错误，不泄露内部异常或凭证。
+- MCP composition 已从 API 反向依赖中拆出共享 `commercevision-bootstrap` 深模块；API 与 MCP
+  共同依赖该组合根，MCP 仅持有窄 Application Ports。Streamable HTTP 使用进程级 lifecycle，
+  MySQL/对象存储 readiness 独立探测，Milvus 通道故障继续由 Retrieval degradation 契约表达。
+- 最终 Python unit/contract 为 `1179 passed, 1 skipped`；MCP/Tool Runtime 聚焦套件 `54 passed`；
+  ProductBrief 真实 MySQL `152 passed`；上传/MinIO/迁移往返/ClamAV 组 `91 passed, 2 skipped`；
+  Worker/Milvus 原失败节点在 CI 等价环境下 `7 passed`，最终官方 2.4 适配组合回归 `4 passed`。
+  跳过项仅为显式 opt-in 的 Alibaba OSS live 与本机未配置的真实 ClamAV 接缝。
+- 依赖锁检查、Ruff format/check、Python 审计、OpenAPI 重导出与 drift、Web generated API types、
+  Compose config、`git diff --check` 均通过。最终 MCP 镜像成功构建，Compose 中 MySQL、迁移、
+  对象存储和 Milvus 依赖收敛后服务 healthy，`/health/live` 与 `/health/ready` 均返回 200，
+  readiness 为 `mysql=ok`、`object_storage=ok`。
+- 排查中确认 PyMilvus 2.4 的 `pkg_resources` 兼容由既有受控 Adapter 提供；独立 SDK 探针曾绕过
+  该边界并导致错误归因。最终保持官方匹配的 PyMilvus/Milvus `2.4.15` 与安全版
+  `setuptools 83`，Python 审计无已知漏洞；短暂尝试的 2.5 组合已完全撤销且不在最终 diff。
+- 安全、正确性、性能、可维护性与简化五轴终审未发现剩余阻断项。Ticket 12 只待形成单一提交、
+  推送并等待精确 GitHub Actions 全绿；在此之前 Ticket 13 保持未启动。

@@ -357,6 +357,33 @@ def test_compose_scheduler_uses_the_shared_authenticated_rabbitmq_boundary() -> 
     assert "CV_RABBITMQ_PASSWORD=commercevision" in example_environment
 
 
+def test_compose_mcp_has_authenticated_dependencies_and_readiness() -> None:
+    service = _compose_services()["mcp-server"]
+    environment = service["environment"]
+
+    assert environment["CV_MYSQL_DSN"].startswith("mysql+pymysql://")
+    assert environment["CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID"]
+    assert environment["CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET"]
+    assert environment["CV_MCP_TOOL_POLICY_VERSION"] == (
+        "${CV_MCP_TOOL_POLICY_VERSION:-mcp-tool-policy-v1}"
+    )
+    assert service["depends_on"] == {
+        "mysql": {"condition": "service_healthy"},
+        "migrate": {"condition": "service_completed_successfully"},
+        "object-storage-init": {"condition": "service_completed_successfully"},
+        "milvus": {"condition": "service_healthy"},
+    }
+    healthcheck = " ".join(service["healthcheck"]["test"])
+    assert "/health/ready" in healthcheck
+    assert "/health/live" not in healthcheck
+
+    mcp_project = (_REPOSITORY_ROOT / "services/mcp-server/pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "commercevision-bootstrap" in mcp_project
+    assert "commercevision-api" not in mcp_project
+
+
 def test_compose_shares_product_brief_policy_without_exposing_worker_secret() -> None:
     services = _compose_services()
     api_environment = services["api"]["environment"]

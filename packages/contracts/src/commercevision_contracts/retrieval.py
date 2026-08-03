@@ -21,7 +21,7 @@ StrictBool = Annotated[bool, Field(strict=True)]
 JsonVectorKind = Annotated[VectorKind, Field(strict=False)]
 
 
-def _controlled_text(
+def controlled_retrieval_text(
     value: str,
     *,
     field: str,
@@ -133,7 +133,7 @@ class RetrievalQueryV1(RetrievalContractV1):
     def normalize_query_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _controlled_text(
+        return controlled_retrieval_text(
             value,
             field="query text",
             maximum_bytes=_MAXIMUM_QUERY_BYTES,
@@ -145,7 +145,7 @@ class RetrievalQueryV1(RetrievalContractV1):
     def normalize_optional_filter(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _controlled_text(value, field="retrieval filter", maximum_bytes=512)
+        return controlled_retrieval_text(value, field="retrieval filter", maximum_bytes=512)
 
     @model_validator(mode="after")
     def require_coherent_query(self) -> RetrievalQueryV1:
@@ -229,7 +229,7 @@ class RetrievalCitationV1(RetrievalContractV1):
     @field_validator("reason")
     @classmethod
     def require_controlled_reason(cls, value: str) -> str:
-        return _controlled_text(value, field="retrieval reason", maximum_bytes=2048)
+        return controlled_retrieval_text(value, field="retrieval reason", maximum_bytes=2048)
 
     @field_validator("decided_at")
     @classmethod
@@ -264,7 +264,7 @@ class RetrievalDegradationV1(RetrievalContractV1):
     @field_validator("message")
     @classmethod
     def require_controlled_message(cls, value: str) -> str:
-        return _controlled_text(value, field="degradation message", maximum_bytes=2048)
+        return controlled_retrieval_text(value, field="degradation message", maximum_bytes=2048)
 
 
 class RetrievalResponseV1(RetrievalContractV1):

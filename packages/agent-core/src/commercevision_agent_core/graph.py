@@ -636,6 +636,8 @@ class FixtureNodes:
             workflow_id=state.workflow_id,
             step_key=step_key,
             tool_name="fixture.generate_image",
+            tool_version="1.0.0",
+            policy_version="tool-policy-v1",
             arguments=arguments,
         )
         attempt = self.lifecycle.begin_attempt(

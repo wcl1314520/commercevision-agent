@@ -127,8 +127,10 @@
 - Ticket 10 单一提交 `f1d8bf0` 对应 GitHub Actions `30800574595` 已全绿，Ticket 11 正式解锁。
 - Ticket 11 已闭合 structured Retrieval Query、MySQL eligible/final rights fence、完整 eligible
   分块 dense、lexical/brand/explicit recall、versioned RRF、受界 rerank/去重、Retained Run、
-  30–60 秒 controlled preview、API 与 Web Retrieval Explorer；当前正在完成全量门禁与独立终审，
-  未启动 Ticket 12 MCP。
+  30–60 秒 controlled preview、API 与 Web Retrieval Explorer；实现提交 `32d3aff` 与迁移契约
+  修复 `dccacec` 已由 GitHub Actions `30813127324` 全绿验证并正式放行。
+- Ticket 12 已完成 Product Catalog/Asset MCP 本地实现与发布门禁；只待单一提交、推送及其
+  精确 GitHub Actions 全绿。Ticket 13 尚未启动。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

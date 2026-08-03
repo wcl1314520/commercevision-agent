@@ -21,10 +21,23 @@ class ToolExecutionContext:
     trace_id: str
     idempotency_key: str
     policy_version: str
+    scopes: frozenset[str] = frozenset()
+    purpose: str = ""
+    provider: str = ""
+    requires_derivative: bool = False
+    maximum_result_count: int = 50
+    maximum_candidate_count: int = 1_000
+    maximum_output_bytes: int = 256 * 1024
     started_at: datetime = field(default_factory=utc_now)
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
+        if self.maximum_result_count < 1:
+            raise ValueError("tool result budget must be positive")
+        if self.maximum_candidate_count < self.maximum_result_count:
+            raise ValueError("tool candidate budget must cover the result budget")
+        if self.maximum_output_bytes < 1:
+            raise ValueError("tool output byte budget must be positive")
 
 
 @dataclass(frozen=True, slots=True)

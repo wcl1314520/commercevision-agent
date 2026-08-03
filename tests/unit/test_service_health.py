@@ -1,4 +1,5 @@
-from commercevision_mcp.main import server
+from commercevision_contracts import Settings
+from commercevision_mcp.main import create_server
 from commercevision_scheduler.main import create_app
 from fastapi.testclient import TestClient
 
@@ -45,7 +46,14 @@ def test_scheduler_readiness_exposes_independent_scanner_status() -> None:
 
 
 def test_mcp_liveness_contract() -> None:
-    with TestClient(server.streamable_http_app()) as client:
+    class Container:
+        def close(self) -> None:
+            pass
+
+    _, holder = create_server(
+        Settings(service_name="mcp-server"), container_factory=lambda _: Container()
+    )
+    with TestClient(holder["http_app"]) as client:
         response = client.get("/health/live")
 
     assert response.status_code == 200

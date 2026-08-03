@@ -12,6 +12,7 @@ members = [
     "commercevision-agent-core",
     "commercevision-api",
     "commercevision-application",
+    "commercevision-bootstrap",
     "commercevision-contracts",
     "commercevision-domain",
     "commercevision-evaluation",
@@ -569,6 +570,7 @@ dependencies = [
     { name = "aio-pika" },
     { name = "aiomysql" },
     { name = "commercevision-application" },
+    { name = "commercevision-bootstrap" },
     { name = "commercevision-contracts" },
     { name = "commercevision-domain" },
     { name = "commercevision-object-storage" },
@@ -588,6 +590,7 @@ requires-dist = [
     { name = "aio-pika", specifier = ">=9.5,<10" },
     { name = "aiomysql", specifier = ">=0.2,<1" },
     { name = "commercevision-application", editable = "packages/application" },
+    { name = "commercevision-bootstrap", editable = "packages/bootstrap" },
     { name = "commercevision-contracts", editable = "packages/contracts" },
     { name = "commercevision-domain", editable = "packages/domain" },
     { name = "commercevision-object-storage", editable = "packages/object-storage" },
@@ -619,6 +622,31 @@ requires-dist = [
     { name = "commercevision-domain", editable = "packages/domain" },
     { name = "commercevision-tool-runtime", editable = "packages/tool-runtime" },
     { name = "pillow", specifier = ">=11,<13" },
+]
+
+[[package]]
+name = "commercevision-bootstrap"
+version = "0.1.0"
+source = { editable = "packages/bootstrap" }
+dependencies = [
+    { name = "commercevision-application" },
+    { name = "commercevision-contracts" },
+    { name = "commercevision-domain" },
+    { name = "commercevision-object-storage" },
+    { name = "commercevision-persistence" },
+    { name = "commercevision-providers" },
+    { name = "commercevision-retrieval" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "commercevision-application", editable = "packages/application" },
+    { name = "commercevision-contracts", editable = "packages/contracts" },
+    { name = "commercevision-domain", editable = "packages/domain" },
+    { name = "commercevision-object-storage", editable = "packages/object-storage" },
+    { name = "commercevision-persistence", editable = "packages/persistence" },
+    { name = "commercevision-providers", editable = "packages/providers" },
+    { name = "commercevision-retrieval", editable = "packages/retrieval" },
 ]
 
 [[package]]
@@ -659,18 +687,32 @@ name = "commercevision-mcp-server"
 version = "0.1.0"
 source = { editable = "services/mcp-server" }
 dependencies = [
+    { name = "commercevision-application" },
+    { name = "commercevision-bootstrap" },
     { name = "commercevision-contracts" },
+    { name = "commercevision-domain" },
+    { name = "commercevision-object-storage" },
     { name = "commercevision-observability" },
+    { name = "commercevision-persistence" },
+    { name = "commercevision-tool-runtime" },
     { name = "mcp" },
     { name = "starlette" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "commercevision-application", editable = "packages/application" },
+    { name = "commercevision-bootstrap", editable = "packages/bootstrap" },
     { name = "commercevision-contracts", editable = "packages/contracts" },
+    { name = "commercevision-domain", editable = "packages/domain" },
+    { name = "commercevision-object-storage", editable = "packages/object-storage" },
     { name = "commercevision-observability", editable = "packages/observability" },
+    { name = "commercevision-persistence", editable = "packages/persistence" },
+    { name = "commercevision-tool-runtime", editable = "packages/tool-runtime" },
     { name = "mcp", specifier = ">=1.9,<2" },
     { name = "starlette", specifier = ">=0.49,<2" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
 
 [[package]]

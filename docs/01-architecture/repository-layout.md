@@ -19,6 +19,7 @@ commercevision-agent/
 │   └── mcp-server/                  # 受控 MCP 工具
 ├── packages/
 │   ├── agent-core/                  # LangGraph、State、Node
+│   ├── bootstrap/                   # 多服务共享的 Adapter composition helpers
 │   ├── domain/                      # Workflow、审批、资产领域模型
 │   ├── contracts/                   # Pydantic/OpenAPI/Event Schema
 │   ├── providers/                   # LLM/Vision/Image Adapter
@@ -71,6 +72,9 @@ apps/services
 
 providers/retrieval/evaluation/tool-runtime
     -> contracts
+
+services
+    -> bootstrap -> application/adapters
 
 domain
     -> contracts
@@ -129,4 +133,3 @@ domain
 - 在 Provider Adapter 中决定业务路由。
 - 在数据库模型中保存永久公网图片 URL。
 - 在同一个文件中混合 Prompt、SDK 调用和 UI 逻辑。
-

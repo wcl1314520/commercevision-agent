@@ -527,21 +527,42 @@ services:
     command:
       - commercevision-mcp
     environment:
+      <<: *object-storage-runtime-environment
       CV_SERVICE_NAME: mcp-server
       CV_ENVIRONMENT: local
+      CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
+      CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
+      CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID: ${CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID:-local-web-gateway}
+      CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET: ${CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET:-local-web-gateway-secret-change-before-production}
+      CV_TRUSTED_PRINCIPAL_PREVIOUS_KEY_ID: ${CV_TRUSTED_PRINCIPAL_PREVIOUS_KEY_ID:-}
+      CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET: ${CV_TRUSTED_PRINCIPAL_PREVIOUS_HMAC_SECRET:-}
+      CV_TRUSTED_PRINCIPAL_MAX_AGE_SECONDS: ${CV_TRUSTED_PRINCIPAL_MAX_AGE_SECONDS:-300}
+      CV_TRUSTED_PRINCIPAL_FUTURE_SKEW_SECONDS: ${CV_TRUSTED_PRINCIPAL_FUTURE_SKEW_SECONDS:-30}
       CV_MCP_TRANSPORT: streamable-http
       CV_MCP_HOST: 0.0.0.0
       CV_MCP_PORT: "8001"
+      CV_MCP_TOOL_POLICY_VERSION: ${CV_MCP_TOOL_POLICY_VERSION:-mcp-tool-policy-v1}
+      CV_MCP_MAX_ARGUMENT_BYTES: ${CV_MCP_MAX_ARGUMENT_BYTES:-65536}
+      CV_MCP_MAX_OUTPUT_BYTES: ${CV_MCP_MAX_OUTPUT_BYTES:-262144}
     ports:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_MCP_HOST_PORT:-18001}:8001"
     restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      object-storage-init:
+        condition: service_completed_successfully
+      milvus:
+        condition: service_healthy
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/ready', timeout=3)",
         ]
       interval: 10s
       timeout: 5s

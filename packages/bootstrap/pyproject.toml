@@ -1,37 +1,23 @@
 [project]
-name = "commercevision-api"
+name = "commercevision-bootstrap"
 version = "0.1.0"
-description = "CommerceVision Control API"
+description = "Shared CommerceVision service composition helpers"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-  "aio-pika>=9.5,<10",
-  "aiomysql>=0.2,<1",
   "commercevision-application",
-  "commercevision-bootstrap",
   "commercevision-contracts",
   "commercevision-domain",
   "commercevision-object-storage",
-  "commercevision-observability",
   "commercevision-persistence",
   "commercevision-providers",
   "commercevision-retrieval",
-  "fastapi>=0.115,<1",
-  "httpx>=0.28,<1",
-  "redis>=5,<7",
-  "sqlalchemy[asyncio]>=2.0,<3",
-  "uvicorn[standard]>=0.34,<1",
 ]
-
-[project.scripts]
-commercevision-api = "commercevision_api.main:run"
 
 [tool.uv.sources]
 commercevision-application = { workspace = true }
-commercevision-bootstrap = { workspace = true }
 commercevision-contracts = { workspace = true }
 commercevision-domain = { workspace = true }
 commercevision-object-storage = { workspace = true }
-commercevision-observability = { workspace = true }
 commercevision-persistence = { workspace = true }
 commercevision-providers = { workspace = true }
 commercevision-retrieval = { workspace = true }
@@ -41,4 +27,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/commercevision_api"]
+packages = ["src/commercevision_bootstrap"]
