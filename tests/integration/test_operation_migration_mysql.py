@@ -40,6 +40,8 @@ WORKSPACE_ID_TABLES = {
     "product_brief_source_assets",
     "product_brief_versions",
     "product_briefs",
+    "retrieval_results",
+    "retrieval_runs",
     "rights_record_providers",
     "rights_record_uses",
     "rights_records",
