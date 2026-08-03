@@ -4454,6 +4454,638 @@
         }
       }
     },
+    "/api/v1/collections/rebuilds": {
+      "post": {
+        "tags": [
+          "collection-rebuilds"
+        ],
+        "summary": "Request Rebuild",
+        "operationId": "request_rebuild_api_v1_collections_rebuilds_post",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 256,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionRebuildRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRebuildResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rebuild argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace administrator required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection rebuild not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version or rebuild state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rebuild contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rebuild dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/collections/rebuilds/{rebuild_id}": {
+      "get": {
+        "tags": [
+          "collection-rebuilds"
+        ],
+        "summary": "Get Rebuild",
+        "operationId": "get_rebuild_api_v1_collections_rebuilds__rebuild_id__get",
+        "parameters": [
+          {
+            "name": "rebuild_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Rebuild Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRebuildResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rebuild argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace administrator required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection rebuild not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version or rebuild state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rebuild contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rebuild dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/collections/rebuilds/{rebuild_id}:validate": {
+      "post": {
+        "tags": [
+          "collection-rebuilds"
+        ],
+        "summary": "Validate Rebuild",
+        "operationId": "validate_rebuild_api_v1_collections_rebuilds__rebuild_id__validate_post",
+        "parameters": [
+          {
+            "name": "rebuild_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Rebuild Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionRebuildActionRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRebuildResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rebuild argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace administrator required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection rebuild not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version or rebuild state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rebuild contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rebuild dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/collections/rebuilds/{rebuild_id}:activate": {
+      "post": {
+        "tags": [
+          "collection-rebuilds"
+        ],
+        "summary": "Activate Rebuild",
+        "operationId": "activate_rebuild_api_v1_collections_rebuilds__rebuild_id__activate_post",
+        "parameters": [
+          {
+            "name": "rebuild_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Rebuild Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionRebuildActionRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRebuildResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rebuild argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace administrator required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection rebuild not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version or rebuild state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rebuild contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rebuild dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/operations": {
       "get": {
         "tags": [
@@ -9632,6 +10264,371 @@
           "expected_version"
         ],
         "title": "CatalogDeleteRequestV1"
+      },
+      "CollectionRebuildActionRequestV1": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "CollectionRebuildActionRequestV1"
+      },
+      "CollectionRebuildProgressV1": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Sequence"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CollectionRebuildState"
+          },
+          "processed_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Processed Count"
+          },
+          "message_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+            "title": "Message Code"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sequence",
+          "state",
+          "processed_count",
+          "message_code",
+          "observed_at"
+        ],
+        "title": "CollectionRebuildProgressV1"
+      },
+      "CollectionRebuildRequestV1": {
+        "properties": {
+          "vector_kind": {
+            "$ref": "#/components/schemas/VectorKind"
+          },
+          "model_family": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Model Family"
+          },
+          "model_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Model Id"
+          },
+          "pinned_revision": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Pinned Revision"
+          },
+          "dimension": {
+            "type": "integer",
+            "maximum": 32768.0,
+            "minimum": 1.0,
+            "title": "Dimension"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Schema Version"
+          },
+          "index_spec_version": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Index Spec Version"
+          },
+          "expected_active_collection_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Active Collection Version"
+          },
+          "expected_policy_pointer_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Policy Pointer Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "vector_kind",
+          "model_family",
+          "model_id",
+          "pinned_revision",
+          "dimension",
+          "schema_version",
+          "index_spec_version",
+          "expected_active_collection_version",
+          "expected_policy_pointer_version"
+        ],
+        "title": "CollectionRebuildRequestV1"
+      },
+      "CollectionRebuildResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f-]{36}$",
+            "title": "Id"
+          },
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f-]{36}$",
+            "title": "Operation Id"
+          },
+          "vector_kind": {
+            "$ref": "#/components/schemas/VectorKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CollectionRebuildState"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "snapshot_watermark": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Snapshot Watermark"
+          },
+          "replay_watermark": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Watermark"
+          },
+          "backfill_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 36
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backfill Cursor"
+          },
+          "replay_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 36
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Cursor"
+          },
+          "processed_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Processed Count"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRebuildValidationV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "retire_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retire After"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "progress": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionRebuildProgressV1"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Progress"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "operation_id",
+          "vector_kind",
+          "state",
+          "version",
+          "snapshot_watermark",
+          "replay_watermark",
+          "processed_count",
+          "validation",
+          "retire_after",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CollectionRebuildResponseV1"
+      },
+      "CollectionRebuildState": {
+        "type": "string",
+        "enum": [
+          "REQUESTED",
+          "PROVISIONING",
+          "BACKFILLING",
+          "REPLAYING",
+          "RIGHTS_RESCAN",
+          "AWAITING_VALIDATION",
+          "VALIDATING",
+          "READY",
+          "ACTIVATING",
+          "ACTIVE",
+          "FAILED",
+          "RETIRING",
+          "RETIRED"
+        ],
+        "title": "CollectionRebuildState"
+      },
+      "CollectionRebuildValidationV1": {
+        "properties": {
+          "expected_row_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Row Count"
+          },
+          "actual_row_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Actual Row Count"
+          },
+          "missing_primary_key_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Missing Primary Key Count"
+          },
+          "unexpected_primary_key_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unexpected Primary Key Count"
+          },
+          "sampled_visibility_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sampled Visibility Count"
+          },
+          "sampled_visibility_failures": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sampled Visibility Failures"
+          },
+          "ann_recall_at_10": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ann Recall At 10"
+          },
+          "minimum_ann_recall_at_10": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Minimum Ann Recall At 10"
+          },
+          "fixed_query_pass_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fixed Query Pass Count"
+          },
+          "fixed_query_total_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fixed Query Total Count"
+          },
+          "unauthorized_result_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unauthorized Result Count"
+          },
+          "queries_with_unauthorized_results": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Queries With Unauthorized Results"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_row_count",
+          "actual_row_count",
+          "missing_primary_key_count",
+          "unexpected_primary_key_count",
+          "sampled_visibility_count",
+          "sampled_visibility_failures",
+          "ann_recall_at_10",
+          "minimum_ann_recall_at_10",
+          "fixed_query_pass_count",
+          "fixed_query_total_count",
+          "unauthorized_result_count",
+          "queries_with_unauthorized_results",
+          "accepted"
+        ],
+        "title": "CollectionRebuildValidationV1"
       },
       "DeadLetterDetailResponseV1": {
         "properties": {

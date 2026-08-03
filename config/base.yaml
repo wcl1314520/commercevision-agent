@@ -140,6 +140,11 @@ embedding_collection_index_spec_version: hnsw-cosine-v1
 image_index_temporary_reference_lifetime_seconds: 60
 image_index_max_attempts: 5
 image_index_max_reconciliation_attempts: 8
+collection_rebuild_batch_size: 100
+collection_rebuild_validation_maximum_rows: 100000
+collection_rebuild_validation_sample_size: 50
+collection_rebuild_minimum_ann_recall_at_10: 0.95
+collection_rebuild_retirement_delay_seconds: 3600
 embedding_data_transfer_enabled: false
 embedding_data_transfer_policy_version: embedding-transfer-deny-v1
 embedding_data_transfer_allowed_workspace_ids: []

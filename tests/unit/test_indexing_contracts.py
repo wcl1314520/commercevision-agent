@@ -64,6 +64,24 @@ def test_collection_admin_contract_disables_dynamic_fields_and_limits_scalars() 
         MilvusCollectionCreateRequestV1(**(request.model_dump() | {"dynamic_fields_enabled": True}))
 
 
+def test_collection_create_request_accepts_only_a_derived_candidate_instance_name() -> None:
+    spec = CollectionSpec.create(
+        model_family="qwen3-vl-embedding",
+        pinned_revision="2026-06-30",
+        dimension=256,
+        vector_kind=VectorKind.IMAGE,
+        schema_version=1,
+        index_spec_version="hnsw-cosine-v1",
+    )
+    candidate_name = f"{spec.physical_name}_019f8a000000"
+
+    assert collection_create_request(spec, collection_name=candidate_name).collection_name == (
+        candidate_name
+    )
+    with pytest.raises(ValueError, match="derived from the immutable spec"):
+        collection_create_request(spec, collection_name="caller_controlled_collection")
+
+
 @pytest.mark.parametrize(
     ("eligible_ids", "limit"),
     [

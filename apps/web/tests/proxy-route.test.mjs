@@ -808,6 +808,57 @@ test("only exact retrieval run and bounded preview paths cross the signed proxy 
   assert.equal(upstreamRequests.length, cases.length);
 });
 
+test("only exact Collection rebuild admin paths cross the signed proxy seam", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const upstreamRequests = [];
+  globalThis.fetch = async (input, init) => {
+    upstreamRequests.push({ method: init.method, url: String(input) });
+    return Response.json({ ok: true });
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const rebuildId = "019f8a00-0000-7000-8000-000000000140";
+  const headers = {
+    "content-type": "application/json",
+    "idempotency-key": "collection-rebuild-proxy-test",
+    "x-workspace-id": "workspace-1",
+  };
+  const cases = [
+    [POST, "POST", ["collections", "rebuilds"], "/collections/rebuilds"],
+    [GET, "GET", ["collections", "rebuilds", rebuildId], `/collections/rebuilds/${rebuildId}`],
+    [POST, "POST", ["collections", "rebuilds", `${rebuildId}:validate`], `/collections/rebuilds/${rebuildId}:validate`],
+    [POST, "POST", ["collections", "rebuilds", `${rebuildId}:activate`], `/collections/rebuilds/${rebuildId}:activate`],
+  ];
+  for (const [handler, method, path, suffix] of cases) {
+    const response = await handler(
+      new Request(`http://web.local/api/v1${suffix}`, {
+        method,
+        headers,
+        body: method === "POST" ? "{}" : undefined,
+      }),
+      { params: Promise.resolve({ path }) },
+    );
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(
+    upstreamRequests.map(({ method, url }) => ({ method, url })),
+    cases.map(([, method, , suffix]) => ({
+      method,
+      url: `http://api:8000/api/v1${suffix}`,
+    })),
+  );
+
+  const denied = await POST(
+    new Request("http://web.local/api/v1/collections/rebuilds/not-a-uuid:activate", {
+      method: "POST",
+    }),
+    { params: Promise.resolve({ path: ["collections", "rebuilds", "not-a-uuid:activate"] }) },
+  );
+  assert.equal(denied.status, 404);
+});
+
 test("enforces a two-item Brand Profile page before crossing the bounded response seam", async (context) => {
   const originalFetch = globalThis.fetch;
   const upstreamUrls = [];

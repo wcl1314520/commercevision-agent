@@ -99,6 +99,21 @@ class CollectionSpec:
         return hashlib.sha256(self.logical_key.encode("utf-8")).hexdigest()
 
 
+def collection_instance_name(spec: CollectionSpec, *, rebuild_id: str) -> str:
+    """Derive one immutable candidate name without accepting caller-controlled names."""
+
+    try:
+        canonical = canonicalize_uuid(rebuild_id)
+    except ValueError:
+        raise ValueError("rebuild_id must be a canonical lowercase UUID") from None
+    if canonical != rebuild_id:
+        raise ValueError("rebuild_id must be a canonical lowercase UUID")
+    name = f"{spec.physical_name}_{canonical.replace('-', '')[:12]}"
+    if len(name) > 255:
+        raise ValueError("candidate collection name exceeds the Milvus identifier limit")
+    return name
+
+
 def _require_sha256(value: str, field: str) -> None:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise ValueError(f"{field} must be a lowercase SHA-256")

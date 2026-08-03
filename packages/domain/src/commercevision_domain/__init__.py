@@ -49,6 +49,7 @@ from .brand_profiles import (
 from .catalog import SKU, DuplicateExternalIdentifierError, Product
 from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
 from .indexing import (
+    CollectionRebuildState,
     CollectionSpec,
     CollectionState,
     ControlledProductText,
@@ -56,6 +57,7 @@ from .indexing import (
     EmbeddingState,
     VectorKind,
     build_controlled_product_text,
+    collection_instance_name,
     compute_embedding_input_hash,
     compute_product_fused_input_hash,
     generation_milvus_primary_key,
@@ -175,6 +177,7 @@ __all__ = [
     "BrandRuleScope",
     "ConcurrencyError",
     "CollectionSpec",
+    "CollectionRebuildState",
     "ControlledProductText",
     "CollectionState",
     "CurrentUsabilityDecision",
@@ -261,6 +264,7 @@ __all__ = [
     "validate_workspace_id",
     "evaluate_current_usability",
     "compute_embedding_input_hash",
+    "collection_instance_name",
     "generation_milvus_primary_key",
     "assert_product_brief_schema",
     "product_brief_field_paths",

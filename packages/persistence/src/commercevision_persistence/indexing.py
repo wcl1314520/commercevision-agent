@@ -37,6 +37,7 @@ from commercevision_domain import (
     RetentionClass,
     StorageLocationClass,
     VectorKind,
+    collection_instance_name,
     compute_embedding_input_hash,
     compute_product_fused_input_hash,
     evaluate_current_usability,
@@ -54,6 +55,7 @@ from .indexing_models import (
     CollectionRegistryModel,
     EmbeddingRecordModel,
     ProductSearchDocumentModel,
+    RetrievalPolicyPointerModel,
 )
 from .models import (
     AssetObjectModel,
@@ -62,6 +64,7 @@ from .models import (
     OutboxEventModel,
     ProductModel,
 )
+from .operation_mappers import operation_from_model
 from .product_brief_models import ProductBriefModel, ProductBriefVersionModel
 from .repositories import OutboxRepository
 
@@ -83,6 +86,54 @@ class MySqlIndexingAuthority:
             self._assert_eligible(session, target, embedding)
             return target
 
+    def load_rebuild_source(
+        self,
+        *,
+        workspace_id: str,
+        embedding_record_id: str,
+        candidate_collection_id: str,
+        candidate_spec: CollectionSpec,
+    ) -> ImageIndexingTarget | None:
+        """Reload one source record against current authority, failing closed on eligibility."""
+
+        with self._session_factory() as session:
+            embedding = session.scalar(
+                select(EmbeddingRecordModel).where(
+                    EmbeddingRecordModel.workspace_id == workspace_id,
+                    EmbeddingRecordModel.id == embedding_record_id,
+                )
+            )
+            if embedding is None:
+                return None
+            operation = session.scalar(
+                select(DurableOperationModel).where(
+                    DurableOperationModel.workspace_id == workspace_id,
+                    DurableOperationModel.id == embedding.operation_id,
+                )
+            )
+            if operation is None:
+                raise ValueError("rebuild source has no durable indexing operation")
+            target, loaded = self._load(
+                session,
+                OperationExecutionRequest.from_operation(operation_from_model(operation)),
+            )
+            if (
+                target.collection_spec.model_family != candidate_spec.model_family
+                or target.collection_spec.pinned_revision != candidate_spec.pinned_revision
+                or target.collection_spec.dimension != candidate_spec.dimension
+                or target.collection_spec.vector_kind is not candidate_spec.vector_kind
+            ):
+                raise ValueError("rebuild candidate changes the embedding identity")
+            try:
+                self._assert_eligible(session, target, loaded)
+            except ValueError:
+                return None
+            return replace(
+                target,
+                collection_id=candidate_collection_id,
+                collection_spec=candidate_spec,
+            )
+
     def activate_collection(self, target: ImageIndexingTarget) -> None:
         with self._session_factory.begin() as session:
             collection = session.scalar(
@@ -96,7 +147,8 @@ class MySqlIndexingAuthority:
             if (
                 collection.logical_key != spec.logical_key
                 or collection.spec_hash != spec.spec_hash
-                or collection.physical_name != spec.physical_name
+                or collection.physical_name
+                != self._expected_physical_name(collection=collection, spec=spec)
                 or collection.model_family != spec.model_family
                 or collection.model_id != target.model_id
                 or collection.pinned_revision != spec.pinned_revision
@@ -127,6 +179,19 @@ class MySqlIndexingAuthority:
             }
             collection.version += 1
             collection.updated_at = database_now
+            pointer = session.get(RetrievalPolicyPointerModel, collection.vector_kind)
+            if pointer is None:
+                session.add(
+                    RetrievalPolicyPointerModel(
+                        vector_kind=collection.vector_kind,
+                        collection_id=collection.id,
+                        retrieval_policy_version="retrieval-policy-v1",
+                        version=1,
+                        updated_at=database_now,
+                    )
+                )
+            elif pointer.collection_id != collection.id:
+                raise ValueError("another collection already owns the retrieval policy pointer")
             session.flush()
 
     def claim_for_submission(
@@ -1163,7 +1228,11 @@ class MySqlIndexingAuthority:
             collection.dynamic_fields_enabled
             or collection.logical_key != spec.logical_key
             or collection.spec_hash != spec.spec_hash
-            or collection.physical_name != spec.physical_name
+            or collection.physical_name
+            != MySqlIndexingAuthority._expected_physical_name(
+                collection=collection,
+                spec=spec,
+            )
             or embedding.model_family != collection.model_family
             or embedding.model_id != collection.model_id
             or embedding.pinned_revision != collection.pinned_revision
@@ -1194,6 +1263,16 @@ class MySqlIndexingAuthority:
             )
         if embedding.input_hash != expected_hash:
             raise ValueError("embedding input hash does not match authoritative index facts")
+
+    @staticmethod
+    def _expected_physical_name(
+        *, collection: CollectionRegistryModel, spec: CollectionSpec
+    ) -> str:
+        if collection.instance_generation == 0 and collection.rebuild_id is None:
+            return spec.physical_name
+        if collection.instance_generation > 0 and collection.rebuild_id is not None:
+            return collection_instance_name(spec, rebuild_id=collection.rebuild_id)
+        raise ValueError("collection registry instance identity is invalid")
 
     @staticmethod
     def _lock_collection(session: Session, collection_id: str) -> CollectionRegistryModel:

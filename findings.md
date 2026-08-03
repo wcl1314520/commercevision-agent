@@ -626,3 +626,18 @@
 - Retention scheduler 的有界性同时依赖查询形状与索引形状。`LIMIT + SKIP LOCKED` 不能弥补以范围或
   `NOT IN` 字段开头的索引；Task 到期扫描使用 retention class、空 deletion operation、deadline、id
   的等值前缀/范围/稳定排序索引，并由独立 scanner health 隔离故障。
+
+## Ticket 14 Collection 重建边界
+
+- 活动路由必须是单一、显式、可锁定的 Retrieval Policy pointer；从 Registry 中查询“某个 ACTIVE 行”
+  会在升级切换与异常恢复时产生歧义。候选 state 是生命周期事实，不是在线路由授权。
+- Snapshot watermark、backfill cursor、replay `(occurred_at,id)` cursor、rights cursor 和 placement 必须
+  持久化到 MySQL。Milvus upsert 可以重复，但只有事务提交 cursor 后才算批次完成；进程内内存不能授权跳批。
+- Validation watermark 必须在扫描前提交。若在扫描完成后才写水位，验证期间的 Rights/删除事件会落入
+  “未被验证、激活也不认为迟到”的窗口。激活发现水位后的事实必须退回 replay，而不是带风险强制切换。
+- MySQL `DATETIME(6)` 不能单独排序同一微秒内的事务。只有时间水位时，边界查询应失败安全使用 `>=`；
+  generation-fenced 幂等重放的代价远低于漏掉一条授权变化。批内继续使用 `(occurred_at,event_id)` keyset。
+- Collection upgrade 与 embedding re-index 是不同语义。前者可改变 schema/index spec，但必须保持 model family、
+  model ID、pinned revision、dimension 和 vector kind；后者需要新 embedding identity，不能通过管理表单绕过。
+- 旧 Collection 只能在 pointer 已原子切换、候选保持 read-enabled 且配置延迟到达后退役。物理删除目标必须
+  来自 rebuild 记录的 source identity，绝不能从当前 active 名称或人工输入推断。

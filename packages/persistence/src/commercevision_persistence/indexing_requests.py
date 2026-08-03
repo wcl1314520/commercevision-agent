@@ -38,6 +38,7 @@ from .indexing_models import (
     CollectionRegistryModel,
     EmbeddingRecordModel,
     ProductSearchDocumentModel,
+    RetrievalPolicyPointerModel,
 )
 from .integrity import database_constraint_name
 from .models import AssetVersionModel, DurableOperationModel, ProductModel
@@ -1041,6 +1042,22 @@ class MySqlIndexRequestService:
         session: Session,
         now: datetime,
     ) -> CollectionRegistryModel:
+        pointer = session.get(
+            RetrievalPolicyPointerModel,
+            self._collection_spec.vector_kind.value,
+        )
+        if pointer is not None:
+            active = session.get(CollectionRegistryModel, pointer.collection_id)
+            if active is None:
+                raise ValueError("retrieval policy points to a missing collection")
+            if (
+                active.state != CollectionState.ACTIVE.value
+                or not active.is_write_enabled
+                or active.spec_hash != self._collection_spec.spec_hash
+                or active.model_id != self._model_id
+            ):
+                raise ValueError("active retrieval policy conflicts with configured vector spec")
+            return active
         collection_id = str(uuid5(_COLLECTION_NAMESPACE, self._collection_spec.spec_hash))
         statement = mysql_insert(CollectionRegistryModel).values(
             id=collection_id,

@@ -46,6 +46,13 @@ from .catalog import (
     SKUResponseV1,
     SKUUpdateRequestV1,
 )
+from .collection_rebuild import (
+    CollectionRebuildActionRequestV1,
+    CollectionRebuildProgressV1,
+    CollectionRebuildRequestV1,
+    CollectionRebuildResponseV1,
+    CollectionRebuildValidationV1,
+)
 from .config import Settings
 from .endpoint_identity import validate_canonical_endpoint_host
 from .errors import ErrorResponse
@@ -63,6 +70,7 @@ from .indexing import (
     MilvusAnnSearchRequestV1,
     MilvusCollectionCreateRequestV1,
     MilvusCollectionFieldV1,
+    MilvusCollectionSnapshotV1,
     MilvusUpsertRequestV1,
     MilvusVectorIdentityV1,
     MilvusVectorProofV1,
@@ -186,6 +194,11 @@ __all__ = [
     "BrandGetProfileInputV1",
     "BrandGetProfileOutputV1",
     "CatalogDeleteRequestV1",
+    "CollectionRebuildActionRequestV1",
+    "CollectionRebuildProgressV1",
+    "CollectionRebuildRequestV1",
+    "CollectionRebuildResponseV1",
+    "CollectionRebuildValidationV1",
     "CatalogGetProductBriefInputV1",
     "CatalogGetProductBriefOutputV1",
     "CatalogGetProductInputV1",
@@ -212,6 +225,7 @@ __all__ = [
     "MilvusAnnSearchRequestV1",
     "MilvusCollectionCreateRequestV1",
     "MilvusCollectionFieldV1",
+    "MilvusCollectionSnapshotV1",
     "MilvusUpsertRequestV1",
     "MilvusVectorIdentityV1",
     "MilvusVectorProofV1",

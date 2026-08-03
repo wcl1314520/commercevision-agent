@@ -47,6 +47,7 @@
 - [ProductBrief Vision 与人工确认 Runbook](runbooks/product-brief.md)
 - [Brand Profile 发布与失效收敛 Runbook](runbooks/brand-profile.md)
 - [IMAGE 索引 Runbook](runbooks/image-indexing.md)
+- [Collection 重建与升级 Runbook](runbooks/collection-rebuild.md)
 
 ## 06 路线图
 

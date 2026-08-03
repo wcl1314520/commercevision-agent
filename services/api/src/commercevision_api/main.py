@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .asset_routes import asset_router, upload_router
 from .brand_profile_routes import router as brand_profile_router
 from .catalog_routes import router as catalog_router
+from .collection_rebuild_routes import router as collection_rebuild_router
 from .container import ApiContainer, ApiTrustKeyRing
 from .errors import install_error_handlers
 from .operation_routes import router as operation_router
@@ -126,6 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(asset_router)
     api.include_router(brand_profile_router)
     api.include_router(catalog_router)
+    api.include_router(collection_rebuild_router)
     api.include_router(operation_router)
     api.include_router(product_brief_router)
     api.include_router(retrieval_router)

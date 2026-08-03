@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from unicodedata import category
@@ -155,6 +156,39 @@ class DeadLetterReplayRecordedPayload(CompatibleEventPayload):
     replay_id: str = Field(min_length=1, max_length=36)
     workspace_id: WorkspaceId
     replay_attempt: int = Field(ge=1)
+
+
+class CollectionRebuildCommand(StrEnum):
+    CONTINUE = "CONTINUE"
+    VALIDATE = "VALIDATE"
+    RETIRE = "RETIRE"
+
+
+class CollectionRebuildRequestedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    rebuild_id: str = Field(pattern=UUID_PATTERN)
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    generation: int = Field(ge=1, strict=True)
+    command: CollectionRebuildCommand
+
+
+class CollectionRebuildProgressedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    rebuild_id: str = Field(pattern=UUID_PATTERN)
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    generation: int = Field(ge=1, strict=True)
+    state: str = Field(min_length=1, max_length=32)
+    processed_count: int = Field(ge=0, strict=True)
+
+
+class CollectionRebuildCompletedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    rebuild_id: str = Field(pattern=UUID_PATTERN)
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    candidate_collection_id: str = Field(pattern=UUID_PATTERN)
+    retired_collection_id: str = Field(pattern=UUID_PATTERN)
+    vector_kind: str = Field(pattern=r"^(IMAGE|PRODUCT_FUSED)$")
+    activated_at: datetime
 
 
 class AssetUploadFinalizedPayload(CompatibleEventPayload):
@@ -695,6 +729,27 @@ ASSET_INDEX_DELETE_REQUESTED_V1 = EventContract(
     AssetIndexDeleteRequestedPayload,
     EventHandling.COMMAND,
 )
+COLLECTION_REBUILD_REQUESTED_V1 = EventContract(
+    EventType.COLLECTION_REBUILD_REQUESTED,
+    1,
+    EventQueue.INDEX,
+    CollectionRebuildRequestedPayload,
+    EventHandling.COMMAND,
+)
+COLLECTION_REBUILD_PROGRESSED_V1 = EventContract(
+    EventType.COLLECTION_REBUILD_PROGRESSED,
+    1,
+    EventQueue.INDEX,
+    CollectionRebuildProgressedPayload,
+    EventHandling.OBSERVATION,
+)
+COLLECTION_REBUILD_COMPLETED_V1 = EventContract(
+    EventType.COLLECTION_REBUILD_COMPLETED,
+    1,
+    EventQueue.INDEX,
+    CollectionRebuildCompletedPayload,
+    EventHandling.OBSERVATION,
+)
 
 
 def _phase2_contract(
@@ -721,21 +776,9 @@ PHASE2_EVENT_CONTRACTS = (
     ASSET_INDEX_REQUESTED_V1,
     ASSET_INDEX_COMPLETED_V1,
     ASSET_INDEX_DELETE_REQUESTED_V1,
-    _phase2_contract(
-        EventType.COLLECTION_REBUILD_REQUESTED,
-        EventQueue.INDEX,
-        EventHandling.COMMAND,
-    ),
-    _phase2_contract(
-        EventType.COLLECTION_REBUILD_PROGRESSED,
-        EventQueue.INDEX,
-        EventHandling.OBSERVATION,
-    ),
-    _phase2_contract(
-        EventType.COLLECTION_REBUILD_COMPLETED,
-        EventQueue.INDEX,
-        EventHandling.OBSERVATION,
-    ),
+    COLLECTION_REBUILD_REQUESTED_V1,
+    COLLECTION_REBUILD_PROGRESSED_V1,
+    COLLECTION_REBUILD_COMPLETED_V1,
     ASSET_DELETE_REQUESTED_V1,
     ASSET_DELETE_COMPLETED_V1,
     _phase2_contract(

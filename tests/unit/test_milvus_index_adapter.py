@@ -166,6 +166,122 @@ def test_ensure_collection_creates_exact_versioned_schema_and_index() -> None:
     ]
 
 
+class _Iterator:
+    def __init__(self, batches: list[list[dict[str, Any]]]) -> None:
+        self._batches = iter(batches)
+        self.closed = False
+
+    def next(self) -> list[dict[str, Any]]:
+        return next(self._batches, [])
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _RebuildInspectionClient:
+    def __init__(self) -> None:
+        self.iterator = _Iterator(
+            [
+                [
+                    {
+                        "milvus_primary_key": "019f8a00-0000-7000-8000-000000000150:g1",
+                        "embedding_record_id": "019f8a00-0000-7000-8000-000000000150",
+                        "asset_version_id": "019f8a00-0000-7000-8000-000000000151",
+                        "workspace_id": "catalog-demo",
+                        "rights_record_version": 1,
+                        "category": "beauty",
+                        "brand": "CV",
+                        "asset_role": "HERO",
+                        "vector_kind": "IMAGE",
+                        "model_configuration_version": "config-v1",
+                        "input_hash": "a" * 64,
+                        "embedding_spec_sha256": "b" * 64,
+                        "write_generation": 1,
+                        "indexed_at_epoch_micros": 1,
+                        "vector": [1.0, 0.0, 0.0, 0.0],
+                    }
+                ],
+                [],
+            ]
+        )
+        self.released = False
+        self.dropped = False
+
+    def get_collection_stats(self, **kwargs: Any) -> dict[str, str]:
+        return {"row_count": "1"}
+
+    def query_iterator(self, **kwargs: Any) -> _Iterator:
+        assert kwargs["batch_size"] == 100
+        assert kwargs["filter"] == ""
+        return self.iterator
+
+    def has_collection(self, **kwargs: Any) -> bool:
+        return not self.dropped
+
+    def release_collection(self, **kwargs: Any) -> None:
+        self.released = True
+
+    def drop_collection(self, **kwargs: Any) -> None:
+        self.dropped = True
+
+    def close(self) -> None:
+        return None
+
+
+def test_rebuild_inspection_reads_a_bounded_exact_snapshot_and_closes_iterator() -> None:
+    client = _RebuildInspectionClient()
+    adapter = MilvusVectorIndexAdapter(client=client, timeout_seconds=2)
+
+    snapshot = adapter.collection_snapshot(
+        collection_name=_collection_request().collection_name,
+        maximum_rows=10,
+        batch_size=100,
+    )
+
+    assert snapshot.row_count == 1
+    assert [row.embedding_record_id for row in snapshot.rows] == [
+        "019f8a00-0000-7000-8000-000000000150"
+    ]
+    assert client.iterator.closed
+
+
+def test_rebuild_inspection_fails_closed_when_the_collection_exceeds_its_bound() -> None:
+    class Client(_RebuildInspectionClient):
+        def get_collection_stats(self, **kwargs: Any) -> dict[str, str]:
+            return {"row_count": "11"}
+
+    with pytest.raises(ValueError, match="exceeds the configured validation bound"):
+        MilvusVectorIndexAdapter(client=Client(), timeout_seconds=2).collection_snapshot(
+            collection_name=_collection_request().collection_name,
+            maximum_rows=10,
+            batch_size=100,
+        )
+
+
+def test_rebuild_snapshot_uses_strong_iterator_count_when_stats_lag() -> None:
+    class Client(_RebuildInspectionClient):
+        def get_collection_stats(self, **kwargs: Any) -> dict[str, str]:
+            return {"row_count": "0"}
+
+    snapshot = MilvusVectorIndexAdapter(client=Client(), timeout_seconds=2).collection_snapshot(
+        collection_name=_collection_request().collection_name,
+        maximum_rows=10,
+        batch_size=100,
+    )
+
+    assert snapshot.row_count == 1
+
+
+def test_retire_collection_is_idempotent_and_verifies_absence_after_drop() -> None:
+    client = _RebuildInspectionClient()
+    adapter = MilvusVectorIndexAdapter(client=client, timeout_seconds=2)
+
+    assert adapter.retire_collection(_collection_request().collection_name)
+    assert client.released
+    assert client.dropped
+    assert not adapter.retire_collection(_collection_request().collection_name)
+
+
 @pytest.mark.parametrize("malformed", [None, {"fields": [None]}])
 def test_malformed_collection_description_is_normalized_to_value_error(
     malformed: object,

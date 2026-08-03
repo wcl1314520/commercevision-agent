@@ -1238,3 +1238,24 @@
   Container、Gitleaks/SBOM 全绿，Python 完整矩阵仅有 2 个向后兼容契约失败：旧 migration 全表
   collation 清单漏列 3 张新表；共享 Upload cleanup event 因扩展 Payload 多序列化两个 null 字段。
   最小修复补齐清单并对旧事件 `exclude_none=True`，两个失败节点本地精确复现后 `2 passed`。
+
+# 2026-08-04 Ticket 13 发布与 Ticket 14 本地收口
+
+- Ticket 13 兼容修复 `894670eb124c82aa15aa153699006e260599e0f2` 对应 GitHub Actions
+  `30846116127` 全绿，Ticket 14 正式解锁。
+- Ticket 14 新增独立 Collection Rebuild 聚合、Registry instance identity、Retrieval Policy pointer、
+  snapshot/backfill/replay/rights/validation 检查点与 typed Outbox；候选物理 Collection 绑定不可变 spec
+  和 rebuild ID，Worker 每批重申候选存在，进程重启或候选误删后从 MySQL cursor 恢复。
+- 验证在外部扫描前持久化 validation watermark，检查 row/PK/sample visibility、exact-versus-ANN recall、
+  fixed query 和 unauthorized 结果。同一 `DATETIME(6)` 微秒边界使用失败安全 `>=` 回放；真实 MySQL 测试
+  证明边界 Rights 事件会使激活回到 `REPLAYING`，pointer 不切换。
+- 激活在一个 MySQL 事务内锁定 rebuild、源、候选和 pointer，迁移 placement/Embedding Record 并递增版本；
+  旧源保持只读 `RETIRING`，配置延迟后才物理删除。Dense retrieval 和后续索引请求统一从 pointer 路由。
+- 管理员 HTTP/Web 已覆盖幂等请求、状态轮询、验证、失败、激活与退役；BFF 仅放行精确路径，默认升级请求
+  保持 embedding identity 不变并提升 schema version。ADR-008 与生产 Runbook 已同步。
+- 明确本地证据：Python unit `1044 passed`；真实 MySQL/Milvus、IMAGE/PRODUCT_FUSED/Retrieval 与迁移兼容
+  矩阵 `103 passed`；Web proxy `23 passed`、unit `194 passed`、Playwright `90 passed`，lint/typecheck、
+  production build、OpenAPI、Alembic drift、Compose、Ruff、Python/pnpm audit 和 `git diff --check` 全绿。
+  一次完整 `uv run pytest` 在 20 分钟工具上限终止且无最终汇总，不计为通过；精确 SHA 的 CI 负责最终全量判定。
+- Standards/Spec 与安全、正确性、性能、可维护性、简化终审发现并修复验证水位竞态、同微秒事件漏回放、
+  激活 placement 版本未递增、非法 Web 默认 embedding identity 和验证投影不变量不足；当前无剩余阻断项。

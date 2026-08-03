@@ -39,6 +39,14 @@ from .brand_profiles import (
     BrandProfilePublicationRejected,
 )
 from .catalog import CatalogApplicationService
+from .collection_rebuild import (
+    CollectionRebuildRepositoryPort,
+    CollectionRebuildRunner,
+    CollectionRebuildTarget,
+    CollectionRebuildVectorPort,
+    RebuildValidationExpected,
+    RebuildWorkBatch,
+)
 from .dead_letter_identity import canonicalize_dead_letter_id
 from .execution import (
     DurableNodeLifecycle,
@@ -61,6 +69,8 @@ from .indexing import (
     IndexingTarget,
     VectorIndexingExecutor,
     VectorIndexPort,
+    build_embedding_provider_request,
+    build_milvus_upsert_request,
 )
 from .indexing_transfer import (
     ImageIndexDataTransferDenied,
@@ -175,6 +185,10 @@ __all__ = [
     "ValidationDataTransferPolicy",
     "OperatorAccessPolicyPort",
     "CatalogApplicationService",
+    "CollectionRebuildRepositoryPort",
+    "CollectionRebuildRunner",
+    "CollectionRebuildTarget",
+    "CollectionRebuildVectorPort",
     "canonicalize_dead_letter_id",
     "DuplicateEventRegistrationError",
     "DeterministicContentSafetyRequestFactory",
@@ -239,6 +253,8 @@ __all__ = [
     "OperationRecoveryService",
     "OperationRetryPolicy",
     "RecoveryService",
+    "RebuildValidationExpected",
+    "RebuildWorkBatch",
     "UnhandledEventError",
     "UnknownEventTypeError",
     "UnsupportedSchemaVersionError",
@@ -251,5 +267,7 @@ __all__ = [
     "VisionDataTransferDenied",
     "VisionDataTransferPolicy",
     "VectorIndexPort",
+    "build_embedding_provider_request",
+    "build_milvus_upsert_request",
     "WorkflowApplicationService",
 ]

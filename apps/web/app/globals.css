@@ -1737,6 +1737,93 @@ textarea {
   max-width: 720px;
 }
 
+.collection-rebuild-admin {
+  margin-bottom: 1.25rem;
+}
+
+.collection-rebuild-admin details {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.collection-rebuild-admin summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.rebuild-lookup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.rebuild-status {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.rebuild-status dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.rebuild-status dl div,
+.rebuild-validation {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+}
+
+.rebuild-status dt,
+.rebuild-status dd {
+  margin: 0;
+}
+
+.rebuild-status dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.rebuild-validation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-top: 0.75rem;
+}
+
+.rebuild-progress {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 1rem 0 0;
+  padding-left: 1.5rem;
+}
+
+.rebuild-progress li {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  gap: 0.75rem;
+  padding: 0.3rem 0;
+}
+
+@media (max-width: 900px) {
+  .rebuild-status dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .rebuild-lookup,
+  .rebuild-status dl,
+  .rebuild-progress li {
+    grid-template-columns: 1fr;
+  }
+}
+
 .retrieval-query-form,
 .retrieval-results {
   display: grid;

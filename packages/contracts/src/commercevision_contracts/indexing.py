@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timedelta
 from typing import Literal
 from unicodedata import category as unicode_category
@@ -230,6 +231,20 @@ class MilvusUpsertRequestV1(IndexingContractV1):
     row: MilvusVectorRowV1
 
 
+class MilvusCollectionSnapshotV1(IndexingContractV1):
+    row_count: int = Field(ge=0, strict=True)
+    rows: list[MilvusVectorRowV1]
+
+    @model_validator(mode="after")
+    def require_exact_row_count(self) -> MilvusCollectionSnapshotV1:
+        if self.row_count != len(self.rows):
+            raise ValueError("Milvus snapshot row count does not match its rows")
+        primary_keys = [row.milvus_primary_key for row in self.rows]
+        if len(primary_keys) != len(set(primary_keys)):
+            raise ValueError("Milvus snapshot contains duplicate primary keys")
+        return self
+
+
 class MilvusAnnSearchRequestV1(IndexingContractV1):
     collection_name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,254}$")
     workspace_id: str = Field(min_length=1, max_length=128)
@@ -297,7 +312,18 @@ class MilvusVectorProofV1(IndexingContractV1):
         )
 
 
-def collection_create_request(spec: CollectionSpec) -> MilvusCollectionCreateRequestV1:
+def collection_create_request(
+    spec: CollectionSpec,
+    *,
+    collection_name: str | None = None,
+) -> MilvusCollectionCreateRequestV1:
+    resolved_name = collection_name or spec.physical_name
+    candidate_pattern = rf"{re.escape(spec.physical_name)}_[0-9a-f]{{12}}"
+    if (
+        resolved_name != spec.physical_name
+        and re.fullmatch(candidate_pattern, resolved_name) is None
+    ):
+        raise ValueError("collection name must be derived from the immutable spec")
     scalar_fields = (
         ("milvus_primary_key", "VARCHAR", True, 64),
         ("embedding_record_id", "VARCHAR", False, 36),
@@ -331,7 +357,7 @@ def collection_create_request(spec: CollectionSpec) -> MilvusCollectionCreateReq
         )
     )
     return MilvusCollectionCreateRequestV1(
-        collection_name=spec.physical_name,
+        collection_name=resolved_name,
         dynamic_fields_enabled=False,
         metric_type="COSINE",
         index_type="HNSW",

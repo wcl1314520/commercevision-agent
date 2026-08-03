@@ -19,13 +19,17 @@ from commercevision_contracts.object_storage import (
     ObjectStorage,
     TemporaryReadRequest,
 )
-from commercevision_domain import RetrievalChannel, StorageLocationClass
+from commercevision_domain import CollectionState, RetrievalChannel, StorageLocationClass
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .brand_profile_models import BrandProfileMemberModel, BrandProfileVersionModel
-from .indexing_models import CollectionRegistryModel, EmbeddingRecordModel
+from .indexing_models import (
+    CollectionRegistryModel,
+    EmbeddingRecordModel,
+    RetrievalPolicyPointerModel,
+)
 from .models import AssetObjectModel
 from .product_search import MySqlProductLexicalSearch
 from .retrieval import MySqlRetrievalAuthority
@@ -141,26 +145,23 @@ class MySqlDenseRetrievalCatalog:
         if len(set(eligible_asset_version_ids)) != len(eligible_asset_version_ids):
             raise ValueError("dense eligible Asset Versions must be unique")
         with self._session_factory() as session:
-            collections = tuple(
-                session.scalars(
-                    select(CollectionRegistryModel)
-                    .where(
-                        CollectionRegistryModel.vector_kind == vector_kind.value,
-                        CollectionRegistryModel.state == "ACTIVE",
-                        CollectionRegistryModel.is_read_enabled.is_(True),
-                    )
-                    .order_by(CollectionRegistryModel.id)
-                    .limit(2)
-                )
+            pointer = session.get(RetrievalPolicyPointerModel, vector_kind.value)
+            collection = (
+                None
+                if pointer is None
+                else session.get(CollectionRegistryModel, pointer.collection_id)
             )
-            if not collections:
+            if collection is None:
                 raise DenseRetrievalIndexUnavailable(
                     code="DENSE_COLLECTION_UNAVAILABLE",
                     message="dense retrieval collection is unavailable",
                 )
-            if len(collections) != 1:
-                raise RuntimeError("dense retrieval routing has multiple active collections")
-            collection = collections[0]
+            if (
+                collection.vector_kind != vector_kind.value
+                or collection.state != CollectionState.ACTIVE.value
+                or not collection.is_read_enabled
+            ):
+                raise RuntimeError("dense retrieval policy does not point to an active collection")
             rows = []
             for offset in range(0, len(eligible_asset_version_ids), _MYSQL_IN_CHUNK_SIZE):
                 eligible_chunk = eligible_asset_version_ids[offset : offset + _MYSQL_IN_CHUNK_SIZE]

@@ -144,6 +144,56 @@ class VectorIndexPort(Protocol):
     def delete_if_generation(self, identity: MilvusVectorIdentityV1) -> bool: ...
 
 
+def build_embedding_provider_request(
+    target: ImageIndexingTarget,
+    *,
+    references: ExactImageReferencePort,
+) -> EmbeddingProviderRequestV1:
+    return EmbeddingProviderRequestV1(
+        provider=target.provider,
+        model_id=target.model_id,
+        pinned_revision=target.collection_spec.pinned_revision,
+        model_configuration_version=target.model_configuration_version,
+        preprocessing_version=target.preprocessing_version,
+        vector_kind=target.vector_kind,
+        expected_dimension=target.collection_spec.dimension,
+        input_hash=target.input_hash,
+        images=[references.temporary_input(target)],
+        controlled_text=target.controlled_text,
+    )
+
+
+def build_milvus_upsert_request(
+    target: ImageIndexingTarget,
+    result: EmbeddingProviderResultV1,
+    *,
+    collection_name: str | None = None,
+) -> MilvusUpsertRequestV1:
+    return MilvusUpsertRequestV1(
+        collection_name=collection_name or target.collection_spec.physical_name,
+        row=MilvusVectorRowV1(
+            embedding_record_id=target.embedding_record_id,
+            milvus_primary_key=generation_milvus_primary_key(
+                embedding_record_id=target.embedding_record_id,
+                write_generation=target.write_generation,
+            ),
+            asset_version_id=target.asset_version_id,
+            workspace_id=target.workspace_id,
+            rights_record_version=target.rights_record_version,
+            category=target.category,
+            brand=target.brand,
+            asset_role=target.asset_role,
+            vector_kind=target.vector_kind,
+            model_configuration_version=target.model_configuration_version,
+            input_hash=target.input_hash,
+            embedding_spec_sha256=target.embedding_spec_sha256,
+            write_generation=target.write_generation,
+            indexed_at_epoch_micros=int(target.indexed_at.timestamp() * 1_000_000),
+            vector=result.vectors[0].values,
+        ),
+    )
+
+
 class ImageIndexStatusQueryPort(Protocol):
     def get_current(
         self,
@@ -496,17 +546,9 @@ class ImageIndexingExecutor:
         self._authority.mark_terminal_failure(request)
 
     def _provider_request(self, target: ImageIndexingTarget) -> EmbeddingProviderRequestV1:
-        return EmbeddingProviderRequestV1(
-            provider=target.provider,
-            model_id=target.model_id,
-            pinned_revision=target.collection_spec.pinned_revision,
-            model_configuration_version=target.model_configuration_version,
-            preprocessing_version=target.preprocessing_version,
-            vector_kind=target.vector_kind,
-            expected_dimension=target.collection_spec.dimension,
-            input_hash=target.input_hash,
-            images=[self._references.temporary_input(target)],
-            controlled_text=target.controlled_text,
+        return build_embedding_provider_request(
+            target,
+            references=self._references,
         )
 
     @staticmethod
@@ -514,29 +556,7 @@ class ImageIndexingExecutor:
         target: ImageIndexingTarget,
         result: EmbeddingProviderResultV1,
     ) -> MilvusUpsertRequestV1:
-        return MilvusUpsertRequestV1(
-            collection_name=target.collection_spec.physical_name,
-            row=MilvusVectorRowV1(
-                embedding_record_id=target.embedding_record_id,
-                milvus_primary_key=generation_milvus_primary_key(
-                    embedding_record_id=target.embedding_record_id,
-                    write_generation=target.write_generation,
-                ),
-                asset_version_id=target.asset_version_id,
-                workspace_id=target.workspace_id,
-                rights_record_version=target.rights_record_version,
-                category=target.category,
-                brand=target.brand,
-                asset_role=target.asset_role,
-                vector_kind=target.vector_kind,
-                model_configuration_version=target.model_configuration_version,
-                input_hash=target.input_hash,
-                embedding_spec_sha256=target.embedding_spec_sha256,
-                write_generation=target.write_generation,
-                indexed_at_epoch_micros=int(target.indexed_at.timestamp() * 1_000_000),
-                vector=result.vectors[0].values,
-            ),
-        )
+        return build_milvus_upsert_request(target, result)
 
     @staticmethod
     def _identity(target: ImageIndexingTarget) -> MilvusVectorIdentityV1:

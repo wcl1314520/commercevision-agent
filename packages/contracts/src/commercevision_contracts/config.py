@@ -441,6 +441,11 @@ class Settings(BaseSettings):
     )
     image_index_max_attempts: int = Field(default=5, ge=1, le=50)
     image_index_max_reconciliation_attempts: int = Field(default=8, ge=1, le=100)
+    collection_rebuild_batch_size: int = Field(default=100, ge=1, le=1000)
+    collection_rebuild_validation_maximum_rows: int = Field(default=100_000, ge=1, le=1_000_000)
+    collection_rebuild_validation_sample_size: int = Field(default=50, ge=1, le=1000)
+    collection_rebuild_minimum_ann_recall_at_10: float = Field(default=0.95, gt=0, le=1)
+    collection_rebuild_retirement_delay_seconds: int = Field(default=3600, ge=60, le=604800)
     embedding_data_transfer_enabled: bool = False
     embedding_data_transfer_policy_version: str = "embedding-transfer-deny-v1"
     embedding_data_transfer_allowed_workspace_ids: list[str] = Field(default_factory=list)

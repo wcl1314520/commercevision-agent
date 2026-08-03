@@ -57,6 +57,12 @@ const RETRIEVAL_RUN_PATH = new RegExp(
 const RETRIEVAL_PREVIEW_PATH = new RegExp(
   `^/retrieval-runs/${UUID_PATH_SEGMENT}/results/(?:[1-9]|[1-4][0-9]|50):preview$`,
 );
+const COLLECTION_REBUILD_PATH = new RegExp(
+  `^/collections/rebuilds/${UUID_PATH_SEGMENT}$`,
+);
+const COLLECTION_REBUILD_ACTION_PATH = new RegExp(
+  `^/collections/rebuilds/${UUID_PATH_SEGMENT}:(validate|activate)$`,
+);
 const FORWARDED_HEADERS = [
   "accept",
   "content-type",
@@ -75,7 +81,7 @@ class UpstreamResponseTooLargeError extends Error {}
 
 function encodeApiPathSegment(segment: string): string {
   const action =
-    /^(.*):(abort|analyze|block|check|confirm|finalize|preview|publish|replace|revise|revoke|validate)$/.exec(
+    /^(.*):(abort|activate|analyze|block|check|confirm|finalize|preview|publish|replace|revise|revoke|validate)$/.exec(
       segment,
     );
   if (action) {
@@ -236,6 +242,9 @@ function apiMethodAllowed(path: string, method: string): boolean {
   if (path === "/retrieval-runs") return method === "POST";
   if (RETRIEVAL_RUN_PATH.test(path)) return method === "GET";
   if (RETRIEVAL_PREVIEW_PATH.test(path)) return method === "POST";
+  if (path === "/collections/rebuilds") return method === "POST";
+  if (COLLECTION_REBUILD_PATH.test(path)) return method === "GET";
+  if (COLLECTION_REBUILD_ACTION_PATH.test(path)) return method === "POST";
   return false;
 }
 

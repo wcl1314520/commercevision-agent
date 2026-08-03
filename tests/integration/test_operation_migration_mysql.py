@@ -29,6 +29,8 @@ WORKSPACE_ID_TABLES = {
     "dead_letter_replays",
     "durable_operations",
     "embedding_records",
+    "collection_rebuilds",
+    "collection_rebuild_placements",
     "product_search_documents",
     "outbox_events",
     "products",

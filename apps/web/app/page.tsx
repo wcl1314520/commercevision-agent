@@ -24,6 +24,7 @@ import type {
 } from "../lib/generated/catalog-api";
 import { AssetUploadWorkbench } from "./asset-upload-workbench";
 import { BrandProfileWorkbench } from "./brand-profile-workbench";
+import { CollectionRebuildAdmin } from "./collection-rebuild-admin";
 import type { BrandProfileIdentityChangeGuard } from "../lib/brand-profile-editor-state";
 import { productBriefSourceFor } from "../lib/product-brief-workbench-state";
 import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
@@ -800,6 +801,8 @@ export default function Home() {
             {notice}
           </div>
         ) : null}
+
+        <CollectionRebuildAdmin />
 
         <div className="catalog-layout">
           <aside className="catalog-sidebar" aria-labelledby="products-heading">

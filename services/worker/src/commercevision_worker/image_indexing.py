@@ -34,6 +34,7 @@ class BuiltImageIndexing:
     authority: MySqlIndexingAuthority
     embedding_provider: object
     vector_index: MilvusVectorIndexAdapter
+    references: MySqlExactImageReference
     closeables: tuple[object, ...]
 
 
@@ -178,13 +179,14 @@ def build_image_indexing(
         settings=settings,
         database=database,
     )
+    references = MySqlExactImageReference(
+        session_factory=database.session_factory,
+        storage=storage,
+        lifetime=timedelta(seconds=settings.image_index_temporary_reference_lifetime_seconds),
+    )
     executor = ImageIndexingExecutor(
         authority=authority,
-        references=MySqlExactImageReference(
-            session_factory=database.session_factory,
-            storage=storage,
-            lifetime=timedelta(seconds=settings.image_index_temporary_reference_lifetime_seconds),
-        ),
+        references=references,
         embedding=embedding,
         vectors=vectors,
         transfer_policy=(
@@ -210,6 +212,7 @@ def build_image_indexing(
         authority=authority,
         embedding_provider=embedding,
         vector_index=vectors,
+        references=references,
         closeables=closeables,
     )
 

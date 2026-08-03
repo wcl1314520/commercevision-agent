@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -18,10 +19,13 @@ from commercevision_contracts import (
     MilvusAnnSearchHitV1,
     MilvusAnnSearchRequestV1,
     MilvusCollectionCreateRequestV1,
+    MilvusCollectionSnapshotV1,
     MilvusUpsertRequestV1,
     MilvusVectorIdentityV1,
     MilvusVectorProofV1,
+    MilvusVectorRowV1,
 )
+from commercevision_domain import VectorKind
 from pydantic import SecretStr
 
 _DATA_TYPES = {
@@ -192,6 +196,136 @@ class MilvusVectorIndexAdapter:
         )
         if not isinstance(result, dict) or result.get("upsert_count") != 1:
             raise TimeoutError("Milvus upsert outcome is unknown")
+
+    def collection_snapshot(
+        self,
+        *,
+        collection_name: str,
+        maximum_rows: int,
+        batch_size: int,
+    ) -> MilvusCollectionSnapshotV1:
+        """Read one bounded, strongly consistent validation snapshot."""
+
+        self._validate_collection_name(collection_name)
+        if isinstance(maximum_rows, bool) or not 1 <= maximum_rows <= 1_000_000:
+            raise ValueError("Milvus validation maximum_rows is out of bounds")
+        if isinstance(batch_size, bool) or not 1 <= batch_size <= 10_000:
+            raise ValueError("Milvus validation batch_size is out of bounds")
+        deadline = _Deadline.start(self._timeout_seconds)
+        stats = self._call(
+            "collection statistics",
+            "get_collection_stats",
+            deadline=deadline,
+            retry_controls=False,
+            collection_name=collection_name,
+        )
+        if not isinstance(stats, dict):
+            raise ValueError("Milvus collection statistics returned an invalid result")
+        raw_count = stats.get("row_count")
+        try:
+            row_count = int(raw_count)
+        except (TypeError, ValueError):
+            raise ValueError("Milvus collection statistics returned an invalid result") from None
+        if isinstance(raw_count, bool) or row_count < 0 or str(row_count) != str(raw_count):
+            raise ValueError("Milvus collection statistics returned an invalid result")
+        if row_count > maximum_rows:
+            raise ValueError("Milvus collection exceeds the configured validation bound")
+        iterator = self._call(
+            "snapshot iterator creation",
+            "query_iterator",
+            deadline=deadline,
+            retry_controls=False,
+            collection_name=collection_name,
+            batch_size=batch_size,
+            filter="",
+            output_fields=[name for name, *_ in _SCALAR_FIELDS] + ["vector"],
+            consistency_level="Strong",
+        )
+        rows: list[MilvusVectorRowV1] = []
+        try:
+            while True:
+                try:
+                    batch = iterator.next()
+                except Exception:
+                    raise ConnectionError("Milvus snapshot iteration failed") from None
+                if not isinstance(batch, list) or any(not isinstance(row, dict) for row in batch):
+                    raise ValueError("Milvus snapshot returned an invalid result")
+                if not batch:
+                    break
+                for raw in batch:
+                    normalized = dict(raw)
+                    try:
+                        normalized["vector_kind"] = VectorKind(normalized.get("vector_kind"))
+                        row = MilvusVectorRowV1.model_validate(normalized)
+                        self._require_generation_key(
+                            embedding_record_id=row.embedding_record_id,
+                            primary_key=row.milvus_primary_key,
+                            write_generation=row.write_generation,
+                        )
+                    except (TypeError, ValueError):
+                        raise ValueError("Milvus snapshot returned an invalid result") from None
+                    rows.append(row)
+                    if len(rows) > maximum_rows:
+                        raise ValueError(
+                            "Milvus collection exceeds the configured validation bound"
+                        )
+        finally:
+            try:
+                iterator.close()
+            except Exception:
+                raise ConnectionError("Milvus snapshot iterator close failed") from None
+        # Milvus collection statistics can lag acknowledged writes. The Strong iterator
+        # is the validation authority; the statistic is only an early resource bound.
+        return MilvusCollectionSnapshotV1(row_count=len(rows), rows=rows)
+
+    def retire_collection(self, collection_name: str) -> bool:
+        """Release and drop one exact physical instance; absence is already converged."""
+
+        self._validate_collection_name(collection_name)
+        deadline = _Deadline.start(self._timeout_seconds)
+        exists = self._call(
+            "collection existence check",
+            "has_collection",
+            deadline=deadline,
+            collection_name=collection_name,
+        )
+        if exists is False:
+            return False
+        if exists is not True:
+            raise ValueError("Milvus collection existence check returned an invalid result")
+        self._call(
+            "collection release",
+            "release_collection",
+            deadline=deadline,
+            collection_name=collection_name,
+        )
+        try:
+            self._call(
+                "collection retirement",
+                "drop_collection",
+                deadline=deadline,
+                outcome_unknown=True,
+                retry_controls=False,
+                collection_name=collection_name,
+            )
+        except TimeoutError:
+            verification_deadline = _Deadline.start(self._timeout_seconds)
+            if self._call(
+                "collection retirement verification",
+                "has_collection",
+                deadline=verification_deadline,
+                collection_name=collection_name,
+            ):
+                raise
+        verification_deadline = _Deadline.start(self._timeout_seconds)
+        if self._call(
+            "collection retirement verification",
+            "has_collection",
+            deadline=verification_deadline,
+            collection_name=collection_name,
+        ):
+            raise TimeoutError("Milvus collection retirement outcome is unknown")
+        return True
 
     def search(
         self,
@@ -395,13 +529,15 @@ class MilvusVectorIndexAdapter:
         *,
         deadline: _Deadline,
         outcome_unknown: bool = False,
+        retry_controls: bool = True,
         **kwargs: Any,
     ) -> Any:
         client = self._get_client(deadline)
         try:
             kwargs["timeout"] = deadline.sdk_timeout()
-            kwargs["retry_times"] = 0
-            kwargs["retry_on_rate_limit"] = False
+            if retry_controls:
+                kwargs["retry_times"] = 0
+                kwargs["retry_on_rate_limit"] = False
             return getattr(client, method_name)(**kwargs)
         except Exception as exc:
             exception_name = type(exc).__name__.lower()
@@ -505,6 +641,11 @@ class MilvusVectorIndexAdapter:
             or not 0 < value <= maximum
         ):
             raise ValueError("Milvus timeout must be finite and strictly bounded")
+
+    @staticmethod
+    def _validate_collection_name(value: str) -> None:
+        if not isinstance(value, str) or re.fullmatch(r"[a-z][a-z0-9_]{0,254}", value) is None:
+            raise ValueError("Milvus collection name is invalid")
 
     @staticmethod
     def _require_generation_key(

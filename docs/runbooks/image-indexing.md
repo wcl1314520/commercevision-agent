@@ -24,16 +24,14 @@
 - 重授权复用同一 `EmbeddingRecord`，创建新的 operation epoch。旧 generation delete 即使迟到，也不能修改新 operation/generation 的 MySQL 状态。
 - Durable Operation 达到 attempt/reconciliation 上限时，终态回调把当前 `PROCESSING` 或 `RETRYABLE_FAILED` 幂等收敛为 `PERMANENT_FAILED`。
 
-## 模型版本迁移
+## Collection 与模型版本迁移
 
 Alibaba `qwen3-vl-embedding` 是 Provider 提交的 mainline model ID；`embedding_pinned_revision` 是 CommerceVision 内部发布/collection epoch，不是 Provider 确认的不可变快照。
 
-Provider alias 或模型行为变化时必须：
-
-1. 将旧 collection 置为 write-disabled，保留 read。
-2. 提升内部 pinned epoch，从而生成新 collection identity；禁止在同一 collection 混写新旧向量。
-3. 运行 Ticket 16 离线/在线评测。
-4. 评测通过后切换读取并启动 backfill；失败则恢复旧 collection 读取。
+Schema 或索引参数升级必须走候选 Collection 重建，活动 Collection 在回填和验证期间继续读写；
+不得提前关闭写入或原地清空。Embedding identity（model family、model ID、pinned revision、dimension）
+变化属于新的 embedding spec/re-index，不伪装成兼容 Collection upgrade。完整操作流程见
+[Collection 重建与升级 Runbook](collection-rebuild.md)。
 
 ## 诊断
 

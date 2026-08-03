@@ -19,6 +19,7 @@ from commercevision_application import (
     BrandProfileDeletionLineageError,
     BrandProfileInvalidationApplicationService,
     BrandProfileInvalidationPort,
+    CollectionRebuildRunner,
     DurableNodeLifecycle,
     DurableOperationWorker,
     EventRoutingError,
@@ -52,6 +53,9 @@ from commercevision_contracts.events import (
     ASSET_VALIDATION_FAILED_V1,
     ASSET_VALIDATION_REQUESTED_V1,
     BRAND_PROFILE_PUBLISHED_V1,
+    COLLECTION_REBUILD_COMPLETED_V1,
+    COLLECTION_REBUILD_PROGRESSED_V1,
+    COLLECTION_REBUILD_REQUESTED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
     OPERATION_RECOVERY_REQUESTED_V1,
     PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
@@ -76,6 +80,7 @@ from commercevision_contracts.events import (
     AssetValidationFailedPayload,
     AssetValidationRequestedPayload,
     BrandProfilePublishedPayload,
+    CollectionRebuildRequestedPayload,
     EventQueue,
     EventType,
     ProductBriefAwaitingConfirmationPayload,
@@ -103,6 +108,7 @@ from commercevision_persistence import (
     ImageIndexNotApplicable,
     MySqlAssetDeletionCoordinator,
     MySQLCheckpointSaver,
+    MySqlCollectionRebuildRepository,
     MySqlImageIndexRequestService,
     MySqlIndexingAuthority,
     MySqlProductFusedIndexRequestService,
@@ -153,6 +159,7 @@ class WorkerRuntime:
     product_fused_index_requests: MySqlProductFusedIndexRequestService | None = None
     image_index_authority: MySqlIndexingAuthority | None = None
     image_vector_index: object | None = None
+    collection_rebuild_runner: CollectionRebuildRunner | None = None
     brand_profile_invalidation: BrandProfileInvalidationPort | None = None
     lifecycle: DurableNodeLifecycle | None = None
 
@@ -184,6 +191,7 @@ class WorkerRuntime:
         product_fused_index_requests: MySqlProductFusedIndexRequestService | None = None
         image_index_authority: MySqlIndexingAuthority | None = None
         image_vector_index: object | None = None
+        collection_rebuild_runner: CollectionRebuildRunner | None = None
         if (
             object_storage is not None
             and settings.worker_requires_asset_validation
@@ -268,6 +276,16 @@ class WorkerRuntime:
             image_index_requests = built_indexing.request_service
             image_index_authority = built_indexing.authority
             image_vector_index = built_indexing.vector_index
+            collection_rebuild_runner = CollectionRebuildRunner(
+                repository=MySqlCollectionRebuildRepository(database.session_factory),
+                references=built_indexing.references,
+                provider=built_indexing.embedding_provider,
+                vectors=built_indexing.vector_index,
+                batch_size=settings.collection_rebuild_batch_size,
+                validation_maximum_rows=(settings.collection_rebuild_validation_maximum_rows),
+                validation_sample_size=settings.collection_rebuild_validation_sample_size,
+                minimum_ann_recall_at_10=(settings.collection_rebuild_minimum_ann_recall_at_10),
+            )
             resources.extend(built_indexing.closeables)
         if {
             settings.asset_queue_name,
@@ -398,6 +416,7 @@ class WorkerRuntime:
             product_fused_index_requests=product_fused_index_requests,
             image_index_authority=image_index_authority,
             image_vector_index=image_vector_index,
+            collection_rebuild_runner=collection_rebuild_runner,
             lifecycle=lifecycle,
             event_router=build_event_routing_registry(
                 {
@@ -463,6 +482,18 @@ class WorkerRuntime:
         runtime.event_router.register_handler(
             contract=ASSET_INDEX_DELETE_REQUESTED_V1,
             handler=runtime._handle_asset_index_delete,
+        )
+        runtime.event_router.register_handler(
+            contract=COLLECTION_REBUILD_REQUESTED_V1,
+            handler=runtime._handle_collection_rebuild,
+        )
+        runtime.event_router.register_handler(
+            contract=COLLECTION_REBUILD_PROGRESSED_V1,
+            handler=runtime._observe_collection_rebuild,
+        )
+        runtime.event_router.register_handler(
+            contract=COLLECTION_REBUILD_COMPLETED_V1,
+            handler=runtime._observe_collection_rebuild,
         )
         runtime.event_router.register_handler(
             contract=ASSET_DELETE_REQUESTED_V1,
@@ -1138,6 +1169,32 @@ class WorkerRuntime:
             raise RuntimeError("vector index cannot delete an exact generation")
         delete(identity)
         self.image_index_authority.complete_delete(payload)
+
+    def _handle_collection_rebuild(self, event: OutboxEvent) -> None:
+        payload = COLLECTION_REBUILD_REQUESTED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, CollectionRebuildRequestedPayload):
+            raise TypeError("collection rebuild contract returned an unexpected payload")
+        if (
+            event.workspace_id != payload.workspace_id
+            or event.envelope.aggregate_type != "collection_rebuild"
+            or event.envelope.aggregate_id != payload.rebuild_id
+            or event.envelope.trace_id != payload.operation_id
+        ):
+            raise EventRoutingError(
+                "collection rebuild command does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        if self.collection_rebuild_runner is None:
+            raise RuntimeError("collection rebuild execution is not configured")
+        self.collection_rebuild_runner.process(payload)
+
+    @staticmethod
+    def _observe_collection_rebuild(event: OutboxEvent) -> None:
+        if event.envelope.aggregate_type != "collection_rebuild" or event.workspace_id is None:
+            raise EventRoutingError(
+                "collection rebuild observation has an invalid aggregate",
+                reason="aggregate_mismatch",
+            )
 
     def _observe_product_brief_state(self, event: OutboxEvent) -> None:
         contract = (

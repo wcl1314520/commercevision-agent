@@ -1067,6 +1067,7 @@ class OutboxEventModel(Base):
         ),
         Index("ix_outbox_ready", "published_at", "available_at", "locked_until"),
         Index("ix_outbox_aggregate", "aggregate_type", "aggregate_id", "occurred_at"),
+        Index("ix_outbox_rebuild_replay", "event_type", "occurred_at", "id"),
         Index(
             "ix_outbox_workspace_source_dead_letter",
             "workspace_id",

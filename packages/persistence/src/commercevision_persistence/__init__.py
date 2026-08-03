@@ -5,6 +5,8 @@ from .assets import SqlAlchemyAssetUnitOfWork
 from .brand_profiles import SqlAlchemyBrandProfileUnitOfWork
 from .catalog import SqlAlchemyCatalogUnitOfWork
 from .checkpointer import MySQLCheckpointSaver
+from .collection_rebuild_control import MySqlCollectionRebuildControl
+from .collection_rebuild_repository import MySqlCollectionRebuildRepository
 from .database import (
     Database,
     create_database,
@@ -43,6 +45,8 @@ from .unit_of_work import SqlAlchemyUnitOfWork
 __all__ = [
     "Database",
     "MySQLCheckpointSaver",
+    "MySqlCollectionRebuildControl",
+    "MySqlCollectionRebuildRepository",
     "MySqlIndexingAuthority",
     "MySqlAssetDeletionCoordinator",
     "MySqlImageIndexRequestService",

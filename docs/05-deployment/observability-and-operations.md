@@ -158,6 +158,7 @@ Operation/Asset IDs、attempt、stage、verdict、reason、validator identity �
 - Worker 卡死和 Lease 恢复。
 - LangGraph Checkpoint 不一致。
 - Milvus 不可用或索引错乱。
+- Collection 重建停滞、验证失败或延迟退役失败（见 [Collection 重建与升级 Runbook](../runbooks/collection-rebuild.md)）。
 - OSS 上传、下载和清理失败。
 - Provider 限流、全故障和未知结果。
 - Prompt/模型发布回滚。

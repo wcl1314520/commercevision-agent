@@ -27,14 +27,24 @@ from .workspace_identity import exact_string_sql_type, workspace_id_sql_type
 class CollectionRegistryModel(Base):
     __tablename__ = "collection_registry"
     __table_args__ = (
-        UniqueConstraint("logical_key", name="uq_collection_registry_logical_key"),
-        UniqueConstraint("spec_hash", name="uq_collection_registry_spec_hash"),
+        UniqueConstraint(
+            "logical_key", "instance_generation", name="uq_collection_registry_logical_instance"
+        ),
+        UniqueConstraint(
+            "spec_hash", "instance_generation", name="uq_collection_registry_spec_instance"
+        ),
+        UniqueConstraint("rebuild_id", name="uq_collection_registry_rebuild"),
         UniqueConstraint("physical_name", name="uq_collection_registry_physical_name"),
         CheckConstraint("dimension > 0", name="ck_collection_registry_dimension"),
         CheckConstraint("schema_version > 0", name="ck_collection_registry_schema_version"),
         CheckConstraint(
             "dynamic_fields_enabled = 0",
             name="ck_collection_registry_dynamic_fields_disabled",
+        ),
+        CheckConstraint(
+            "(instance_generation = 0 AND rebuild_id IS NULL) OR "
+            "(instance_generation > 0 AND rebuild_id IS NOT NULL)",
+            name="ck_collection_registry_instance_identity",
         ),
         CheckConstraint(
             "state IN ('PLANNED', 'CREATING', 'BACKFILLING', 'VERIFYING', "
@@ -68,6 +78,10 @@ class CollectionRegistryModel(Base):
         default=False,
         server_default=false(),
     )
+    instance_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    rebuild_id: Mapped[str | None] = mapped_column(String(36))
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     is_read_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     is_write_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -75,6 +89,116 @@ class CollectionRegistryModel(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class RetrievalPolicyPointerModel(Base):
+    __tablename__ = "retrieval_policy_pointers"
+    __table_args__ = (
+        UniqueConstraint("collection_id", name="uq_retrieval_policy_pointer_collection"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    vector_kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("collection_registry.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    retrieval_policy_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class CollectionRebuildModel(Base):
+    __tablename__ = "collection_rebuilds"
+    __table_args__ = (
+        UniqueConstraint("operation_id", name="uq_collection_rebuild_operation"),
+        UniqueConstraint("candidate_collection_id", name="uq_collection_rebuild_candidate"),
+        CheckConstraint("generation > 0 AND version > 0", name="ck_collection_rebuild_versions"),
+        CheckConstraint(
+            "state IN ('REQUESTED', 'PROVISIONING', 'BACKFILLING', 'REPLAYING', "
+            "'RIGHTS_RESCAN', 'AWAITING_VALIDATION', 'VALIDATING', 'READY', "
+            "'ACTIVATING', 'ACTIVE', 'FAILED', 'RETIRING', 'RETIRED')",
+            name="ck_collection_rebuild_state",
+        ),
+        Index("ix_collection_rebuild_state", "state", "updated_at", "id"),
+        Index("ix_collection_rebuild_retirement", "state", "retire_after", "id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    operation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_collection_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("collection_registry.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_collection_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("collection_registry.id", ondelete="RESTRICT"), nullable=False
+    )
+    vector_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_collection_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_pointer_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_watermark: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    backfill_cursor: Mapped[str | None] = mapped_column(String(36))
+    replay_watermark: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    replay_cursor_occurred_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    replay_cursor_event_id: Mapped[str | None] = mapped_column(String(36))
+    rights_cursor: Mapped[str | None] = mapped_column(String(36))
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    validation_watermark: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    retire_after: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class CollectionRebuildPlacementModel(Base):
+    __tablename__ = "collection_rebuild_placements"
+    __table_args__ = (
+        UniqueConstraint(
+            "rebuild_id", "milvus_primary_key", name="uq_collection_rebuild_placement_pk"
+        ),
+        Index("ix_collection_rebuild_placement_asset", "rebuild_id", "asset_id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    rebuild_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("collection_rebuilds.id", ondelete="RESTRICT"), primary_key=True
+    )
+    embedding_record_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("embedding_records.id", ondelete="RESTRICT"), primary_key=True
+    )
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    milvus_primary_key: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    input_hash: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    embedding_spec_hash: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    write_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    placed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class CollectionRebuildProgressModel(Base):
+    __tablename__ = "collection_rebuild_progress"
+    __table_args__ = (
+        UniqueConstraint("rebuild_id", "sequence", name="uq_collection_rebuild_progress_seq"),
+        Index("ix_collection_rebuild_progress_latest", "rebuild_id", "sequence"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    rebuild_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("collection_rebuilds.id", ondelete="RESTRICT"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    message_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
 class EmbeddingRecordModel(Base):

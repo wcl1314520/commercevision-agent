@@ -37,6 +37,7 @@ from commercevision_object_storage import (
 from commercevision_observability import ProductBriefTelemetry
 from commercevision_persistence import (
     Database,
+    MySqlCollectionRebuildControl,
     MySqlRetrievalPreviewService,
     MySqlRetrievalRunStore,
     SqlAlchemyAssetUnitOfWork,
@@ -141,6 +142,7 @@ class ApiContainer:
     retrieval: RetrievalApplicationService
     retrieval_runs: MySqlRetrievalRunStore
     retrieval_previews: MySqlRetrievalPreviewService
+    collection_rebuilds: MySqlCollectionRebuildControl
     retrieval_closeables: tuple[object, ...]
 
     @classmethod
@@ -295,6 +297,12 @@ class ApiContainer:
             retrieval=built_retrieval.service,
             retrieval_runs=built_retrieval.runs,
             retrieval_previews=built_retrieval.previews,
+            collection_rebuilds=MySqlCollectionRebuildControl(
+                database.session_factory,
+                retirement_delay=timedelta(
+                    seconds=settings.collection_rebuild_retirement_delay_seconds
+                ),
+            ),
             retrieval_closeables=built_retrieval.closeables,
         )
 
