@@ -5,6 +5,9 @@ from typing import Annotated
 from commercevision_application import AuthenticatedPrincipal
 from commercevision_contracts import (
     AssetAdministratorBlockRequestV1,
+    AssetDeleteRequestV1,
+    AssetDeleteResponseV1,
+    AssetDeletionStatusResponseV1,
     AssetIndexStatusResponseV1,
     AssetResponseV1,
     AssetValidationStatusResponseV1,
@@ -20,6 +23,7 @@ from commercevision_contracts import (
     UploadSessionCreateResponseV1,
     UploadSessionMutationRequestV1,
     UploadSessionResponseV1,
+    ValidationOperationSummaryV1,
 )
 from commercevision_domain import AuthenticationError
 from fastapi import APIRouter, Header, Query, Request, status
@@ -223,6 +227,74 @@ def get_asset(
         trusted_principal=trusted_principal,
     )
     return request.app.state.container.assets.get_asset(
+        workspace_id=workspace_id,
+        asset_id=asset_id,
+    )
+
+
+@asset_router.delete(
+    "/{asset_id}",
+    response_model=AssetDeleteResponseV1,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=RIGHTS_MUTATION_ERROR_RESPONSES,
+)
+def delete_foundation_asset(
+    asset_id: str,
+    payload: AssetDeleteRequestV1,
+    request: Request,
+    workspace_id: WorkspaceHeader,
+    actor_id: ActorHeader,
+    trusted_principal: PrincipalHeader = None,
+) -> AssetDeleteResponseV1:
+    principal = _require_mutation_principal(
+        request,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        trusted_principal=trusted_principal,
+    )
+    request.app.state.container.access_policy.require_admin(
+        workspace_id=workspace_id,
+        principal=principal,
+    )
+    result = request.app.state.container.asset_retention.request_administrator_deletion(
+        workspace_id=workspace_id,
+        asset_id=asset_id,
+        actor_id=principal.actor_id,
+        expected_version=payload.expected_version,
+        trace_id=request.state.trace_id,
+    )
+    return AssetDeleteResponseV1(
+        asset_id=result.asset_id,
+        asset_version_id=result.asset_version_id,
+        deletion_generation=result.deletion_generation,
+        deletion_reason=result.deletion_reason,
+        operation=ValidationOperationSummaryV1(
+            id=result.operation.id,
+            state=result.operation.state,
+            target_id=result.operation.target_id,
+            target_version=result.operation.target_version,
+            version=result.operation.version,
+        ),
+    )
+
+
+@asset_router.get(
+    "/{asset_id}/deletion",
+    response_model=AssetDeletionStatusResponseV1,
+    responses=RIGHTS_READ_ERROR_RESPONSES,
+)
+def get_asset_deletion(
+    asset_id: str,
+    request: Request,
+    workspace_id: WorkspaceHeader,
+    trusted_principal: PrincipalHeader = None,
+) -> AssetDeletionStatusResponseV1:
+    _require_workspace_principal(
+        request,
+        workspace_id=workspace_id,
+        trusted_principal=trusted_principal,
+    )
+    return request.app.state.container.asset_retention.status(
         workspace_id=workspace_id,
         asset_id=asset_id,
     )

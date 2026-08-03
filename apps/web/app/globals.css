@@ -403,6 +403,39 @@ textarea {
   padding: 5px 8px;
 }
 
+.asset-deletion-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.85rem;
+  align-items: center;
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--danger);
+  border-radius: 0.75rem;
+  background: var(--danger-soft);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.asset-deletion-progress strong {
+  color: var(--ink);
+}
+
+.asset-deletion-components {
+  display: grid;
+  flex-basis: 100%;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset-deletion-components li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .asset-status-FINALIZED {
   background: var(--success-soft);
   border-color: #b7dec8;

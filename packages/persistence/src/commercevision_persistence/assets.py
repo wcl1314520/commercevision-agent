@@ -8,12 +8,14 @@ from types import TracebackType
 
 from commercevision_application.asset_ports import (
     AssetRetentionCommitExpiredError,
+    AssetRetentionScanClaim,
     CurrentUsabilitySnapshot,
     RightsScanClaim,
     WorkflowRetentionFacts,
 )
 from commercevision_domain import (
     Asset,
+    AssetDeletionReason,
     AssetKind,
     AssetObject,
     AssetObjectState,
@@ -36,6 +38,7 @@ from sqlalchemy import and_, exists, literal_column, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .asset_deletions import AssetDeletionRepository
 from .database import enter_unit_of_work, exit_unit_of_work
 from .integrity import (
     classify_database_error,
@@ -170,6 +173,15 @@ def _asset_from_model(model: AssetModel) -> Asset:
         block_reason=model.block_reason,
         current_version_id=model.current_version_id,
         retention_deadline=model.retention_deadline,
+        deletion_generation=model.deletion_generation,
+        deletion_operation_id=model.deletion_operation_id,
+        deletion_reason=(
+            AssetDeletionReason(model.deletion_reason)
+            if model.deletion_reason is not None
+            else None
+        ),
+        deletion_requested_at=model.deletion_requested_at,
+        deletion_completed_at=model.deletion_completed_at,
         version=model.version,
         created_at=model.created_at,
         updated_at=model.updated_at,
@@ -438,6 +450,11 @@ class AssetRepository:
                 current_version_id=None,
                 current_rights_record_id=None,
                 retention_deadline=asset.retention_deadline,
+                deletion_generation=asset.deletion_generation,
+                deletion_operation_id=asset.deletion_operation_id,
+                deletion_reason=(asset.deletion_reason.value if asset.deletion_reason else None),
+                deletion_requested_at=asset.deletion_requested_at,
+                deletion_completed_at=asset.deletion_completed_at,
                 version=asset.version,
                 created_at=asset.created_at,
                 updated_at=asset.updated_at,
@@ -532,6 +549,9 @@ class AssetRepository:
         original_version = self._loaded_asset_versions.get(asset.id)
         if original_version is None:
             raise ConcurrencyError(f"Asset {asset.id} was not loaded by this transaction")
+        if asset.deletion_operation_id is not None:
+            # The pending Operation must exist before the Asset deletion head FK moves.
+            flush_with_integrity_classification(self._session)
         result = execute_with_integrity_classification(
             self._session,
             update(AssetModel)
@@ -546,6 +566,11 @@ class AssetRepository:
                 current_version_id=asset.current_version_id,
                 current_rights_record_id=asset.current_rights_record_id,
                 retention_deadline=asset.retention_deadline,
+                deletion_generation=asset.deletion_generation,
+                deletion_operation_id=asset.deletion_operation_id,
+                deletion_reason=(asset.deletion_reason.value if asset.deletion_reason else None),
+                deletion_requested_at=asset.deletion_requested_at,
+                deletion_completed_at=asset.deletion_completed_at,
                 version=asset.version,
                 updated_at=asset.updated_at,
             ),
@@ -770,6 +795,38 @@ class AssetRepository:
                 )
             )
         return claimed
+
+    def claim_expired_assets(self, *, limit: int) -> list[AssetRetentionScanClaim]:
+        if limit < 1:
+            raise ValueError("Asset retention scan limit must be positive")
+        database_now = literal_column("UTC_TIMESTAMP(6)")
+        rows = list(
+            self._session.execute(
+                select(AssetModel, database_now.label("database_now"))
+                .where(
+                    AssetModel.retention_class == RetentionClass.TASK.value,
+                    AssetModel.retention_deadline.is_not(None),
+                    AssetModel.retention_deadline <= database_now,
+                    AssetModel.deletion_operation_id.is_(None),
+                    AssetModel.status.not_in({AssetState.DELETING.value, AssetState.DELETED.value}),
+                )
+                .order_by(AssetModel.retention_deadline, AssetModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        )
+        claims: list[AssetRetentionScanClaim] = []
+        for asset_model, observed_database_now in rows:
+            self._loaded_asset_versions[asset_model.id] = asset_model.version
+            if observed_database_now.tzinfo is None:
+                observed_database_now = observed_database_now.replace(tzinfo=UTC)
+            claims.append(
+                AssetRetentionScanClaim(
+                    asset=_asset_from_model(asset_model),
+                    database_now=observed_database_now,
+                )
+            )
+        return claims
 
     def claim_activatable_rights(
         self,
@@ -1084,6 +1141,7 @@ class SqlAlchemyAssetUnitOfWork:
         self.associations = AssetAssociationRepository(self._session)
         self.idempotency = IdempotencyRepository(self._session)
         self.operations = OperationRepository(self._session)
+        self.asset_deletions = AssetDeletionRepository(self._session)
         self.outbox = OutboxRepository(self._session)
         self.audit = AuditRepository(self._session)
         return self

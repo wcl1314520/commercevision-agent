@@ -2,6 +2,41 @@
 
 export type AssetKind = "IMAGE" | "LORA" | "PROMPT_TEMPLATE" | "MODEL_CONFIGURATION";
 
+export interface AssetDeleteRequestV1 {
+  expected_version: number;
+}
+
+export interface AssetDeleteResponseV1 {
+  asset_id: string;
+  asset_version_id: string;
+  deletion_generation: number;
+  deletion_reason: AssetDeletionReason;
+  operation: ValidationOperationSummaryV1;
+}
+
+export interface AssetDeletionProgressItemV1 {
+  component: "OBJECTS" | "VECTORS" | "SEARCH_DOCUMENTS" | "PROVIDER_ARTIFACTS" | "TEMPORARY_REFERENCES" | "CACHES" | "PRODUCT_BRIEFS" | "RETRIEVAL_RUNS" | "CHECKPOINTS" | "QUARANTINE" | "OPERATIONS";
+  state: "PENDING" | "CONVERGED" | "RETRYABLE_FAILED";
+  observed_count: number;
+  converged_count: number;
+  error_code?: string | null;
+  observed_at: string;
+}
+
+export type AssetDeletionReason = "RETENTION_EXPIRED" | "RIGHTS_EXPIRED" | "ADMINISTRATOR_DELETE";
+
+export interface AssetDeletionStatusResponseV1 {
+  asset_id: string;
+  asset_version_id: string;
+  asset_state: AssetState;
+  deletion_generation: number;
+  deletion_reason: AssetDeletionReason;
+  requested_at: string;
+  completed_at: string | null;
+  operation: ValidationOperationSummaryV1;
+  progress: Array<AssetDeletionProgressItemV1>;
+}
+
 export interface AssetIndexStatusResponseV1 {
   asset_id: string;
   asset_version_id: string | null;
@@ -33,6 +68,11 @@ export interface AssetResponseV1 {
   current_version_id: string;
   current_rights_record_id: string | null;
   retention_deadline: string | null;
+  deletion_generation?: number;
+  deletion_operation_id?: string | null;
+  deletion_reason?: AssetDeletionReason | null;
+  deletion_requested_at?: string | null;
+  deletion_completed_at?: string | null;
   version: number;
   created_at: string;
   updated_at: string;

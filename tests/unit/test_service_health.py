@@ -28,6 +28,7 @@ def test_scheduler_readiness_exposes_independent_scanner_status() -> None:
         "upload_session_expiry",
         "rights_activation",
         "rights_expiry",
+        "asset_retention_expiry",
     }
     assert response.json()["expired_uploads_total"] == 0
     assert response.json()["expired_rights_total"] == 0

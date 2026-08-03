@@ -200,7 +200,10 @@ function apiMethodAllowed(path: string, method: string): boolean {
   if (/^\/upload-sessions\/[^/:]+:(abort|finalize)$/.test(path)) {
     return method === "POST";
   }
-  if (/^\/assets\/[^/:]+$/.test(path)) return method === "GET";
+  if (/^\/assets\/[^/:]+$/.test(path)) {
+    return method === "GET" || method === "DELETE";
+  }
+  if (/^\/assets\/[^/:]+\/deletion$/.test(path)) return method === "GET";
   if (/^\/assets\/[^/:]+\/validation$/.test(path)) return method === "GET";
   if (/^\/assets\/[^/:]+\/index-status$/.test(path)) return method === "GET";
   if (/^\/assets\/[^/:]+\/rights$/.test(path)) {

@@ -408,8 +408,41 @@ class AssetModel(Base):
             ondelete="RESTRICT",
             use_alter=True,
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "deletion_operation_id"],
+            ["durable_operations.workspace_id", "durable_operations.id"],
+            name="fk_assets_deletion_operation",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        CheckConstraint(
+            "deletion_generation >= 0 AND ((deletion_generation = 0 "
+            "AND deletion_operation_id IS NULL AND deletion_reason IS NULL "
+            "AND deletion_requested_at IS NULL AND deletion_completed_at IS NULL) "
+            "OR (deletion_generation > 0 AND deletion_operation_id IS NOT NULL "
+            "AND deletion_reason IS NOT NULL AND deletion_requested_at IS NOT NULL))",
+            name="ck_assets_deletion_identity",
+        ),
+        CheckConstraint(
+            "deletion_completed_at IS NULL OR status = 'DELETED'",
+            name="ck_assets_deletion_completion",
+        ),
         Index("ix_assets_workspace_status", "workspace_id", "status", "updated_at", "id"),
         Index("ix_assets_retention_deadline", "status", "retention_deadline"),
+        Index(
+            "ix_assets_retention_cleanup_due",
+            "retention_class",
+            "deletion_operation_id",
+            "retention_deadline",
+            "id",
+        ),
+        Index(
+            "ix_assets_deletion_progress",
+            "status",
+            "deletion_requested_at",
+            "workspace_id",
+            "id",
+        ),
         Index(
             "ix_assets_current_rights",
             "workspace_id",
@@ -431,6 +464,16 @@ class AssetModel(Base):
     current_version_id: Mapped[str | None] = mapped_column(String(36))
     current_rights_record_id: Mapped[str | None] = mapped_column(String(36))
     retention_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deletion_generation: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    deletion_operation_id: Mapped[str | None] = mapped_column(String(36))
+    deletion_reason: Mapped[str | None] = mapped_column(String(32))
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deletion_completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
@@ -1393,6 +1436,7 @@ class AuditEventModel(Base):
 from . import brand_profile_models as _brand_profile_models  # noqa: E402, F401, I001
 from . import indexing_models as _indexing_models  # noqa: E402, F401, I001
 from . import product_brief_models as _product_brief_models  # noqa: E402, F401, I001
+from . import retention_models as _retention_models  # noqa: E402, F401, I001
 from . import retrieval_models as _retrieval_models  # noqa: E402, F401, I001
 
 

@@ -129,8 +129,12 @@
   分块 dense、lexical/brand/explicit recall、versioned RRF、受界 rerank/去重、Retained Run、
   30–60 秒 controlled preview、API 与 Web Retrieval Explorer；实现提交 `32d3aff` 与迁移契约
   修复 `dccacec` 已由 GitHub Actions `30813127324` 全绿验证并正式放行。
-- Ticket 12 已完成 Product Catalog/Asset MCP 本地实现与发布门禁；只待单一提交、推送及其
-  精确 GitHub Actions 全绿。Ticket 13 尚未启动。
+- Ticket 12 单一提交 `ff9c4b3` 已推送；精确 GitHub Actions `30832780556` 的 Python、Web、
+  Container builds、Gitleaks 与 SBOM 全部通过，Ticket 13 已正式解锁。
+- Ticket 13 已按冻结工单完成本地实现与发布门禁：资产级 tombstone/deletion generation、复用既有
+  Durable Operation 的全版本外部收敛、独立 Scheduler 到期扫描、Provider Artifact 精确版本/未知
+  结果穷尽对账，以及不暴露存储细节的 HTTP/Web 进度视图均已闭合；当前只允许形成单一提交、推送并
+  等待精确 GitHub Actions 全绿，在此之前不启动 Ticket 14。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

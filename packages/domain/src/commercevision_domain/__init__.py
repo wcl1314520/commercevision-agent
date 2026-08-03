@@ -2,6 +2,8 @@
 
 from .assets import (
     Asset,
+    AssetDeletionReason,
+    AssetDeletionTombstone,
     AssetKind,
     AssetObject,
     AssetObjectState,
@@ -148,6 +150,8 @@ __all__ = [
     "Approval",
     "AdminRequiredError",
     "Asset",
+    "AssetDeletionReason",
+    "AssetDeletionTombstone",
     "AssetKind",
     "AssetObject",
     "AssetObjectState",

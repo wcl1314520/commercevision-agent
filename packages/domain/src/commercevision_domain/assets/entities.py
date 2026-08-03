@@ -18,6 +18,7 @@ from commercevision_domain.workflow.errors import (
 from commercevision_domain.workspace_identity import validate_workspace_id
 
 from .enums import (
+    AssetDeletionReason,
     AssetKind,
     AssetObjectState,
     AssetState,
@@ -662,6 +663,11 @@ class Asset:
     created_at: datetime
     updated_at: datetime
     current_rights_record_id: str | None = None
+    deletion_generation: int = 0
+    deletion_operation_id: str | None = None
+    deletion_reason: AssetDeletionReason | None = None
+    deletion_requested_at: datetime | None = None
+    deletion_completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
@@ -669,6 +675,23 @@ class Asset:
         _require_utc(self.updated_at, "updated_at")
         if self.retention_deadline is not None:
             _require_utc(self.retention_deadline, "retention_deadline")
+        if self.deletion_requested_at is not None:
+            _require_utc(self.deletion_requested_at, "deletion_requested_at")
+        if self.deletion_completed_at is not None:
+            _require_utc(self.deletion_completed_at, "deletion_completed_at")
+        if self.deletion_generation < 0:
+            raise ValueError("Asset deletion generation must not be negative")
+        deletion_identity = (
+            self.deletion_operation_id,
+            self.deletion_reason,
+            self.deletion_requested_at,
+        )
+        if self.deletion_generation == 0 and any(value is not None for value in deletion_identity):
+            raise ValueError("Asset deletion identity requires a positive generation")
+        if self.deletion_generation > 0 and any(value is None for value in deletion_identity):
+            raise ValueError("Asset deletion generation requires complete tombstone identity")
+        if self.deletion_completed_at is not None and self.status != AssetState.DELETED:
+            raise ValueError("only deleted Assets may record deletion completion")
         if self.retention_class == RetentionClass.TASK and self.workflow_id is None:
             raise ValueError("Task Assets require a Workflow")
         if self.retention_class == RetentionClass.FOUNDATION and self.workflow_id is not None:
@@ -896,6 +919,87 @@ class Asset:
         self.block_reason = None
         self._touch(now)
 
+    def request_deletion(
+        self,
+        *,
+        reason: AssetDeletionReason,
+        operation_id: str,
+        target_asset_version_id: str,
+        now: datetime,
+    ) -> int:
+        """Tombstone use before external cleanup and return the stable generation."""
+
+        _require_utc(now, "now")
+        if not operation_id or not target_asset_version_id:
+            raise ValueError("Asset deletion requires operation and target version identities")
+        if target_asset_version_id != self.current_version_id:
+            raise InvalidTransitionError(f"Asset {self.id} deletion identity fence failed")
+        if self.deletion_operation_id is not None:
+            if (
+                self.deletion_operation_id == operation_id
+                and self.deletion_reason == reason
+                and self.deletion_generation > 0
+            ):
+                return self.deletion_generation
+            raise InvalidTransitionError(f"Asset {self.id} already has a different deletion")
+        if self.status == AssetState.DELETED:
+            raise InvalidTransitionError(f"Asset {self.id} is already deleted")
+        if reason == AssetDeletionReason.RETENTION_EXPIRED:
+            if (
+                self.retention_class != RetentionClass.TASK
+                or self.retention_deadline is None
+                or now < self.retention_deadline
+            ):
+                raise InvalidTransitionError(
+                    f"Asset {self.id} cannot delete before its retention deadline"
+                )
+        elif reason == AssetDeletionReason.RIGHTS_EXPIRED:
+            if (
+                self.retention_class != RetentionClass.FOUNDATION
+                or self.status != AssetState.RIGHTS_EXPIRED
+            ):
+                raise InvalidTransitionError(
+                    f"Asset {self.id} cannot delete before its Foundation rights expire"
+                )
+        elif self.retention_class != RetentionClass.FOUNDATION:
+            raise InvalidTransitionError(f"Task Asset {self.id} cannot be deleted administratively")
+        self.deletion_generation += 1
+        self.deletion_operation_id = operation_id
+        self.deletion_reason = reason
+        self.deletion_requested_at = now
+        self.deletion_completed_at = None
+        if reason != AssetDeletionReason.RIGHTS_EXPIRED:
+            self.status = AssetState.DELETING
+        self.block_reason = None
+        self._touch(now)
+        return self.deletion_generation
+
+    def complete_deletion(
+        self,
+        *,
+        deletion_generation: int,
+        target_asset_version_id: str,
+        now: datetime,
+    ) -> None:
+        """Complete only the exact tombstone generation and Asset Version."""
+
+        _require_utc(now, "now")
+        if (
+            deletion_generation != self.deletion_generation
+            or target_asset_version_id != self.current_version_id
+        ):
+            raise InvalidTransitionError(f"Asset {self.id} deletion identity fence failed")
+        if self.status == AssetState.DELETED:
+            return
+        if self.status not in {AssetState.DELETING, AssetState.RIGHTS_EXPIRED}:
+            raise InvalidTransitionError(
+                f"Asset {self.id} cannot complete deletion from {self.status.value}"
+            )
+        self.status = AssetState.DELETED
+        self.deletion_completed_at = now
+        self.block_reason = None
+        self._touch(now)
+
     def begin_retention_cleanup(self, *, now: datetime) -> None:
         _require_utc(now, "now")
         if self.retention_deadline is None:
@@ -952,6 +1056,35 @@ class Asset:
     def _touch(self, now: datetime) -> None:
         self.version += 1
         self.updated_at = now
+
+
+@dataclass(frozen=True, slots=True)
+class AssetDeletionTombstone:
+    id: str
+    workspace_id: str
+    asset_id: str
+    target_asset_version_id: str
+    deletion_generation: int
+    operation_id: str
+    reason: AssetDeletionReason
+    requested_by: str
+    requested_at: datetime
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)
+        _require_utc(self.requested_at, "requested_at")
+        if self.deletion_generation < 1:
+            raise ValueError("Asset deletion tombstone generation must be positive")
+        if not all(
+            (
+                self.id,
+                self.asset_id,
+                self.target_asset_version_id,
+                self.operation_id,
+                self.requested_by,
+            )
+        ):
+            raise ValueError("Asset deletion tombstone identity must be complete")
 
 
 @dataclass(frozen=True, slots=True)

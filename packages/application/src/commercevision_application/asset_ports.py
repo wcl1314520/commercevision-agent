@@ -9,6 +9,7 @@ from typing import Protocol
 
 from commercevision_domain import (
     Asset,
+    AssetDeletionTombstone,
     AssetObject,
     AssetValidationResult,
     AssetVersion,
@@ -46,6 +47,22 @@ class RightsScanClaim:
     asset: Asset
     rights_record: RightsRecord
     database_now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AssetRetentionScanClaim:
+    asset: Asset
+    database_now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AssetDeletionProgressSnapshot:
+    component: str
+    state: str
+    observed_count: int
+    converged_count: int
+    error_code: str | None
+    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +200,12 @@ class AssetRepositoryPort(Protocol):
         limit: int,
     ) -> list[RightsScanClaim]: ...
 
+    def claim_expired_assets(
+        self,
+        *,
+        limit: int,
+    ) -> list[AssetRetentionScanClaim]: ...
+
 
 class AssetAssociationPort(Protocol):
     def workflow_retention_facts(
@@ -248,6 +271,17 @@ class AssetOperationPort(Protocol):
     ) -> DurableOperation | None: ...
 
 
+class AssetDeletionRepositoryPort(Protocol):
+    def add(self, tombstone: AssetDeletionTombstone) -> None: ...
+
+    def list_latest_progress(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> list[AssetDeletionProgressSnapshot]: ...
+
+
 class AssetOutboxPort(Protocol):
     def add(self, event: OutboxEvent) -> None: ...
 
@@ -275,6 +309,7 @@ class AssetUnitOfWorkPort(Protocol):
     associations: AssetAssociationPort
     idempotency: AssetIdempotencyPort
     operations: AssetOperationPort
+    asset_deletions: AssetDeletionRepositoryPort
     outbox: AssetOutboxPort
     audit: AssetAuditPort
 

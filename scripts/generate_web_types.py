@@ -9,6 +9,11 @@ from typing import Any
 
 SCHEMAS = (
     "AssetKind",
+    "AssetDeleteRequestV1",
+    "AssetDeleteResponseV1",
+    "AssetDeletionProgressItemV1",
+    "AssetDeletionReason",
+    "AssetDeletionStatusResponseV1",
     "AssetIndexStatusResponseV1",
     "AssetAdministratorBlockRequestV1",
     "AssetObjectState",

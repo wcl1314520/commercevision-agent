@@ -2,6 +2,12 @@
 
 from .asset_cleanup import UploadObjectCleaner
 from .asset_cleanup_dispatch import upload_cleanup_input_hash
+from .asset_deletion import (
+    AssetDeletionConvergenceResult,
+    AssetDeletionPolicy,
+    AssetDeletionRequestResult,
+    AssetRetentionApplicationService,
+)
 from .asset_rights import AssetRightsApplicationService
 from .asset_validation import (
     AssetValidationExecutor,
@@ -147,6 +153,10 @@ __all__ = [
     "DeadLetterOperatorService",
     "AuthenticatedPrincipal",
     "AssetRegistryApplicationService",
+    "AssetDeletionConvergenceResult",
+    "AssetDeletionPolicy",
+    "AssetDeletionRequestResult",
+    "AssetRetentionApplicationService",
     "AssetRightsApplicationService",
     "AssetValidationExecutor",
     "AssetValidationExecutorPolicy",

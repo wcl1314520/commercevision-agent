@@ -2,12 +2,14 @@
 
 from .entities import (
     Asset,
+    AssetDeletionTombstone,
     AssetObject,
     AssetValidationResult,
     AssetVersion,
     UploadSession,
 )
 from .enums import (
+    AssetDeletionReason,
     AssetKind,
     AssetObjectState,
     AssetState,
@@ -41,6 +43,8 @@ from .rights import (
 
 __all__ = [
     "Asset",
+    "AssetDeletionReason",
+    "AssetDeletionTombstone",
     "AssetKind",
     "AssetObject",
     "AssetObjectState",

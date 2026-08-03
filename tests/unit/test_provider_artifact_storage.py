@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 
 import pytest
 from commercevision_contracts.object_storage import (
+    ConditionalDeleteRequest,
     ConditionalWriteRequest,
+    DeleteMarkerRequest,
     ObjectReference,
     ObjectStat,
     ServerSideEncryptionState,
@@ -23,7 +25,11 @@ from commercevision_domain import (
     StoragePreconditionError,
     StorageWriteSafeToRetryError,
 )
-from commercevision_object_storage import ObjectStorageProviderArtifactSink
+from commercevision_object_storage import (
+    ObjectStorageProviderArtifactSink,
+    ObjectStorageProviderArtifactTarget,
+    ObjectStorageProviderArtifactTargetRegistry,
+)
 
 
 class CapturingStorage:
@@ -32,6 +38,20 @@ class CapturingStorage:
 
     def __init__(self) -> None:
         self.request: ConditionalWriteRequest | None = None
+        self.delete_request: ConditionalDeleteRequest | None = None
+        self.delete_marker_request: DeleteMarkerRequest | None = None
+
+    def configured_bucket(self, location: StorageLocationClass) -> str:
+        assert location == StorageLocationClass.PROVIDER_RESULT
+        return "provider-results"
+
+    def delete_if_match(self, request: ConditionalDeleteRequest) -> bool:
+        self.delete_request = request
+        return True
+
+    def delete_marker(self, request: DeleteMarkerRequest) -> bool:
+        self.delete_marker_request = request
+        return True
 
     def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat:
         self.request = request
@@ -219,3 +239,47 @@ def test_provider_artifact_sink_preserves_proven_safe_pre_write_failure() -> Non
         match="before write",
     ):
         sink.write_prepared(artifact, target)
+
+
+def test_provider_artifact_registry_deletes_only_the_frozen_exact_target() -> None:
+    storage = CapturingStorage()
+    sink = ObjectStorageProviderArtifactSink(storage, bucket="provider-results")  # type: ignore[arg-type]
+    artifact = ProviderArtifactWrite(
+        operation_id="019f9aaa-0000-7000-8000-000000000001",
+        operation_attempt=1,
+        call_index=0,
+        kind=ProviderArtifactKind.REQUEST,
+        content_type="application/json",
+        payload=b"{}",
+        sha256=hashlib.sha256(b"{}").hexdigest(),
+        retention_class=RetentionClass.TASK,
+        retention_deadline=datetime(2026, 7, 31, tzinfo=UTC),
+    )
+    target = sink.prepare(
+        artifact,
+        ledger_id="019f9aaa-0000-7000-8000-000000000099",
+        write_fence="e" * 64,
+    )
+    registry = ObjectStorageProviderArtifactTargetRegistry(
+        (ObjectStorageProviderArtifactTarget(storage=storage, bucket="provider-results"),)  # type: ignore[arg-type]
+    )
+    exact = ObjectReference(
+        location=target.location,
+        key=target.key,
+        version_id="version-1",
+    )
+
+    assert registry.delete_if_match(target, exact, expected_etag='"etag"') is True
+    assert registry.delete_marker(target, exact) is True
+    assert storage.delete_request == ConditionalDeleteRequest(
+        reference=exact,
+        expected_etag='"etag"',
+    )
+    assert storage.delete_marker_request == DeleteMarkerRequest(reference=exact)
+
+    with pytest.raises(StoragePreconditionError, match="frozen target"):
+        registry.delete_if_match(
+            target,
+            exact.model_copy(update={"key": "different"}),
+            expected_etag='"etag"',
+        )

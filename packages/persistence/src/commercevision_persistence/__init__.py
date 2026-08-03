@@ -1,5 +1,6 @@
 """MySQL infrastructure shared by CommerceVision services."""
 
+from .asset_deletion_cleanup import MySqlAssetDeletionCoordinator
 from .assets import SqlAlchemyAssetUnitOfWork
 from .brand_profiles import SqlAlchemyBrandProfileUnitOfWork
 from .catalog import SqlAlchemyCatalogUnitOfWork
@@ -43,6 +44,7 @@ __all__ = [
     "Database",
     "MySQLCheckpointSaver",
     "MySqlIndexingAuthority",
+    "MySqlAssetDeletionCoordinator",
     "MySqlImageIndexRequestService",
     "MySqlIndexRequestService",
     "MySqlProductFusedIndexRequestService",

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from commercevision_domain import (
     Asset,
+    AssetDeletionReason,
     AssetKind,
     AssetObject,
     AssetObjectState,
@@ -428,6 +429,87 @@ def test_task_retention_cleanup_accepts_every_post_rights_usable_state(
         asset.expire_retention(now=deadline)
 
     assert asset.status == expected_state
+
+
+def test_foundation_administrator_deletion_creates_one_generation_fenced_tombstone() -> None:
+    asset = _asset()
+    operation_id = new_uuid7()
+    current_version_id = asset.current_version_id
+
+    generation = asset.request_deletion(
+        reason=AssetDeletionReason.ADMINISTRATOR_DELETE,
+        operation_id=operation_id,
+        target_asset_version_id=current_version_id,
+        now=NOW + timedelta(seconds=1),
+    )
+    replayed_generation = asset.request_deletion(
+        reason=AssetDeletionReason.ADMINISTRATOR_DELETE,
+        operation_id=operation_id,
+        target_asset_version_id=current_version_id,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert generation == replayed_generation == 1
+    assert asset.status == AssetState.DELETING
+    assert asset.deletion_generation == 1
+    assert asset.deletion_operation_id == operation_id
+    assert asset.deletion_reason == AssetDeletionReason.ADMINISTRATOR_DELETE
+    assert asset.deletion_requested_at == NOW + timedelta(seconds=1)
+
+
+def test_task_retention_deletion_starts_at_exact_deadline_and_never_before() -> None:
+    deadline = NOW + timedelta(hours=72)
+    asset = Asset.create_quarantined(
+        asset_id=new_uuid7(),
+        workspace_id="asset-domain",
+        retention_class=RetentionClass.TASK,
+        kind=AssetKind.IMAGE,
+        workflow_id=new_uuid7(),
+        product_id=None,
+        sku_id=None,
+        current_version_id=new_uuid7(),
+        retention_deadline=deadline,
+        now=NOW,
+    )
+
+    with pytest.raises(InvalidTransitionError, match="retention deadline"):
+        asset.request_deletion(
+            reason=AssetDeletionReason.RETENTION_EXPIRED,
+            operation_id=new_uuid7(),
+            target_asset_version_id=asset.current_version_id,
+            now=deadline - timedelta(microseconds=1),
+        )
+
+    assert (
+        asset.request_deletion(
+            reason=AssetDeletionReason.RETENTION_EXPIRED,
+            operation_id=new_uuid7(),
+            target_asset_version_id=asset.current_version_id,
+            now=deadline,
+        )
+        == 1
+    )
+
+
+def test_old_deletion_generation_cannot_complete_a_later_asset_version() -> None:
+    asset = _asset()
+    old_version_id = asset.current_version_id
+    generation = asset.request_deletion(
+        reason=AssetDeletionReason.ADMINISTRATOR_DELETE,
+        operation_id=new_uuid7(),
+        target_asset_version_id=old_version_id,
+        now=NOW + timedelta(seconds=1),
+    )
+    asset.current_version_id = new_uuid7()
+
+    with pytest.raises(InvalidTransitionError, match="identity fence"):
+        asset.complete_deletion(
+            deletion_generation=generation,
+            target_asset_version_id=old_version_id,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert asset.status == AssetState.DELETING
 
 
 @pytest.mark.parametrize(

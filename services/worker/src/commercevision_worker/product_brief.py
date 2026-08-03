@@ -231,6 +231,23 @@ def _build_artifact_targets(
         raise
 
 
+def build_provider_artifact_targets(
+    *,
+    settings: Settings,
+    database: Database,
+    storage: ObjectStorage,
+) -> _ProductBriefArtifactTargets:
+    """Build the exact current and historical registry shared by retention cleanup."""
+
+    return _build_artifact_targets(
+        settings=settings,
+        database=database,
+        storage=storage,
+        artifact_target_readiness_query=None,
+        additional_artifact_targets=None,
+    )
+
+
 def probe_product_brief_artifact_targets(
     *,
     settings: Settings,

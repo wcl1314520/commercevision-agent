@@ -7,18 +7,18 @@ references, and caches without resurrection.
 
 **Blocked by:** 02 — Durable Operations and recovery control plane; 06 — Rights Records and current usability; 09 — Collection Registry and IMAGE incremental indexing.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Task Asset retention copies the Workflow expiry and is never extended by upload, retry, analysis, or reindex.
-- [ ] Foundation Asset retention ends at administrator deletion or current Rights Record expiry, whichever occurs first.
-- [ ] Rights expiry and deletion atomically mark MySQL unusable, increment deletion generation, record a tombstone, and emit cleanup work.
-- [ ] Cleanup includes all Asset Versions, objects, vectors, search documents, temporary references, caches, task ProductBrief payloads, retrieval runs, and task-bearing checkpoints.
-- [ ] Cleanup consumes every ProductBrief Provider Artifact ledger row, conditionally deletes every persisted exact Version ID, and exhaustively reconciles `INTENDED` or `UNKNOWN` exact keys before recording deletion convergence.
-- [ ] Provider Artifact ledger identity, target, content, and retention facts remain immutable; deletion records an append-only tombstone/progress fact instead of erasing the evidence needed for retry and audit.
-- [ ] Missing external objects or vectors are treated as converged success.
-- [ ] Old delete events cannot delete a later Asset Version because target version and deletion generation are checked.
-- [ ] Partial cleanup retries without restoring usability or duplicating logical work.
-- [ ] Reconciliation detects orphaned quarantine objects, stale vectors, missing vectors, stuck operations, and incomplete deletion.
-- [ ] Scheduler scans use bounded keyset batches, `SKIP LOCKED`, exact time boundaries, and independent scanner health.
-- [ ] HTTP and Web operation views expose deletion and reconciliation progress without storage details.
-- [ ] Time-frozen and fault-injection tests prove exact 72-hour expiry, Foundation expiry, administrator delete, storage/vector outage, Worker restart, and no resurrection.
+- [x] Task Asset retention copies the Workflow expiry and is never extended by upload, retry, analysis, or reindex.
+- [x] Foundation Asset retention ends at administrator deletion or current Rights Record expiry, whichever occurs first.
+- [x] Rights expiry and deletion atomically mark MySQL unusable, increment deletion generation, record a tombstone, and emit cleanup work.
+- [x] Cleanup includes all Asset Versions, objects, vectors, search documents, temporary references, caches, task ProductBrief payloads, retrieval runs, and task-bearing checkpoints.
+- [x] Cleanup consumes every ProductBrief Provider Artifact ledger row, conditionally deletes every persisted exact Version ID, and exhaustively reconciles `INTENDED` or `UNKNOWN` exact keys before recording deletion convergence.
+- [x] Provider Artifact ledger identity, target, content, and retention facts remain immutable; deletion records an append-only tombstone/progress fact instead of erasing the evidence needed for retry and audit.
+- [x] Missing external objects or vectors are treated as converged success.
+- [x] Old delete events cannot delete a later Asset Version because target version and deletion generation are checked.
+- [x] Partial cleanup retries without restoring usability or duplicating logical work.
+- [x] Reconciliation detects orphaned quarantine objects, stale vectors, missing vectors, stuck operations, and incomplete deletion.
+- [x] Scheduler scans use bounded keyset batches, `SKIP LOCKED`, exact time boundaries, and independent scanner health.
+- [x] HTTP and Web operation views expose deletion and reconciliation progress without storage details.
+- [x] Time-frozen and fault-injection tests prove exact 72-hour expiry, Foundation expiry, administrator delete, storage/vector outage, Worker restart, and no resurrection.

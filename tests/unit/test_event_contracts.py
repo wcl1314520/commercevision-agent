@@ -209,3 +209,55 @@ def test_upload_cleanup_is_a_typed_maintenance_command(reason: str) -> None:
     assert "key" not in payload.model_dump()
     assert contract.queue == EventQueue.MAINTENANCE
     assert contract.handling == EventHandling.COMMAND
+
+
+def test_asset_cleanup_command_binds_exact_version_and_deletion_generation() -> None:
+    contract = event_contract_for(EventType.ASSET_DELETE_REQUESTED, 1)
+    asset_id = "019b7b74-51f8-7ea7-9d2c-7a61cb443f1d"
+    asset_version_id = "019b7b74-6f5b-79b1-a431-6227d8bc4f68"
+
+    payload = contract.validate_payload(
+        {
+            "operation_id": "019b7b74-7e3e-7352-86a4-ef6718aa8c2c",
+            "workspace_id": "workspace-a",
+            "target_type": "ASSET",
+            "target_id": asset_id,
+            "target_version": 3,
+            "reason": "RIGHTS_EXPIRED",
+            "asset_version_id": asset_version_id,
+            "deletion_generation": 3,
+        }
+    )
+
+    assert isinstance(payload, AssetDeleteRequestedPayload)
+    assert payload.asset_version_id == asset_version_id
+    assert payload.deletion_generation == 3
+    assert "bucket" not in payload.model_dump()
+    assert "key" not in payload.model_dump()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"asset_version_id": None},
+        {"deletion_generation": 2},
+        {"reason": "UPLOAD_EXPIRED"},
+    ],
+)
+def test_asset_cleanup_command_rejects_incomplete_or_mixed_identity(
+    changes: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "operation_id": "019b7b74-7e3e-7352-86a4-ef6718aa8c2c",
+        "workspace_id": "workspace-a",
+        "target_type": "ASSET",
+        "target_id": "019b7b74-51f8-7ea7-9d2c-7a61cb443f1d",
+        "target_version": 3,
+        "reason": "RIGHTS_EXPIRED",
+        "asset_version_id": "019b7b74-6f5b-79b1-a431-6227d8bc4f68",
+        "deletion_generation": 3,
+    }
+    values.update(changes)
+
+    with pytest.raises(ValueError):
+        event_contract_for(EventType.ASSET_DELETE_REQUESTED, 1).validate_payload(values)

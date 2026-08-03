@@ -135,6 +135,73 @@ describe("AssetApi validation status reads", () => {
     });
   });
 
+  it("requests generation-fenced administrator deletion without storage details", async () => {
+    const assetId = "019f8a00-0000-7000-8000-000000000030";
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        asset_id: assetId,
+        asset_version_id: "019f8a00-0000-7000-8000-000000000031",
+        deletion_generation: 1,
+        deletion_reason: "ADMINISTRATOR_DELETE",
+        operation: { id: "operation", state: "PENDING", target_version: 1 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new AssetApi({
+      baseUrl: "https://web.example",
+      workspaceId: "catalog-demo",
+      actorId: "catalog-administrator",
+    }).deleteAsset(assetId, 4, "web-asset-delete-0001");
+
+    expect(result).not.toHaveProperty("bucket");
+    expect(result).not.toHaveProperty("object_key");
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe(`https://web.example/api/v1/assets/${assetId}`);
+    expect(init).toMatchObject({
+      body: '{"expected_version":4}',
+      method: "DELETE",
+    });
+  });
+
+  it("reads persisted deletion convergence progress without storage details", async () => {
+    const assetId = "019f8a00-0000-7000-8000-000000000030";
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        asset_id: assetId,
+        asset_version_id: "019f8a00-0000-7000-8000-000000000031",
+        asset_state: "DELETING",
+        deletion_generation: 1,
+        deletion_reason: "ADMINISTRATOR_DELETE",
+        requested_at: "2026-08-04T02:00:00Z",
+        completed_at: null,
+        operation: { id: "operation", state: "RUNNING", target_version: 1 },
+        progress: [
+          {
+            component: "OBJECTS",
+            state: "CONVERGED",
+            observed_count: 2,
+            converged_count: 2,
+            error_code: null,
+            observed_at: "2026-08-04T02:00:02Z",
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new AssetApi({
+      baseUrl: "https://web.example",
+      workspaceId: "catalog-demo",
+    }).getAssetDeletion(assetId);
+
+    expect(result.progress[0].component).toBe("OBJECTS");
+    expect(result).not.toHaveProperty("bucket");
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `https://web.example/api/v1/assets/${assetId}/deletion`,
+    );
+  });
+
   it("registers explicit rights and reads immutable history", async () => {
     const assetId = "019f8a00-0000-7000-8000-000000000030";
     const fetchMock = vi

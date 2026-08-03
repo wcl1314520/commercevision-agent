@@ -7,7 +7,9 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from commercevision_application import (
+    AssetDeletionPolicy,
     AssetRegistryApplicationService,
+    AssetRetentionApplicationService,
     AssetRightsApplicationService,
     BrandProfileApplicationService,
     BrandProfileCursorCodec,
@@ -124,6 +126,7 @@ class ApiContainer:
     database: Database
     assets: AssetRegistryApplicationService
     rights: AssetRightsApplicationService
+    asset_retention: AssetRetentionApplicationService
     brand_profiles: BrandProfileApplicationService
     catalog: CatalogApplicationService
     operations: OperationApplicationService
@@ -205,6 +208,11 @@ class ApiContainer:
             maximum_prompt_template_bytes=settings.upload_max_prompt_template_bytes,
             maximum_model_configuration_bytes=(settings.upload_max_model_configuration_bytes),
         )
+        deletion_policy = AssetDeletionPolicy(
+            max_attempts=settings.asset_deletion_max_attempts,
+            max_reconciliation_attempts=(settings.asset_deletion_max_reconciliation_attempts),
+            execution_max_elapsed=timedelta(seconds=settings.operation_retry_max_elapsed_seconds),
+        )
         return cls(
             database=database,
             assets=AssetRegistryApplicationService(
@@ -245,7 +253,14 @@ class ApiContainer:
                 ),
                 lease_owner=f"{socket.gethostname()}:{settings.service_name}",
             ),
-            rights=AssetRightsApplicationService(uow_factory=asset_uow_factory),
+            rights=AssetRightsApplicationService(
+                uow_factory=asset_uow_factory,
+                deletion_policy=deletion_policy,
+            ),
+            asset_retention=AssetRetentionApplicationService(
+                uow_factory=asset_uow_factory,
+                policy=deletion_policy,
+            ),
             brand_profiles=BrandProfileApplicationService(
                 uow_factory=brand_profile_uow_factory,
                 cursor_codec=brand_profile_cursor_codec,

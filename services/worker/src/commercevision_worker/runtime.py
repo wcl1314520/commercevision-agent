@@ -101,6 +101,7 @@ from commercevision_object_storage import (
 from commercevision_persistence import (
     Database,
     ImageIndexNotApplicable,
+    MySqlAssetDeletionCoordinator,
     MySQLCheckpointSaver,
     MySqlImageIndexRequestService,
     MySqlIndexingAuthority,
@@ -113,6 +114,7 @@ from commercevision_persistence import (
     create_database,
     is_unit_of_work_active,
 )
+from commercevision_retrieval import MilvusVectorIndexAdapter
 from commercevision_tool_runtime import (
     FixtureImageTool,
     ToolDefinition,
@@ -123,6 +125,7 @@ from commercevision_tool_runtime.policy import ToolPolicy
 
 from . import product_brief
 from .asset_cleanup import UploadSessionCleanupExecutor
+from .asset_deletion import AssetCleanupExecutor, AssetDeletionExecutor
 from .asset_validation import build_asset_validation_executor
 from .executors import available_builtin_operation_kinds
 from .image_indexing import (
@@ -212,7 +215,7 @@ class WorkerRuntime:
             and settings.maintenance_queue_name in settings.configured_worker_queues
             and OperationKind.ASSET_DELETION not in configured_executors
         ):
-            configured_executors[OperationKind.ASSET_DELETION] = UploadSessionCleanupExecutor(
+            upload_cleanup = UploadSessionCleanupExecutor(
                 uow_factory=lambda: SqlAlchemyAssetUnitOfWork(database.session_factory),
                 cleaner=UploadObjectCleaner(object_storage),
                 reconciliation_interval=timedelta(
@@ -222,6 +225,35 @@ class WorkerRuntime:
                     seconds=settings.operation_retry_max_elapsed_seconds
                 ),
             )
+            artifact_targets = product_brief.build_provider_artifact_targets(
+                settings=settings,
+                database=database,
+                storage=object_storage,
+            )
+            deletion_vectors = MilvusVectorIndexAdapter(
+                uri=settings.milvus_uri,
+                token=settings.milvus_token,
+                db_name=settings.milvus_database,
+                timeout_seconds=settings.milvus_timeout_seconds,
+                readiness_timeout_seconds=settings.milvus_readiness_timeout_seconds,
+            )
+            asset_deletion = AssetDeletionExecutor(
+                coordinator=MySqlAssetDeletionCoordinator(
+                    session_factory=database.session_factory,
+                    storage=object_storage,
+                    vectors=deletion_vectors,
+                    provider_artifacts=artifact_targets.artifact_reader,
+                    version_page_size=settings.asset_retention_cleanup_version_page_size,
+                    max_version_pages=settings.asset_retention_cleanup_max_version_pages,
+                    max_versions=settings.asset_retention_cleanup_max_versions,
+                    stable_empty_passes=(settings.asset_retention_cleanup_stable_empty_passes),
+                )
+            )
+            configured_executors[OperationKind.ASSET_DELETION] = AssetCleanupExecutor(
+                uploads=upload_cleanup,
+                assets=asset_deletion,
+            )
+            resources.extend((artifact_targets, deletion_vectors))
         if (
             object_storage is not None
             and settings.index_queue_name in settings.configured_worker_queues

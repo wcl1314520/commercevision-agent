@@ -21,10 +21,12 @@ from commercevision_contracts.events import (
 )
 from commercevision_domain import (
     Asset,
+    AssetDeletionReason,
     AssetState,
     ConcurrencyError,
     InvalidTransitionError,
     NotFoundError,
+    RetentionClass,
     RightsRecord,
     RightsRecordDecision,
     evaluate_current_usability,
@@ -33,6 +35,7 @@ from commercevision_domain import (
 )
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 
+from .asset_deletion import AssetDeletionPolicy, schedule_asset_deletion
 from .asset_idempotency import (
     canonical_hash,
     claim_idempotency,
@@ -79,9 +82,15 @@ class AssetRightsApplicationService:
         self,
         *,
         uow_factory: AssetUnitOfWorkFactory,
+        deletion_policy: AssetDeletionPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
+        self._deletion_policy = deletion_policy or AssetDeletionPolicy(
+            max_attempts=8,
+            max_reconciliation_attempts=20,
+            execution_max_elapsed=timedelta(hours=24),
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def register(
@@ -267,18 +276,28 @@ class AssetRightsApplicationService:
                         expired=True,
                         now=now,
                     )
-                uow.assets.save_asset(asset)
-                uow.outbox.add(
-                    self._event(
-                        asset=asset,
-                        rights_record=record,
-                        change="EXPIRED",
-                        convergence="REMOVE_EXTERNAL_DERIVATIVES",
-                        trace_id=f"rights-expiry:{record.id}",
-                        now=now,
-                        event_type=EventType.ASSET_RIGHTS_EXPIRED,
-                    )
+                rights_event = self._event(
+                    asset=asset,
+                    rights_record=record,
+                    change="EXPIRED",
+                    convergence="REMOVE_EXTERNAL_DERIVATIVES",
+                    trace_id=f"rights-expiry:{record.id}",
+                    now=now,
+                    event_type=EventType.ASSET_RIGHTS_EXPIRED,
                 )
+                if asset.retention_class == RetentionClass.FOUNDATION:
+                    schedule_asset_deletion(
+                        uow=uow,
+                        asset=asset,
+                        reason=AssetDeletionReason.RIGHTS_EXPIRED,
+                        requested_by="rights-expiry-scheduler",
+                        trace_id=f"rights-expiry-delete:{record.id}",
+                        policy=self._deletion_policy,
+                        now=now,
+                    )
+                else:
+                    uow.assets.save_asset(asset)
+                uow.outbox.add(rights_event)
                 uow.audit.add(
                     workspace_id=asset.workspace_id,
                     actor_type="SYSTEM",

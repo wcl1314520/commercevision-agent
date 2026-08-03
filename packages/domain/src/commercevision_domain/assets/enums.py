@@ -36,6 +36,12 @@ class AssetState(StrEnum):
     FAILED = "FAILED"
 
 
+class AssetDeletionReason(StrEnum):
+    RETENTION_EXPIRED = "RETENTION_EXPIRED"
+    RIGHTS_EXPIRED = "RIGHTS_EXPIRED"
+    ADMINISTRATOR_DELETE = "ADMINISTRATOR_DELETE"
+
+
 class AssetObjectState(StrEnum):
     QUARANTINED = "QUARANTINED"
     CONTROLLED = "CONTROLLED"

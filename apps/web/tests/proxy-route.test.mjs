@@ -965,7 +965,7 @@ test("proxies bounded ProductBrief history summaries without full field payloads
   assert.ok(parsed.items.every((item) => !Object.hasOwn(item, "fields")));
 });
 
-test("only the exact asset validation GET path crosses the HTTP proxy seam", async (context) => {
+test("only exact asset status GET paths cross the HTTP proxy seam", async (context) => {
   const originalFetch = globalThis.fetch;
   const upstreamRequests = [];
   globalThis.fetch = async (input, init) => {
@@ -985,6 +985,14 @@ test("only the exact asset validation GET path crosses the HTTP proxy seam", asy
       params: Promise.resolve({ path: ["assets", assetId, "validation"] }),
     },
   );
+  const deletion = await GET(
+    new Request(`http://web.local/api/v1/assets/${assetId}/deletion`, {
+      headers: { "x-workspace-id": "workspace-1" },
+    }),
+    {
+      params: Promise.resolve({ path: ["assets", assetId, "deletion"] }),
+    },
+  );
   const deniedSuffix = await GET(
     new Request(`http://web.local/api/v1/assets/${assetId}/validation/raw`),
     {
@@ -995,11 +1003,16 @@ test("only the exact asset validation GET path crosses the HTTP proxy seam", asy
   );
 
   assert.equal(accepted.status, 200);
+  assert.equal(deletion.status, 200);
   assert.equal(deniedSuffix.status, 404);
   assert.deepEqual(upstreamRequests, [
     {
       method: "GET",
       url: `http://api:8000/api/v1/assets/${assetId}/validation`,
+    },
+    {
+      method: "GET",
+      url: `http://api:8000/api/v1/assets/${assetId}/deletion`,
     },
   ]);
 });

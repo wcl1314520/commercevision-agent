@@ -1074,6 +1074,19 @@ def test_expiry_and_administrator_block_publish_removal_before_return(
             .mappings()
             .one()
         )
+        deletion_tombstone = (
+            connection.execute(
+                text(
+                    "SELECT a.deletion_generation, a.deletion_operation_id, t.reason "
+                    "FROM assets a JOIN asset_deletion_tombstones t "
+                    "ON t.operation_id = a.deletion_operation_id "
+                    "WHERE a.id = :asset_id"
+                ),
+                {"asset_id": expiry_asset_id},
+            )
+            .mappings()
+            .one()
+        )
         expiry_audit = (
             connection.execute(
                 text(
@@ -1090,6 +1103,9 @@ def test_expiry_and_administrator_block_publish_removal_before_return(
     expiry_payload = json.loads(expiry["payload_json"])
     assert expiry_payload["change"] == "EXPIRED"
     assert expiry_payload["required_convergence"] == ("REMOVE_EXTERNAL_DERIVATIVES")
+    assert deletion_tombstone["deletion_generation"] == 1
+    assert deletion_tombstone["deletion_operation_id"] is not None
+    assert deletion_tombstone["reason"] == "RIGHTS_EXPIRED"
     assert expiry_audit["actor_type"] == "SYSTEM"
     assert expiry_audit["actor_id"] == "rights-expiry-scheduler"
     assert json.loads(expiry_audit["metadata_json"])["rights_record_version"] == 1

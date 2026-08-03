@@ -12,6 +12,8 @@ from threading import Event, Thread
 
 from celery import Celery
 from commercevision_application import (
+    AssetDeletionPolicy,
+    AssetRetentionApplicationService,
     AssetRightsApplicationService,
     EventRoutingError,
     OperationRecoveryService,
@@ -212,6 +214,7 @@ class SchedulerState:
     expired_uploads_total: int = 0
     expired_rights_total: int = 0
     activated_rights_total: int = 0
+    expired_assets_total: int = 0
     scanners: dict[str, ScannerStatus] | None = None
 
     @property
@@ -277,8 +280,18 @@ class SchedulerRuntime:
                 ),
             ),
         )
+        deletion_policy = AssetDeletionPolicy(
+            max_attempts=settings.asset_deletion_max_attempts,
+            max_reconciliation_attempts=(settings.asset_deletion_max_reconciliation_attempts),
+            execution_max_elapsed=timedelta(seconds=settings.operation_retry_max_elapsed_seconds),
+        )
         self.rights = AssetRightsApplicationService(
-            uow_factory=lambda: SqlAlchemyAssetUnitOfWork(self.database.session_factory)
+            uow_factory=lambda: SqlAlchemyAssetUnitOfWork(self.database.session_factory),
+            deletion_policy=deletion_policy,
+        )
+        self.asset_retention = AssetRetentionApplicationService(
+            uow_factory=lambda: SqlAlchemyAssetUnitOfWork(self.database.session_factory),
+            policy=deletion_policy,
         )
         self.state = SchedulerState()
         self.orchestrator = IndependentScannerOrchestrator(
@@ -312,6 +325,11 @@ class SchedulerRuntime:
                     "rights_expiry",
                     settings.rights_expiry_scan_interval_seconds,
                     self._expire_rights_once,
+                ),
+                ScannerDefinition(
+                    "asset_retention_expiry",
+                    settings.asset_retention_scan_interval_seconds,
+                    self._expire_assets_once,
                 ),
             ),
             timeout_seconds=settings.scheduler_scanner_timeout_seconds,
@@ -356,6 +374,11 @@ class SchedulerRuntime:
         activated = self.rights.activate_due_once(limit=self.settings.scheduler_batch_size)
         self.state.activated_rights_total += activated
         return activated
+
+    def _expire_assets_once(self) -> int:
+        expired = self.asset_retention.expire_due_once(limit=self.settings.scheduler_batch_size)
+        self.state.expired_assets_total += expired
+        return expired
 
     def close(self) -> None:
         self.database.dispose()

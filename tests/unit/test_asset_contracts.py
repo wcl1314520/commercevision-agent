@@ -1,5 +1,5 @@
 import pytest
-from commercevision_contracts import UploadSessionCreateRequestV1
+from commercevision_contracts import AssetDeleteRequestV1, UploadSessionCreateRequestV1
 from pydantic import ValidationError
 
 
@@ -124,3 +124,11 @@ def test_registration_contract_rejects_unsafe_kind_policy(
 ) -> None:
     with pytest.raises(ValidationError):
         _foundation_request(**overrides)
+
+
+@pytest.mark.parametrize("expected_version", [True, 3.0, "3"])
+def test_administrator_deletion_requires_a_strict_integer_version(
+    expected_version: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        AssetDeleteRequestV1.model_validate({"expected_version": expected_version})

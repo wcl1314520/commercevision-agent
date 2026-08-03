@@ -25,6 +25,8 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 from commercevision_api.main import create_app
 from commercevision_application import (
+    AssetDeletionPolicy,
+    AssetRetentionApplicationService,
     AssetValidationExecutor,
     AssetValidationExecutorPolicy,
     AuthenticatedPrincipal,
@@ -94,8 +96,14 @@ from commercevision_domain import (
     UploadObjectMissingError,
     new_uuid7,
 )
-from commercevision_object_storage import build_object_storage, close_object_storage
+from commercevision_object_storage import (
+    ObjectStorageProviderArtifactTarget,
+    ObjectStorageProviderArtifactTargetRegistry,
+    build_object_storage,
+    close_object_storage,
+)
 from commercevision_persistence import (
+    MySqlAssetDeletionCoordinator,
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyOperatorUnitOfWork,
@@ -1081,6 +1089,39 @@ def _read_headers(
     }
 
 
+def _admin_headers(
+    workspace_id: str = "upload-workspace",
+    *,
+    actor_id: str = "upload-administrator",
+) -> dict[str, str]:
+    encoded = (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "actor_id": actor_id,
+                    "workspace_ids": [workspace_id],
+                    "admin_workspace_ids": [workspace_id],
+                    "system_admin": False,
+                    "issued_at": int(datetime.now(UTC).timestamp()),
+                },
+                separators=(",", ":"),
+            ).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    signature = hmac.new(
+        TRUSTED_SECRET.encode(),
+        f"{TRUSTED_KEY_ID}.{encoded}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "X-Workspace-Id": workspace_id,
+        "X-Actor-Id": actor_id,
+        "X-Trusted-Principal": f"{TRUSTED_KEY_ID}.{encoded}.{signature}",
+    }
+
+
 def _create_session(
     client: TestClient,
     *,
@@ -1450,6 +1491,590 @@ def _overwrite_uploaded_object(
             "sha256": base64.b64encode(hashlib.sha256(content).digest()).decode(),
         },
     )
+
+
+class _UnavailableDeleteStorage:
+    def __init__(self, delegate: ObjectStorage) -> None:
+        self._delegate = delegate
+
+    @property
+    def backend(self):
+        return self._delegate.backend
+
+    def configured_bucket(self, location: StorageLocationClass) -> str:
+        return self._delegate.configured_bucket(location)  # type: ignore[attr-defined]
+
+    def delete_if_match(self, _request: ConditionalDeleteRequest) -> bool:
+        raise StorageUnavailableError("simulated Asset deletion storage outage")
+
+    def __getattr__(self, name: str):
+        return getattr(self._delegate, name)
+
+
+class _MissingVectorIndex:
+    def delete_if_generation(self, _identity: object) -> bool:
+        return False
+
+
+def test_foundation_administrator_deletion_recovers_without_resurrection(
+    integration_database: object,
+    upload_settings: Settings,
+    minio_client: object,
+) -> None:
+    storage = build_object_storage(upload_settings)
+    try:
+        with TestClient(create_app(upload_settings)) as client:
+            upload = _create_session(
+                client,
+                idempotency_key="create-administrator-delete-0001",
+            )
+            _direct_upload(upload)
+            finalized = client.post(
+                f"/api/v1/upload-sessions/{upload['id']}:finalize",
+                headers=_headers("finalize-administrator-delete-0001"),
+                json={"expected_version": upload["version"]},
+            )
+            assert finalized.status_code == 202, finalized.text
+            asset = finalized.json()["asset"]
+
+            accepted = client.request(
+                "DELETE",
+                f"/api/v1/assets/{asset['id']}",
+                headers=_admin_headers(),
+                json={"expected_version": asset["version"]},
+            )
+            assert accepted.status_code == 202, accepted.text
+            deletion = accepted.json()
+            assert deletion["deletion_generation"] == 1
+            assert deletion["deletion_reason"] == "ADMINISTRATOR_DELETE"
+
+            request = _validation_operation_request(
+                integration_database=integration_database,
+                operation_id=deletion["operation"]["id"],
+            )
+            target_registry = ObjectStorageProviderArtifactTargetRegistry(
+                (
+                    ObjectStorageProviderArtifactTarget(
+                        storage=storage,
+                        bucket=upload_settings.object_store_provider_result_bucket,
+                    ),
+                )
+            )
+            unavailable = MySqlAssetDeletionCoordinator(
+                session_factory=integration_database.session_factory,  # type: ignore[attr-defined]
+                storage=_UnavailableDeleteStorage(storage),  # type: ignore[arg-type]
+                vectors=_MissingVectorIndex(),
+                provider_artifacts=target_registry,
+                version_page_size=10,
+                max_version_pages=10,
+                max_versions=100,
+                stable_empty_passes=2,
+            )
+            with pytest.raises(StorageUnavailableError):
+                unavailable.converge(request)
+
+            during_outage = client.get(
+                f"/api/v1/assets/{asset['id']}",
+                headers=_read_headers(),
+            )
+            assert during_outage.status_code == 200
+            assert during_outage.json()["status"] == "DELETING"
+            assert during_outage.json()["current_version"]["object_state"] == ("DELETE_PENDING")
+            deletion_during_outage = client.get(
+                f"/api/v1/assets/{asset['id']}/deletion",
+                headers=_read_headers(),
+            )
+            assert deletion_during_outage.status_code == 200, deletion_during_outage.text
+            progress_body = deletion_during_outage.json()
+            assert progress_body["operation"]["id"] == deletion["operation"]["id"]
+            assert [
+                {
+                    key: item[key]
+                    for key in (
+                        "component",
+                        "state",
+                        "observed_count",
+                        "converged_count",
+                        "error_code",
+                    )
+                }
+                for item in progress_body["progress"]
+            ] == [
+                {
+                    "component": "OBJECTS",
+                    "state": "RETRYABLE_FAILED",
+                    "observed_count": 1,
+                    "converged_count": 0,
+                    "error_code": "OBJECT_DELETE_RETRYABLE",
+                },
+                {
+                    "component": "OPERATIONS",
+                    "state": "PENDING",
+                    "observed_count": 1,
+                    "converged_count": 0,
+                    "error_code": None,
+                },
+            ]
+            assert "bucket" not in json.dumps(progress_body)
+            assert "object_key" not in json.dumps(progress_body)
+
+            coordinator = MySqlAssetDeletionCoordinator(
+                session_factory=integration_database.session_factory,  # type: ignore[attr-defined]
+                storage=storage,
+                vectors=_MissingVectorIndex(),
+                provider_artifacts=target_registry,
+                version_page_size=10,
+                max_version_pages=10,
+                max_versions=100,
+                stable_empty_passes=2,
+            )
+            completed = coordinator.converge(request)
+            repeated = coordinator.converge(request)
+            assert repeated == completed
+
+            final_asset = client.get(
+                f"/api/v1/assets/{asset['id']}",
+                headers=_read_headers(),
+            )
+            assert final_asset.status_code == 200
+            assert final_asset.json()["status"] == "DELETED"
+            assert final_asset.json()["current_version"]["object_state"] == "DELETED"
+            completed_progress = client.get(
+                f"/api/v1/assets/{asset['id']}/deletion",
+                headers=_read_headers(),
+            )
+            assert completed_progress.status_code == 200
+            completed_body = completed_progress.json()
+            assert completed_body["asset_state"] == "DELETED"
+            assert completed_body["completed_at"] is not None
+            assert {item["component"] for item in completed_body["progress"]} == {
+                "CACHES",
+                "CHECKPOINTS",
+                "OBJECTS",
+                "OPERATIONS",
+                "PRODUCT_BRIEFS",
+                "PROVIDER_ARTIFACTS",
+                "QUARANTINE",
+                "RETRIEVAL_RUNS",
+                "SEARCH_DOCUMENTS",
+                "TEMPORARY_REFERENCES",
+                "VECTORS",
+            }
+
+        with integration_database.engine.connect() as connection:  # type: ignore[attr-defined]
+            completed_events = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events "
+                    "WHERE aggregate_id = :asset_id AND event_type = 'asset.delete.completed'"
+                ),
+                {"asset_id": asset["id"]},
+            ).scalar_one()
+            completed_facts = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM asset_deletion_progress "
+                    "WHERE component = 'OPERATIONS' AND state = 'CONVERGED'"
+                )
+            ).scalar_one()
+        assert completed_events == 1
+        assert completed_facts == 1
+    finally:
+        close_object_storage(storage)
+
+
+def test_task_asset_scanner_tombstones_at_the_exact_mysql_boundary(
+    integration_database: object,
+    upload_settings: Settings,
+    minio_client: object,
+) -> None:
+    del minio_client
+    with TestClient(create_app(upload_settings)) as client:
+        workflow = client.post(
+            "/api/v1/workflows",
+            headers=_headers("create-task-deletion-boundary-workflow-0001"),
+            json={
+                "workflow_type": "FIXTURE_IMAGE_GENERATION",
+                "input_data": {"fixture_config": {"count": 1}},
+                "retention_hours": 72,
+            },
+        )
+        assert workflow.status_code == 202, workflow.text
+        product = client.post(
+            "/api/v1/products",
+            headers=_headers("create-task-deletion-boundary-product-0001"),
+            json=_catalog_payload(
+                external_id="TASK-DELETION-BOUNDARY-001",
+                title="Task deletion payload fixture",
+            ),
+        )
+        assert product.status_code == 201, product.text
+        upload = _create_session(
+            client,
+            idempotency_key="create-task-deletion-boundary-upload-0001",
+            retention_class="TASK",
+            workflow_id=workflow.json()["id"],
+        )
+        _direct_upload(upload)
+        finalized = client.post(
+            f"/api/v1/upload-sessions/{upload['id']}:finalize",
+            headers=_headers("finalize-task-deletion-boundary-upload-0001"),
+            json={"expected_version": upload["version"]},
+        )
+        assert finalized.status_code == 202, finalized.text
+        asset_id = finalized.json()["asset"]["id"]
+
+    with integration_database.engine.begin() as connection:  # type: ignore[attr-defined]
+        connection.execute(
+            text("UPDATE assets SET retention_deadline = UTC_TIMESTAMP(6) WHERE id = :asset_id"),
+            {"asset_id": asset_id},
+        )
+    service = AssetRetentionApplicationService(
+        uow_factory=lambda: SqlAlchemyAssetUnitOfWork(
+            integration_database.session_factory  # type: ignore[attr-defined]
+        ),
+        policy=AssetDeletionPolicy(
+            max_attempts=3,
+            max_reconciliation_attempts=5,
+            execution_max_elapsed=timedelta(hours=1),
+        ),
+        clock=lambda: datetime(2000, 1, 1, tzinfo=UTC),
+    )
+
+    assert service.expire_due_once(limit=10) == 1
+    assert service.expire_due_once(limit=10) == 0
+    with integration_database.engine.connect() as connection:  # type: ignore[attr-defined]
+        fact = (
+            connection.execute(
+                text(
+                    "SELECT a.status, a.deletion_generation, t.reason, o.target_version, "
+                    "o.id AS operation_id "
+                    "FROM assets a "
+                    "JOIN asset_deletion_tombstones t ON t.operation_id = a.deletion_operation_id "
+                    "JOIN durable_operations o ON o.id = a.deletion_operation_id "
+                    "WHERE a.id = :asset_id"
+                ),
+                {"asset_id": asset_id},
+            )
+            .mappings()
+            .one()
+        )
+    assert {
+        key: fact[key] for key in ("status", "deletion_generation", "reason", "target_version")
+    } == {
+        "status": "DELETING",
+        "deletion_generation": 1,
+        "reason": "RETENTION_EXPIRED",
+        "target_version": 1,
+    }
+
+    run_id = new_uuid7()
+    product_brief_id = new_uuid7()
+    product_brief_version_id = new_uuid7()
+    product_brief_field_id = new_uuid7()
+    product_brief_evidence_id = new_uuid7()
+    rights_record_id = new_uuid7()
+    collection_id = new_uuid7()
+    embedding_record_id = new_uuid7()
+    search_document_id = new_uuid7()
+    checkpoint_id = "checkpoint-task-retention"
+    workflow_id = workflow.json()["id"]
+    with integration_database.engine.begin() as connection:  # type: ignore[attr-defined]
+        connection.execute(
+            text(
+                "INSERT INTO retrieval_runs "
+                "(id, workspace_id, requester_id, query_json, query_sha256, "
+                "retrieval_policy_version, complete_hybrid, degradations_json, "
+                "eligible_asset_version_count, fused_candidate_count, "
+                "final_authorized_candidate_count, latency_ms, created_at, expires_at) "
+                "VALUES (:id, 'upload-workspace', 'retention-test', JSON_OBJECT(), :hash, "
+                "'retrieval-v1', 1, JSON_ARRAY(), 1, 1, 1, 1, UTC_TIMESTAMP(6), "
+                "DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR))"
+            ),
+            {"id": run_id, "hash": "d" * 64},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO retrieval_results "
+                "(retrieval_run_id, result_rank, workspace_id, asset_id, asset_version_id, "
+                "rights_record_id, rights_record_version, brand_profile_version, channels_json, "
+                "score_json, reason, decided_at, preview_token_sha256, preview_expires_at, "
+                "created_at) VALUES (:run_id, 1, 'upload-workspace', :asset_id, "
+                ":asset_version_id, :rights_id, 1, NULL, JSON_ARRAY(), JSON_OBJECT(), "
+                "'retention', UTC_TIMESTAMP(6), :token_hash, "
+                "DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "run_id": run_id,
+                "asset_id": asset_id,
+                "asset_version_id": finalized.json()["asset"]["current_version_id"],
+                "rights_id": new_uuid7(),
+                "token_hash": "e" * 64,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO rights_records "
+                "(id, workspace_id, asset_id, asset_version_id, version_number, decision, "
+                "owner_reference, source, license_reference, derivative_allowed, "
+                "public_demo_allowed, evidence_reference, terms_sha256, valid_from, "
+                "valid_until, perpetual, supersedes_record_id, created_by, created_at, "
+                "permissions_sealed_at) VALUES (:rights_id, 'upload-workspace', :asset_id, "
+                ":asset_version_id, 1, 'GRANT', 'retention-owner', 'retention-source', "
+                "'retention-license', 1, 0, 'retention-evidence', :terms_hash, "
+                "UTC_TIMESTAMP(6), NULL, 1, NULL, 'retention-test', UTC_TIMESTAMP(6), "
+                "UTC_TIMESTAMP(6))"
+            ),
+            {
+                "rights_id": rights_record_id,
+                "asset_id": asset_id,
+                "asset_version_id": finalized.json()["asset"]["current_version_id"],
+                "terms_hash": "a" * 64,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO collection_registry "
+                "(id, logical_key, spec_hash, physical_name, model_family, model_id, "
+                "pinned_revision, dimension, vector_kind, schema_version, index_spec_version, "
+                "dynamic_fields_enabled, state, is_read_enabled, is_write_enabled, "
+                "validation_summary_json, version, created_at, updated_at) VALUES "
+                "(:collection_id, :logical_key, :spec_hash, :physical_name, 'clip', 'clip-v1', "
+                "'revision-1', 2, 'IMAGE', 1, 'index-v1', 0, 'ACTIVE', 1, 1, "
+                "JSON_OBJECT(), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "collection_id": collection_id,
+                "logical_key": f"retention/{collection_id}",
+                "spec_hash": "b" * 64,
+                "physical_name": f"retention_{collection_id.replace('-', '_')}",
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO embedding_records "
+                "(id, workspace_id, asset_id, asset_version_id, asset_version_number, "
+                "rights_record_id, rights_record_version, collection_id, operation_id, "
+                "vector_kind, provider, model_family, model_id, pinned_revision, "
+                "model_configuration_version, preprocessing_version, dimension, input_hash, "
+                "embedding_spec_hash, product_brief_version_id, controlled_text_sha256, "
+                "milvus_primary_key, state, write_generation, provider_request_id, actual_model, "
+                "indexed_at, stale_at, stale_reason, version, created_at, updated_at) VALUES "
+                "(:embedding_id, 'upload-workspace', :asset_id, :asset_version_id, 1, "
+                ":rights_id, 1, :collection_id, :operation_id, 'IMAGE', 'local', 'clip', "
+                "'clip-v1', 'revision-1', 'config-v1', 'pre-v1', 2, :input_hash, :spec_hash, "
+                "NULL, NULL, :milvus_key, 'INDEXED', 1, NULL, 'clip-v1', UTC_TIMESTAMP(6), "
+                "NULL, NULL, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "embedding_id": embedding_record_id,
+                "asset_id": asset_id,
+                "asset_version_id": finalized.json()["asset"]["current_version_id"],
+                "rights_id": rights_record_id,
+                "collection_id": collection_id,
+                "operation_id": fact["operation_id"],
+                "input_hash": "c" * 64,
+                "spec_hash": "b" * 64,
+                "milvus_key": embedding_record_id,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_checkpoints "
+                "(thread_id, checkpoint_namespace, checkpoint_id, parent_checkpoint_id, "
+                "workflow_id, workflow_version, run_id, checkpoint_type, checkpoint_blob, "
+                "metadata_type, metadata_blob, metadata_json, created_at, expires_at) "
+                "VALUES (:workflow_id, '', :checkpoint_id, NULL, :workflow_id, 1, NULL, "
+                "'json', X'7B7D', 'json', X'7B7D', JSON_OBJECT(), UTC_TIMESTAMP(6), "
+                "DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR))"
+            ),
+            {"workflow_id": workflow_id, "checkpoint_id": checkpoint_id},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO product_briefs "
+                "(id, workspace_id, workflow_id, product_id, operation_id, created_by, "
+                "state, current_version_id, confirmed_version_id, version, retention_class, "
+                "retention_deadline, created_at, updated_at) VALUES "
+                "(:brief_id, 'upload-workspace', :workflow_id, :product_id, :operation_id, "
+                "'retention-test', 'DRAFT', NULL, NULL, 1, 'TASK', UTC_TIMESTAMP(6), "
+                "UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "brief_id": product_brief_id,
+                "workflow_id": workflow_id,
+                "product_id": product.json()["id"],
+                "operation_id": fact["operation_id"],
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO product_brief_versions "
+                "(id, workspace_id, product_brief_id, version_number, supersedes_version_id, "
+                "category, common_schema_version, category_schema_version, payload_sha256, "
+                "changed_paths_json, confirmation_required, unresolved_field_count, "
+                "review_policy_version, source, prompt_version, provider_call_id, actor_id, "
+                "revision_reason, retention_class, retention_deadline, created_at) VALUES "
+                "(:version_id, 'upload-workspace', :brief_id, 1, NULL, 'BEAUTY', 'common-v1', "
+                "'beauty-v1', :payload_hash, JSON_ARRAY('/identity/name'), 1, 0, "
+                "'review-v1', 'HUMAN', NULL, NULL, 'retention-test', 'fixture', 'TASK', "
+                "UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "version_id": product_brief_version_id,
+                "brief_id": product_brief_id,
+                "payload_hash": "f" * 64,
+            },
+        )
+        connection.execute(
+            text("UPDATE product_briefs SET current_version_id = :version_id WHERE id = :brief_id"),
+            {"version_id": product_brief_version_id, "brief_id": product_brief_id},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO product_brief_fields "
+                "(id, workspace_id, product_brief_id, product_brief_version_id, path, "
+                "value_json, confidence, source, conflict, review_required, `sensitive`, "
+                "review_reasons_json, created_at) VALUES "
+                "(:field_id, 'upload-workspace', :brief_id, :version_id, '/identity/name', "
+                "JSON_OBJECT('value', 'must be erased'), 1, 'HUMAN', 'NONE', 0, 1, "
+                "JSON_ARRAY(), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "field_id": product_brief_field_id,
+                "brief_id": product_brief_id,
+                "version_id": product_brief_version_id,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO product_brief_evidence "
+                "(id, workspace_id, product_brief_id, product_brief_version_id, field_id, "
+                "source_asset_version_id, kind, reference, region_json, excerpt_sha256, "
+                "created_at) VALUES (:evidence_id, 'upload-workspace', :brief_id, :version_id, "
+                ":field_id, :asset_version_id, 'HUMAN_NOTE', 'must be erased', NULL, NULL, "
+                "UTC_TIMESTAMP(6))"
+            ),
+            {
+                "evidence_id": product_brief_evidence_id,
+                "brief_id": product_brief_id,
+                "version_id": product_brief_version_id,
+                "field_id": product_brief_field_id,
+                "asset_version_id": finalized.json()["asset"]["current_version_id"],
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO product_search_documents "
+                "(id, workspace_id, product_id, product_brief_id, product_brief_version_id, "
+                "asset_id, asset_version_id, rights_record_id, rights_record_version, "
+                "embedding_record_id, input_hash, controlled_text_sha256, "
+                "preprocessing_version, title, labels, ocr_summary, product_brief_summary, "
+                "approved_notes, retention_class, retention_deadline, state, version, "
+                "created_at, updated_at) VALUES (:document_id, 'upload-workspace', :product_id, "
+                ":brief_id, :brief_version_id, :asset_id, :asset_version_id, :rights_id, 1, "
+                ":embedding_id, :input_hash, :controlled_hash, 'pre-v1', 'must be erased', "
+                "'must be erased', 'must be erased', 'must be erased', 'must be erased', "
+                "'TASK', UTC_TIMESTAMP(6), 'INDEXED', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"
+            ),
+            {
+                "document_id": search_document_id,
+                "product_id": product.json()["id"],
+                "brief_id": product_brief_id,
+                "brief_version_id": product_brief_version_id,
+                "asset_id": asset_id,
+                "asset_version_id": finalized.json()["asset"]["current_version_id"],
+                "rights_id": rights_record_id,
+                "embedding_id": embedding_record_id,
+                "input_hash": "d" * 64,
+                "controlled_hash": "e" * 64,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_checkpoint_writes "
+                "(thread_id, checkpoint_namespace, checkpoint_id, task_id, write_index, "
+                "task_path, channel, value_type, value_blob, created_at) "
+                "VALUES (:workflow_id, '', :checkpoint_id, 'task', 0, '', 'channel', "
+                "'json', X'7B7D', UTC_TIMESTAMP(6))"
+            ),
+            {"workflow_id": workflow_id, "checkpoint_id": checkpoint_id},
+        )
+
+    storage = build_object_storage(upload_settings)
+    try:
+        provider_targets = ObjectStorageProviderArtifactTargetRegistry(
+            (
+                ObjectStorageProviderArtifactTarget(
+                    storage=storage,
+                    bucket=upload_settings.object_store_provider_result_bucket,
+                ),
+            )
+        )
+        coordinator = MySqlAssetDeletionCoordinator(
+            session_factory=integration_database.session_factory,  # type: ignore[attr-defined]
+            storage=storage,
+            vectors=_MissingVectorIndex(),
+            provider_artifacts=provider_targets,
+            version_page_size=10,
+            max_version_pages=10,
+            max_versions=100,
+            stable_empty_passes=2,
+        )
+        coordinator.converge(
+            _validation_operation_request(
+                integration_database=integration_database,
+                operation_id=fact["operation_id"],
+            )
+        )
+    finally:
+        close_object_storage(storage)
+
+    with integration_database.engine.connect() as connection:  # type: ignore[attr-defined]
+        cleanup = (
+            connection.execute(
+                text(
+                    "SELECT (SELECT status FROM assets WHERE id = :asset_id) AS asset_status, "
+                    "(SELECT COUNT(*) FROM retrieval_runs WHERE id = :run_id) AS runs, "
+                    "(SELECT COUNT(*) FROM agent_checkpoints WHERE workflow_id = :workflow_id) "
+                    "AS checkpoints, "
+                    "(SELECT COUNT(*) FROM agent_checkpoint_writes WHERE thread_id = :workflow_id) "
+                    "AS checkpoint_writes, "
+                    "(SELECT COUNT(*) FROM product_brief_fields "
+                    "WHERE product_brief_id = :brief_id) AS product_brief_fields, "
+                    "(SELECT COUNT(*) FROM product_brief_evidence "
+                    "WHERE product_brief_id = :brief_id) AS product_brief_evidence, "
+                    "(SELECT converged_count FROM asset_deletion_progress "
+                    "WHERE workspace_id = 'upload-workspace' AND component = 'PRODUCT_BRIEFS' "
+                    "ORDER BY created_at DESC, id DESC LIMIT 1) AS product_brief_progress, "
+                    "(SELECT converged_count FROM asset_deletion_progress "
+                    "WHERE workspace_id = 'upload-workspace' "
+                    "AND component = 'TEMPORARY_REFERENCES' "
+                    "ORDER BY created_at DESC, id DESC LIMIT 1) AS temporary_reference_progress, "
+                    "(SELECT CONCAT_WS('|', state, title, labels, ocr_summary, "
+                    "product_brief_summary, approved_notes) FROM product_search_documents "
+                    "WHERE id = :document_id) AS search_document"
+                ),
+                {
+                    "asset_id": asset_id,
+                    "run_id": run_id,
+                    "workflow_id": workflow_id,
+                    "brief_id": product_brief_id,
+                    "document_id": search_document_id,
+                },
+            )
+            .mappings()
+            .one()
+        )
+    assert cleanup == {
+        "asset_status": "DELETED",
+        "runs": 0,
+        "checkpoints": 0,
+        "checkpoint_writes": 0,
+        "product_brief_fields": 0,
+        "product_brief_evidence": 0,
+        "product_brief_progress": 2,
+        "temporary_reference_progress": 1,
+        "search_document": "DELETED|||||",
+    }
 
 
 @pytest.mark.parametrize(

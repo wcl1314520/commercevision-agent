@@ -1,5 +1,7 @@
 import type {
   AssetIndexStatusResponseV1,
+  AssetDeleteResponseV1,
+  AssetDeletionStatusResponseV1,
   AssetResponseV1,
   AssetValidationStatusResponseV1,
   ErrorResponse,
@@ -178,6 +180,27 @@ export class AssetApi {
   getAsset(assetId: string): Promise<AssetResponseV1> {
     return this.request<AssetResponseV1>(
       `/api/v1/assets/${encodeURIComponent(assetId)}`,
+    );
+  }
+
+  deleteAsset(
+    assetId: string,
+    expectedVersion: number,
+    idempotencyKey: string,
+  ): Promise<AssetDeleteResponseV1> {
+    return this.request<AssetDeleteResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ expected_version: expectedVersion }),
+      },
+      idempotencyKey,
+    );
+  }
+
+  getAssetDeletion(assetId: string): Promise<AssetDeletionStatusResponseV1> {
+    return this.request<AssetDeletionStatusResponseV1>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/deletion`,
     );
   }
 

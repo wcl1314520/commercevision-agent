@@ -1,6 +1,10 @@
 """Public contracts shared by all CommerceVision services."""
 
 from .assets import (
+    AssetDeleteRequestV1,
+    AssetDeleteResponseV1,
+    AssetDeletionProgressItemV1,
+    AssetDeletionStatusResponseV1,
     AssetResponseV1,
     AssetValidationOperationResponseV1,
     AssetValidationStageResponseV1,
@@ -154,6 +158,10 @@ __all__ = [
     "AssetsSearchInputV1",
     "AssetsSearchOutputV1",
     "AssetResponseV1",
+    "AssetDeleteRequestV1",
+    "AssetDeleteResponseV1",
+    "AssetDeletionProgressItemV1",
+    "AssetDeletionStatusResponseV1",
     "AssetIndexStatusResponseV1",
     "AssetAdministratorBlockRequestV1",
     "AssetValidationOperationResponseV1",

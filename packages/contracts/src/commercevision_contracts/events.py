@@ -11,7 +11,9 @@ from commercevision_domain import (
     UUID_PATTERN,
     ApprovalDecision,
     ApprovalType,
+    AssetDeletionReason,
     OperationKind,
+    RetentionClass,
     WorkflowStatus,
     canonicalize_uuid,
 )
@@ -290,19 +292,44 @@ class UploadCleanupReason(StrEnum):
 class AssetDeleteRequestedPayload(CompatibleEventPayload):
     operation_id: str = Field(min_length=1, max_length=36)
     workspace_id: WorkspaceId
-    target_type: Literal["UPLOAD_SESSION"]
+    target_type: Literal["UPLOAD_SESSION", "ASSET"]
     target_id: str = Field(min_length=1, max_length=36)
     target_version: int = Field(ge=1)
-    reason: UploadCleanupReason
+    reason: UploadCleanupReason | AssetDeletionReason
+    asset_version_id: str | None = Field(default=None, pattern=UUID_PATTERN)
+    deletion_generation: int | None = Field(default=None, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_target_identity(self) -> AssetDeleteRequestedPayload:
+        if self.target_type == "UPLOAD_SESSION":
+            if not isinstance(self.reason, UploadCleanupReason):
+                raise ValueError("Upload Session cleanup requires an upload cleanup reason")
+            if self.asset_version_id is not None or self.deletion_generation is not None:
+                raise ValueError("Upload Session cleanup must not carry Asset deletion identity")
+            return self
+        if not isinstance(self.reason, AssetDeletionReason):
+            raise ValueError("Asset cleanup requires an Asset deletion reason")
+        if (
+            self.asset_version_id is None
+            or self.deletion_generation is None
+            or self.deletion_generation != self.target_version
+        ):
+            raise ValueError("Asset cleanup requires one exact deletion generation and version")
+        if (
+            canonicalize_uuid(self.target_id) != self.target_id
+            or canonicalize_uuid(self.asset_version_id) != self.asset_version_id
+        ):
+            raise ValueError("Asset cleanup identities must be canonical lowercase UUIDs")
+        return self
 
 
 class AssetDeleteCompletedPayload(CompatibleEventPayload):
-    """Foundation Asset tombstone convergence observed by downstream modules."""
+    """Exact Asset tombstone convergence observed by downstream modules."""
 
     workspace_id: WorkspaceId
     asset_id: str = Field(pattern=UUID_PATTERN)
     asset_version_id: str = Field(pattern=UUID_PATTERN)
-    retention_class: Literal["FOUNDATION"]
+    retention_class: RetentionClass
     deletion_generation: int = Field(ge=1, strict=True)
 
     @field_validator("asset_id", "asset_version_id")

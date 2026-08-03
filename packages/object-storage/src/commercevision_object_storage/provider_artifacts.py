@@ -7,7 +7,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from commercevision_contracts.object_storage import (
+    ConditionalDeleteRequest,
     ConditionalWriteRequest,
+    DeleteMarkerRequest,
     ObjectReference,
     ObjectStat,
     ObjectStorage,
@@ -122,6 +124,45 @@ class ObjectStorageProviderArtifactTargetRegistry:
                 "provider artifact reconciliation resolved a different physical target"
             )
         return stat
+
+    def delete_if_match(
+        self,
+        target: PreparedProviderArtifact,
+        reference: ObjectReference,
+        *,
+        expected_etag: str,
+    ) -> bool:
+        registered = self._resolve(target)
+        self._assert_reference(target, reference)
+        return registered.storage.delete_if_match(
+            ConditionalDeleteRequest(
+                reference=reference,
+                expected_etag=expected_etag,
+            )
+        )
+
+    def delete_marker(
+        self,
+        target: PreparedProviderArtifact,
+        reference: ObjectReference,
+    ) -> bool:
+        registered = self._resolve(target)
+        self._assert_reference(target, reference)
+        return registered.storage.delete_marker(DeleteMarkerRequest(reference=reference))
+
+    @staticmethod
+    def _assert_reference(
+        target: PreparedProviderArtifact,
+        reference: ObjectReference,
+    ) -> None:
+        if (
+            reference.location != target.location
+            or reference.key != target.key
+            or reference.version_id is None
+        ):
+            raise StoragePreconditionError(
+                "provider artifact deletion reference changed from its frozen target"
+            )
 
     def _resolve(
         self,

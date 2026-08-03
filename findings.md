@@ -611,3 +611,18 @@
 - 短期对象引用不能因浏览器先下载为 Blob 而被无意延长。Retrieval Explorer 在新检索开始时取消
   旧预览请求，并在引用到期、替换或卸载时撤销 Blob URL；同时只接受 JPEG/PNG/WebP 与 10 MiB
   上限，签名 URL 和 opaque token 均不进入持久化状态。
+
+## Ticket 13 删除收敛边界
+
+- 删除墓碑是一次不可变业务意图，不是对象存储删除结果。Asset 必须先在 MySQL 中停止可用，并把
+  Operation、目标 Asset Version、deletion generation、原因和 tombstone 原子绑定；所有外部清理只
+  消费该身份，不能从 latest object 或事件到达顺序推断目标。
+- Provider Artifact 的 `STORED` 与 `INTENDED/UNKNOWN` 需要不同证明：前者使用 ledger 的精确 Version ID
+  与 ETag，后者必须穷尽冻结 exact key 的所有版本和 delete marker。一次非空末页不能计作稳定空扫描；
+  list 后 stat 已缺失属于幂等成功，而身份/ETag 冲突必须失败关闭。
+- 清理完成不是“已经调用过删除 API”，而是 MySQL 完成事务在锁内确认所有对象、向量、搜索文档、
+  ProductBrief payload、检索结果、checkpoint 与 Provider ledger 行均已收敛。事务前后出现的晚到事实使
+  当前尝试回滚并重试，Asset 继续不可用。
+- Retention scheduler 的有界性同时依赖查询形状与索引形状。`LIMIT + SKIP LOCKED` 不能弥补以范围或
+  `NOT IN` 字段开头的索引；Task 到期扫描使用 retention class、空 deletion operation、deadline、id
+  的等值前缀/范围/稳定排序索引，并由独立 scanner health 隔离故障。

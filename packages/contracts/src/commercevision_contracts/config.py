@@ -538,6 +538,17 @@ class Settings(BaseSettings):
         gt=0.5,
         le=300,
     )
+    asset_retention_scan_interval_seconds: float = Field(
+        default=10.0,
+        gt=0.5,
+        le=300,
+    )
+    asset_deletion_max_attempts: int = Field(default=50, ge=2, le=2000)
+    asset_deletion_max_reconciliation_attempts: int = Field(
+        default=100,
+        ge=2,
+        le=2000,
+    )
     scheduler_scanner_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
     operation_retry_initial_seconds: float = Field(default=1.0, gt=0, le=3600)
     operation_retry_max_seconds: float = Field(default=300.0, gt=0, le=86400)

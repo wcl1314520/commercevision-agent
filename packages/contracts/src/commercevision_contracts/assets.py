@@ -7,6 +7,7 @@ from typing import Literal
 
 from commercevision_domain import (
     UUID_PATTERN,
+    AssetDeletionReason,
     AssetKind,
     AssetObjectState,
     AssetState,
@@ -196,10 +197,27 @@ class AssetResponseV1(BaseModel):
     current_version_id: str
     current_rights_record_id: str | None
     retention_deadline: datetime | None
+    deletion_generation: int = Field(default=0, ge=0)
+    deletion_operation_id: str | None = None
+    deletion_reason: AssetDeletionReason | None = None
+    deletion_requested_at: datetime | None = None
+    deletion_completed_at: datetime | None = None
     version: int
     created_at: datetime
     updated_at: datetime
     current_version: AssetVersionResponseV1 | None = None
+
+
+class AssetDeleteRequestV1(AssetContractV1):
+    expected_version: int = Field(ge=1, strict=True)
+
+
+class AssetDeleteResponseV1(AssetContractV1):
+    asset_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_id: str = Field(pattern=UUID_PATTERN)
+    deletion_generation: int = Field(ge=1)
+    deletion_reason: AssetDeletionReason
+    operation: ValidationOperationSummaryV1
 
 
 class ValidationOperationSummaryV1(BaseModel):
@@ -208,6 +226,39 @@ class ValidationOperationSummaryV1(BaseModel):
     target_id: str
     target_version: int
     version: int
+
+
+class AssetDeletionProgressItemV1(AssetContractV1):
+    component: Literal[
+        "OBJECTS",
+        "VECTORS",
+        "SEARCH_DOCUMENTS",
+        "PROVIDER_ARTIFACTS",
+        "TEMPORARY_REFERENCES",
+        "CACHES",
+        "PRODUCT_BRIEFS",
+        "RETRIEVAL_RUNS",
+        "CHECKPOINTS",
+        "QUARANTINE",
+        "OPERATIONS",
+    ]
+    state: Literal["PENDING", "CONVERGED", "RETRYABLE_FAILED"]
+    observed_count: int = Field(ge=0)
+    converged_count: int = Field(ge=0)
+    error_code: str | None = Field(default=None, max_length=64)
+    observed_at: datetime
+
+
+class AssetDeletionStatusResponseV1(AssetContractV1):
+    asset_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_id: str = Field(pattern=UUID_PATTERN)
+    asset_state: AssetState
+    deletion_generation: int = Field(ge=1)
+    deletion_reason: AssetDeletionReason
+    requested_at: datetime
+    completed_at: datetime | None
+    operation: ValidationOperationSummaryV1
+    progress: list[AssetDeletionProgressItemV1]
 
 
 class UploadFinalizeResponseV1(BaseModel):

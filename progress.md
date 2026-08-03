@@ -1185,3 +1185,52 @@
   `setuptools 83`，Python 审计无已知漏洞；短暂尝试的 2.5 组合已完全撤销且不在最终 diff。
 - 安全、正确性、性能、可维护性与简化五轴终审未发现剩余阻断项。Ticket 12 只待形成单一提交、
   推送并等待精确 GitHub Actions 全绿；在此之前 Ticket 13 保持未启动。
+
+# 2026-08-04 Ticket 12 发布与 Ticket 13 启动
+
+- Ticket 12 单一提交 `ff9c4b3714ef4d3d65c27637775dde4eddfb0fa8` 已推送，精确 GitHub
+  Actions `30832780556` 全绿：Python checks、Web checks、Container builds、Security/Gitleaks
+  与 SBOM 均成功；本地 `main` 与 `origin/main` 一致且工作树干净。
+- Ticket 13 已按既定工单和 TDD 接缝启动，不重开 Phase 2 规划。已重读 `CONTEXT.md`、
+  `ADR-006`、Ticket 13 与规格中的 Retention/Deletion、Durable Events、Observability 和测试决策。
+- 初始代码勘探确认可复用边界：上传隔离区已有 Durable cleanup，任务资产验证期已有精确对象清理，
+  Rights expiry 已有 `SKIP LOCKED` 扫描，IMAGE/PRODUCT_FUSED 已有 generation-fenced vector delete；
+  Ticket 13 的主要缺口是把它们收敛为资产级 tombstone/deletion generation 与完整 payload cleanup。
+- 路径探测曾误用不存在的 `docs/adr` 和 `docs/phase-2-implementation-spec.md`；仓库权威路径分别是
+  `docs/07-decisions` 与 `.scratch/phase-2-assets-retrieval/spec.md`。两次失败均无文件变更，后续命令
+  已固定使用真实路径。
+
+# 2026-08-04 Ticket 13 Retention、删除与一致性对账本地收口
+
+- Asset 聚合新增不可逆 deletion generation、精确 Asset Version fence、删除原因与完成时间；管理员
+  删除、Foundation Rights expiry、Task exact deadline 均在一个 MySQL UoW 内先停止可用性，再写入
+  Durable Operation、不可变 tombstone 与 typed Outbox command。重复请求复用同一 Operation，旧代次
+  或旧 Asset Version 无法完成后续删除。
+- 清理协调器以 MySQL 为权威，覆盖全部 Asset Versions/object versions、IMAGE/PRODUCT_FUSED vectors、
+  Search Documents 文本、Task ProductBrief fields/evidence、Retained Retrieval Runs、短期 preview token、
+  Agent checkpoints、quarantine 与 cache 进度；完成前再次查询晚到事实，发现任何未收敛数据即回滚并
+  进入 Durable retry，MySQL 全程保持不可用且不会复活。
+- ProductBrief Provider Artifact ledger 保持不可变。`STORED` 行只按冻结的 Version ID + ETag 条件删除；
+  `INTENDED/UNKNOWN` 行按精确 key 有界分页，删除每个 object version/delete marker，并要求两次真实稳定
+  空扫描。列举后对象已被并发重试删除被视为收敛成功；每行收敛证据与组件进度均为 append-only。
+- 深模块审查将 Provider 版本收敛与 Task payload 清理从 MySQL 协调器拆出，协调器只保留代际校验、事务
+  栅栏和步骤编排；到期扫描增加 `(retention_class, deletion_operation_id, retention_deadline, id)` 索引，
+  使用 MySQL `UTC_TIMESTAMP(6)`、`LIMIT`、确定性顺序与 `SKIP LOCKED`，并暴露独立 scanner health。
+- HTTP 新增仅管理员可调用的 Foundation 删除入口和 Workspace 授权的删除状态投影；Web BFF 只放行精确
+  路径，工作台轮询持久化组件进度且不显示 bucket/key/version/ETag。管理员并发版本字段已固定为 strict
+  integer，拒绝 bool、float 与 string coercion。
+- 本地证据：Python unit `1015 passed`（随后新增严格版本/Provider 竞态/schema tests 均独立通过）；
+  Foundation 管理删除、Task 全版本清理、Rights expiry 与新 migration 的真实 MySQL/MinIO 聚焦矩阵
+  `4 passed`，迁移/schema 复验 `3 passed`。全仓 `pytest` 运行 15 分钟无失败输出后受工具上限终止，
+  不计为通过，最终完整矩阵由本票推送后的 GitHub Actions 提供。
+- Ruff format/check、Python 依赖审计、OpenAPI 幂等导出、Web generated types、ESLint、TypeScript、BFF
+  `22 passed`、Web unit `191 passed`、production build、Phase 0 verification、Compose config 与 Alembic
+  schema drift 全部通过。审计新发现的 `brace-expansion <5.0.9` 与 `postcss <=8.5.22` 发布阻断已用最小
+  workspace override 升至安全版本，锁文件重建后 `pnpm audit --audit-level=moderate` 无已知漏洞。
+- 扫描索引加入同一未提交 revision 后，本地测试库仍是旧版 `e1b7c4d9a263` 物理 schema；MySQL 非事务
+  downgrade 在缺失新索引处停止并留下部分 DDL。确认无测试进程且只读核验数据库名精确为
+  `commercevision_test` 后，重建该可再生测试库并从首个 migration 完整升级；fresh head、schema drift、
+  正式 downgrade/re-upgrade roundtrip 与 Ticket 13 migration contract 均通过（`2 passed`）。
+- Standards/Spec 与安全、正确性、性能、可维护性、简化五轴本地终审已完成；Provider 并发缺失竞态、
+  稳定空扫描误计数、管理员删除后的二次数据库读取、协调器职责过宽、到期扫描索引和严格版本解析等
+  审查发现均已按 TDD 修复，当前无剩余 P0/P1/P2/Required。只待单一提交、推送与远端 CI 全绿。

@@ -859,6 +859,257 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Delete Foundation Asset",
+        "operationId": "delete_foundation_asset_api_v1_assets__asset_id__delete",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Asset Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetDeleteRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDeleteResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Rights argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace authorization required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Asset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rights request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rights version, state, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assets/{asset_id}/deletion": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Get Asset Deletion",
+        "operationId": "get_asset_deletion_api_v1_assets__asset_id__deletion_get",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Asset Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDeletionStatusResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Rights argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace authorization required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Asset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rights request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/assets/{asset_id}/validation": {
@@ -7848,6 +8099,198 @@
         ],
         "title": "AssetAdministratorBlockRequestV1"
       },
+      "AssetDeleteRequestV1": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "AssetDeleteRequestV1"
+      },
+      "AssetDeleteResponseV1": {
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+            "title": "Asset Id"
+          },
+          "asset_version_id": {
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+            "title": "Asset Version Id"
+          },
+          "deletion_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Deletion Generation"
+          },
+          "deletion_reason": {
+            "$ref": "#/components/schemas/AssetDeletionReason"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ValidationOperationSummaryV1"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "asset_id",
+          "asset_version_id",
+          "deletion_generation",
+          "deletion_reason",
+          "operation"
+        ],
+        "title": "AssetDeleteResponseV1"
+      },
+      "AssetDeletionProgressItemV1": {
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "OBJECTS",
+              "VECTORS",
+              "SEARCH_DOCUMENTS",
+              "PROVIDER_ARTIFACTS",
+              "TEMPORARY_REFERENCES",
+              "CACHES",
+              "PRODUCT_BRIEFS",
+              "RETRIEVAL_RUNS",
+              "CHECKPOINTS",
+              "QUARANTINE",
+              "OPERATIONS"
+            ],
+            "title": "Component"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "CONVERGED",
+              "RETRYABLE_FAILED"
+            ],
+            "title": "State"
+          },
+          "observed_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Observed Count"
+          },
+          "converged_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Converged Count"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "component",
+          "state",
+          "observed_count",
+          "converged_count",
+          "observed_at"
+        ],
+        "title": "AssetDeletionProgressItemV1"
+      },
+      "AssetDeletionReason": {
+        "type": "string",
+        "enum": [
+          "RETENTION_EXPIRED",
+          "RIGHTS_EXPIRED",
+          "ADMINISTRATOR_DELETE"
+        ],
+        "title": "AssetDeletionReason"
+      },
+      "AssetDeletionStatusResponseV1": {
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+            "title": "Asset Id"
+          },
+          "asset_version_id": {
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+            "title": "Asset Version Id"
+          },
+          "asset_state": {
+            "$ref": "#/components/schemas/AssetState"
+          },
+          "deletion_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Deletion Generation"
+          },
+          "deletion_reason": {
+            "$ref": "#/components/schemas/AssetDeletionReason"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ValidationOperationSummaryV1"
+          },
+          "progress": {
+            "items": {
+              "$ref": "#/components/schemas/AssetDeletionProgressItemV1"
+            },
+            "type": "array",
+            "title": "Progress"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "asset_id",
+          "asset_version_id",
+          "asset_state",
+          "deletion_generation",
+          "deletion_reason",
+          "requested_at",
+          "completed_at",
+          "operation",
+          "progress"
+        ],
+        "title": "AssetDeletionStatusResponseV1"
+      },
       "AssetIndexStatusResponseV1": {
         "properties": {
           "asset_id": {
@@ -8051,6 +8494,57 @@
               }
             ],
             "title": "Retention Deadline"
+          },
+          "deletion_generation": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Deletion Generation",
+            "default": 0
+          },
+          "deletion_operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Operation Id"
+          },
+          "deletion_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetDeletionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deletion_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Requested At"
+          },
+          "deletion_completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Completed At"
           },
           "version": {
             "type": "integer",

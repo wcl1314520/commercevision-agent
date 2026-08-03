@@ -17,6 +17,7 @@ import {
 } from "../lib/asset-api";
 import type {
   AssetKind,
+  AssetDeletionStatusResponseV1,
   AssetIndexStatusResponseV1,
   AssetResponseV1,
   AssetValidationStageResponseV1,
@@ -72,6 +73,22 @@ const INDEX_STATUS_LABELS: Record<AssetIndexStatusResponseV1["state"], string> =
   STALE: "已失效",
   DELETE_PENDING: "正在移除",
   DELETED: "已移除",
+};
+const DELETION_COMPONENT_LABELS: Record<
+  AssetDeletionStatusResponseV1["progress"][number]["component"],
+  string
+> = {
+  OBJECTS: "素材对象",
+  VECTORS: "向量索引",
+  SEARCH_DOCUMENTS: "搜索文档",
+  PROVIDER_ARTIFACTS: "分析原始载荷",
+  TEMPORARY_REFERENCES: "临时访问引用",
+  CACHES: "缓存",
+  PRODUCT_BRIEFS: "商品简报载荷",
+  RETRIEVAL_RUNS: "检索记录",
+  CHECKPOINTS: "任务检查点",
+  QUARANTINE: "隔离区",
+  OPERATIONS: "清理操作",
 };
 
 function indexStatusFingerprint(status: AssetIndexStatusResponseV1 | null): string | null {
@@ -279,6 +296,9 @@ export function AssetUploadWorkbench({
   const [indexStatus, setIndexStatus] =
     useState<AssetIndexStatusResponseV1 | null>(null);
   const [indexStatusError, setIndexStatusError] = useState(false);
+  const [deletionStatus, setDeletionStatus] =
+    useState<AssetDeletionStatusResponseV1 | null>(null);
+  const [deletionStatusError, setDeletionStatusError] = useState(false);
   const [indexStatusRefreshEpoch, setIndexStatusRefreshEpoch] = useState(0);
   const indexStatusRequestEpoch = useRef(0);
   const indexStatusFailureCount = useRef(0);
@@ -393,6 +413,8 @@ export function AssetUploadWorkbench({
     setCreatedSession(null);
     setValidationStatus(null);
     setValidationControlError(null);
+    setDeletionStatus(null);
+    setDeletionStatusError(false);
     setProgress(0);
     setError(null);
     setBusy("recover");
@@ -783,6 +805,43 @@ export function AssetUploadWorkbench({
     finalized?.validation_operation.state ??
     null;
   const displayAsset = asset ?? finalized?.asset ?? null;
+  const deletionAssetId =
+    (displayAsset?.deletion_generation ?? 0) > 0 ? displayAsset?.id : null;
+  useEffect(() => {
+    let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    setDeletionStatus((current) =>
+      current?.asset_id === deletionAssetId ? current : null,
+    );
+    setDeletionStatusError(false);
+    if (!deletionAssetId) {
+      return () => {
+        active = false;
+      };
+    }
+    const requestStatus = (): void => {
+      void api
+        .getAssetDeletion(deletionAssetId)
+        .then((projection) => {
+          if (!active) return;
+          setDeletionStatus(projection);
+          setDeletionStatusError(false);
+          if (projection.asset_state !== "DELETED") {
+            refreshTimer = setTimeout(requestStatus, 2_000);
+          }
+        })
+        .catch(() => {
+          if (!active) return;
+          setDeletionStatusError(true);
+          refreshTimer = setTimeout(requestStatus, 5_000);
+        });
+    };
+    requestStatus();
+    return () => {
+      active = false;
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+    };
+  }, [deletionAssetId]);
   const indexAssetId =
     displayAsset?.asset_kind === "IMAGE" ? displayAsset.id : null;
   useEffect(() => {
@@ -950,6 +1009,50 @@ export function AssetUploadWorkbench({
           {statusLabel(session)}
         </span>
       </div>
+
+      {(displayAsset?.deletion_generation ?? 0) > 0 ? (
+        <div className="asset-deletion-progress" role="status" aria-live="polite">
+          <strong>
+            {deletionStatus?.asset_state === "DELETED" ||
+            displayAsset?.status === "DELETED"
+              ? "素材清理已完成"
+              : "素材正在安全清理"}
+          </strong>
+          <span>删除批次 {displayAsset?.deletion_generation}</span>
+          <span>
+            {displayAsset?.deletion_reason === "RETENTION_EXPIRED"
+              ? "任务保留期已结束"
+              : displayAsset?.deletion_reason === "RIGHTS_EXPIRED"
+                ? "素材权利已到期"
+                : "管理员已请求删除"}
+          </span>
+          {displayAsset?.deletion_requested_at ? (
+            <time dateTime={displayAsset.deletion_requested_at}>
+              {new Date(displayAsset.deletion_requested_at).toLocaleString("zh-CN")}
+            </time>
+          ) : null}
+          {deletionStatus?.progress.length ? (
+            <ul className="asset-deletion-components" aria-label="清理组件进度">
+              {deletionStatus.progress.map((item) => (
+                <li key={item.component}>
+                  <span>{DELETION_COMPONENT_LABELS[item.component]}</span>
+                  <span>
+                    {item.state === "CONVERGED"
+                      ? `已完成 ${item.converged_count}/${item.observed_count}`
+                      : item.state === "RETRYABLE_FAILED"
+                        ? "等待自动重试"
+                        : `处理中 ${item.converged_count}/${item.observed_count}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : deletionStatusError ? (
+            <span>清理进度暂不可用，系统会自动重试。</span>
+          ) : (
+            <span>正在读取持久化清理进度…</span>
+          )}
+        </div>
+      ) : null}
 
       <div className="asset-upload-layout">
         <div className="asset-preview" aria-label="素材预览">
