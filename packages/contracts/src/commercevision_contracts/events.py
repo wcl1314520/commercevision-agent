@@ -376,6 +376,77 @@ class BrandProfilePublishedPayload(StrictEventPayload):
         return value
 
 
+class AssetIndexRequestedPayload(StrictEventPayload):
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    operation_epoch: int = Field(ge=1)
+    operation_input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_record_id: str = Field(pattern=UUID_PATTERN)
+    workspace_id: WorkspaceId
+    asset_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_number: int = Field(ge=1)
+    rights_record_id: str = Field(pattern=UUID_PATTERN)
+    rights_record_version: int = Field(ge=1)
+    collection_id: str = Field(pattern=UUID_PATTERN)
+    vector_kind: Literal["IMAGE"]
+    provider: str = Field(min_length=1, max_length=64)
+    embedding_input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator(
+        "operation_id",
+        "embedding_record_id",
+        "asset_id",
+        "asset_version_id",
+        "rights_record_id",
+        "collection_id",
+    )
+    @classmethod
+    def validate_index_ids(cls, value: str) -> str:
+        if canonicalize_uuid(value) != value:
+            raise ValueError("index event identifiers must be canonical lowercase UUIDs")
+        return value
+
+
+class AssetIndexTerminalIdentity(StrictEventPayload):
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    embedding_record_id: str = Field(pattern=UUID_PATTERN)
+    workspace_id: WorkspaceId
+    asset_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_id: str = Field(pattern=UUID_PATTERN)
+    collection_id: str = Field(pattern=UUID_PATTERN)
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    write_generation: int = Field(ge=1)
+
+    @field_validator(
+        "operation_id",
+        "embedding_record_id",
+        "asset_id",
+        "asset_version_id",
+        "collection_id",
+    )
+    @classmethod
+    def validate_terminal_index_ids(cls, value: str) -> str:
+        if canonicalize_uuid(value) != value:
+            raise ValueError("index event identifiers must be canonical lowercase UUIDs")
+        return value
+
+
+class AssetIndexCompletedPayload(AssetIndexTerminalIdentity):
+    outcome: Literal["INDEXED", "STALE"]
+
+
+class AssetIndexDeleteRequestedPayload(AssetIndexTerminalIdentity):
+    reason: Literal[
+        "RIGHTS_INVALID",
+        "ASSET_BLOCKED",
+        "ASSET_DELETED",
+        "SUPERSEDED",
+        "RECONCILIATION",
+    ]
+
+
 class PendingPhase2Payload(RootModel[dict[str, JsonValue]]):
     """JSON payload boundary for Phase 2 events whose owning ticket defines fields later."""
 
@@ -558,6 +629,27 @@ BRAND_PROFILE_PUBLISHED_V1 = EventContract(
     BrandProfilePublishedPayload,
     EventHandling.OBSERVATION,
 )
+ASSET_INDEX_REQUESTED_V1 = EventContract(
+    EventType.ASSET_INDEX_REQUESTED,
+    1,
+    EventQueue.INDEX,
+    AssetIndexRequestedPayload,
+    EventHandling.COMMAND,
+)
+ASSET_INDEX_COMPLETED_V1 = EventContract(
+    EventType.ASSET_INDEX_COMPLETED,
+    1,
+    EventQueue.INDEX,
+    AssetIndexCompletedPayload,
+    EventHandling.OBSERVATION,
+)
+ASSET_INDEX_DELETE_REQUESTED_V1 = EventContract(
+    EventType.ASSET_INDEX_DELETE_REQUESTED,
+    1,
+    EventQueue.INDEX,
+    AssetIndexDeleteRequestedPayload,
+    EventHandling.COMMAND,
+)
 
 
 def _phase2_contract(
@@ -581,21 +673,9 @@ PHASE2_EVENT_CONTRACTS = (
     PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
     PRODUCT_BRIEF_CONFIRMED_V1,
     BRAND_PROFILE_PUBLISHED_V1,
-    _phase2_contract(
-        EventType.ASSET_INDEX_REQUESTED,
-        EventQueue.INDEX,
-        EventHandling.COMMAND,
-    ),
-    _phase2_contract(
-        EventType.ASSET_INDEX_COMPLETED,
-        EventQueue.INDEX,
-        EventHandling.OBSERVATION,
-    ),
-    _phase2_contract(
-        EventType.ASSET_INDEX_DELETE_REQUESTED,
-        EventQueue.INDEX,
-        EventHandling.COMMAND,
-    ),
+    ASSET_INDEX_REQUESTED_V1,
+    ASSET_INDEX_COMPLETED_V1,
+    ASSET_INDEX_DELETE_REQUESTED_V1,
     _phase2_contract(
         EventType.COLLECTION_REBUILD_REQUESTED,
         EventQueue.INDEX,

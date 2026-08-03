@@ -196,6 +196,7 @@ function apiMethodAllowed(path: string, method: string): boolean {
   }
   if (/^\/assets\/[^/:]+$/.test(path)) return method === "GET";
   if (/^\/assets\/[^/:]+\/validation$/.test(path)) return method === "GET";
+  if (/^\/assets\/[^/:]+\/index-status$/.test(path)) return method === "GET";
   if (/^\/assets\/[^/:]+\/rights$/.test(path)) {
     return method === "GET" || method === "POST";
   }

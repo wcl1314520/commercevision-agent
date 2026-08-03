@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -1383,6 +1384,8 @@ class OperationExecutionRequest:
     attempt_count: int
     idempotency_key: str
     lease_expires_at: datetime | None = None
+    replay_source_dead_letter_id: str | None = None
+    replay_attempt: int = 0
 
     @classmethod
     def from_operation(
@@ -1402,6 +1405,8 @@ class OperationExecutionRequest:
             attempt_count=operation.attempt_count,
             idempotency_key=f"durable-operation:{operation.id}",
             lease_expires_at=operation.lease_expires_at,
+            replay_source_dead_letter_id=operation.replay_source_dead_letter_id,
+            replay_attempt=operation.replay_attempt,
         )
 
 
@@ -1442,10 +1447,18 @@ class OperationExecutionFailure(Exception):
         error: NormalizedOperationError,
         *,
         retry_at: datetime | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
+        if retry_at is not None and retry_after_seconds is not None:
+            raise ValueError("retry_at and retry_after_seconds are mutually exclusive")
+        if retry_after_seconds is not None and (
+            not math.isfinite(retry_after_seconds) or retry_after_seconds < 0
+        ):
+            raise ValueError("retry_after_seconds must be finite and non-negative")
         super().__init__(error.message)
         self.error = error
         self.retry_at = retry_at
+        self.retry_after_seconds = retry_after_seconds
 
 
 class OperationHumanWaitRequired(Exception):
@@ -1535,7 +1548,12 @@ class OperationRetryPolicy:
         if operation.attempt_count >= operation.max_attempts:
             return replace(error, retryable=False), None
         retry_at = failure.retry_at
-        if retry_at is None:
+        if failure.retry_after_seconds is not None:
+            retry_at = now + min(
+                timedelta(seconds=failure.retry_after_seconds),
+                self._maximum_delay,
+            )
+        elif retry_at is None:
             delay_seconds = _jittered_backoff_seconds(
                 attempt_count=operation.attempt_count,
                 initial_delay=self._initial_delay,
@@ -1602,6 +1620,11 @@ class OperationReconciliationPolicy:
             return replace(error, retryable=False), None
 
         retry_at = failure.retry_at
+        if failure.retry_after_seconds is not None:
+            retry_at = now + min(
+                timedelta(seconds=failure.retry_after_seconds),
+                self._maximum_delay,
+            )
         if retry_at is not None and (
             retry_at.tzinfo is None or retry_at.utcoffset() != timedelta(0)
         ):

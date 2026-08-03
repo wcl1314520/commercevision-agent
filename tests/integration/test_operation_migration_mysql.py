@@ -26,6 +26,7 @@ WORKSPACE_ID_TABLES = {
     "dead_letter_messages",
     "dead_letter_replays",
     "durable_operations",
+    "embedding_records",
     "outbox_events",
     "products",
     "product_brief_analysis_requests",

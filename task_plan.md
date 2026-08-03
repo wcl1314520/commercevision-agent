@@ -110,9 +110,13 @@
   current usability、Rights/Asset 失效收敛、HTTP/Web、MySQL/Alembic、Worker、Runbook 和
   生产配置均已闭合。
 - Ticket 08 完整 Python/Web/迁移/容器/安全门禁和 Backend/Ops/Web 三路独立终审均通过，
-  无剩余 P0/P1/P2/Required；本 Ticket 必须作为一个单一实现提交推送。
-- Ticket 08 只有在该提交对应的 GitHub Actions 全部绿色后才最终放行；Ticket 09 保持
-  `pending`，不得提前启动。
+  无剩余 P0/P1/P2/Required；单一实现提交为 `2b79080`。
+- Ticket 08 对应 GitHub Actions 运行 `30596872198` 已全部绿色，正式放行。
+- Ticket 09 本地实现与发布门禁已完成：IMAGE 增量索引、Rights/generation fencing、Durable
+  recovery/DLQ replay、MySQL 权威状态、Milvus 可重建索引、Embedding Provider、HTTP/Web、
+  Alembic、生产配置与 Runbook 均已闭合；Standards、Spec 与 Quality 终审全部批准，无剩余阻断。
+- Ticket 09 单一实现提交及对应 GitHub Actions 全绿是进入 Ticket 10 的最终放行门槛；在该门槛
+  完成前不启动下一 Ticket。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending
@@ -147,6 +151,29 @@
 
 | 日期 | 错误 | 处理 |
 |---|---|---|
+| 2026-08-03 | Ticket 09 修复前全量 `tests/integration` 运行期间用户中断，进程随后不存在且未产生 pytest 汇总 | 不把无失败输出冒充通过；保留已完成的 28 项 Ticket09 integration 与其它门禁证据，双审修复后重新运行有明确汇总的完整 integration 门禁 |
+| 2026-08-03 | Ticket 09 Standards/Spec 双审均 Request Changes，现有绿测未覆盖两个持久化提交边界、DLQ replay、执行中 regrant、delete identity conflict 等生产恢复路径 | 暂停发布与 Ticket10；逐项先在公开 seam 添加 RED，再做最小深模块修复并要求双审复核 |
+| 2026-07-31 | Web unit 181 项全绿后 TypeScript 门禁发现 generated `failure_reason` 仍为 optional，presentation helper 只接受 `string | null` | 精确反馈 `index-status-state.ts` 两处调用以 `?? null` 收敛或修正生成契约；ESLint 同次已通过，修复后需重跑 typecheck |
+| 2026-07-31 | Ticket 09 主链 195 项 unit 通过后，聚焦 Ruff 检出三个并行编辑产生的 import-order I001 | 不在主实现仍编辑同文件时抢占 auto-fix；已精确反馈三个文件，待语义稳定后执行机械排序并重跑同一门禁 |
+| 2026-07-31 | 查找 integration fixture 时先假定根 `tests/conftest.py`，实际 fixture 位于 `tests/integration/conftest.py` | 只读命令未写文件；用 `rg --files -g conftest.py` 定位真实路径后读取，后续复用该 session MySQL fixture |
+| 2026-07-31 | Compose 配置复验首次误把 env 文件放在 `infra/compose/.env.example`，实际文件位于仓库根目录 | 命令未写文件；先用 `rg --files` 确认真实路径，再以根 `.env.example` 执行同一 `docker compose config --quiet`，结果通过 |
+| 2026-07-31 | UI 无障碍检索首次用 PowerShell 双引号包裹含 `\"` 的复合 `rg` 正则，转义后形成未闭合分组 | 命令未写文件；改用单引号字面正则并拆开 CSS 检索，成功读取状态/重试/aria 接缝 |
+| 2026-07-31 | 记录 Milvus 审查结论的首个补丁假定了不存在的 `findings.md` Ticket 标题，context 校验失败且未写入 | 先读取文件真实开头，以现有 Milvus 限制条目为锚点重新应用，审查结论已持久化 |
+| 2026-07-31 | 主控检查 Compose 接线时先假定根目录 `docker-compose.yml`，并再次把 `compose*.yml` 作为 Windows 字面路径传给 `rg` | 未改文件；用 `rg --files -g "*compose*"` 定位真实 `infra/compose/docker-compose.yml`，后续只对已验证路径检索 |
+| 2026-07-31 | 主控静态复核再次把 `indexing*.py` 作为 Windows `rg` 字面路径，命中已记录的非法 glob 用法 | 未据此作结论；立即改为真实目录加 `-g "indexing*.py"`，后续只使用过滤参数而不向 Windows 传通配路径 |
+| 2026-07-31 | Ticket 09 Worker 接线首次聚焦收集失败：`image_indexing.py` 导入了 object-storage 包并未公开的 `ObjectStorage` 名称 | 不通过新增跨层导出掩盖；按 object-storage 现有公开 Port/Protocol 修正类型依赖，再重跑 Worker/settings 聚焦套件 |
+| 2026-07-31 | Embedding Provider 首次从根默认 package 运行聚焦测试时无法导入 provider workspace 包 | 改用 `uv run --package commercevision-providers` 的真实 workspace 环境；该次只算测试装置 RED，不虚报为行为 RED |
+| 2026-07-31 | Milvus unit 与 integration 测试初版使用相同 basename，在 tests 非 package 布局下全量 pytest 会产生 import-file-mismatch | 不改全仓 pytest import mode；将 integration 文件改为唯一 basename，并在同一 pytest 进程联合收集两者验证 |
+| 2026-07-31 | Ticket 09 HTTP route test 首次从根默认 package 运行，collection 阶段找不到 `commercevision_api`；route 与测试又在同一批落下，无法诚实提供 behavior RED | 改用 `uv run --package commercevision-api`，记录本切片无 behavioral RED；保留测试并由独立 Spec review 与真实 MySQL/HTTP 回归补足证据，不虚报 TDD |
+| 2026-07-31 | 修正 Rights seed 后真实 MySQL indexing 为 5 pass / 1 fail：Provider facts 已持久化但返回 target 未刷新；随后 stale 断言把 raw SQL JSON 字符串误当对象 | Production mapper 改为同步 generation/provider request/actual model；测试显式解析 raw JSON，聚焦 stale typed-Outbox 已通过并重跑完整范围 |
+| 2026-07-31 | Ticket 09 首轮真实 MySQL indexing 测试 6 项全部在 seed 阶段失败：fixture 先封存 Rights Record 再插 permissions，被不可变 trigger 正确拒绝 | 不修改生产栅栏；修正测试 seed 为父记录未封存 → 插 use/provider 子表 → 一次性 seal，再重跑真实 MySQL seam |
+| 2026-07-31 | 一次 `rg` 静态门禁搜索向 Windows 传入 `packages/*/pyproject.toml`，该 glob 被解释为非法路径并返回 1 | 已从有效输出确认根配置与 CI 只有 Python Ruff/pytest；后续如需枚举 package 配置使用 `rg ... packages -g pyproject.toml`，不重复非法 glob |
+| 2026-07-31 | Ticket 09 实现上下文尝试运行未安装/未配置的 `pyright`，程序不存在 | 不重复不存在的工具，也不为单 Ticket 临时扩依赖；使用仓库与 CI 已配置的 Ruff、测试和现有类型门禁，终审记录实际覆盖 |
+| 2026-07-31 | 隔离 Python 3.13 探针导入 `pymilvus==2.4.15` 失败：SDK 使用但未声明 `pkg_resources`，裸环境缺少 setuptools | 不直接写入项目锁文件；用显式 setuptools 做第二个隔离探针，再决定生产 Adapter 的最小兼容依赖并验证 Worker 镜像 |
+| 2026-07-31 | Ticket 09 初版 application/persistence 将 Operation target version 绑到可变 Embedding CAS version、reconcile 未提交 MySQL indexed state、eligibility 错用 `milvus` 代替真实 Embedding Provider，且未比较 Rights Record ID | 暂停扩展；分别添加 retry/reconcile、crash-after-upsert、Provider 授权与 Rights identity 的公开 seam RED tests，修复后再进入 Worker/Milvus 纵切 |
+| 2026-07-31 | Ticket 09 初版 migration 的 positive-version Check Constraint 引用了尚未创建的 `write_generation`，ORM-only schema 测试未发现，真实 MySQL 会报 3820 | 在继续后续纵切前补齐 generation 的 ORM/DDL/约束，并新增/运行真实 Alembic MySQL roundtrip RED→GREEN |
+| 2026-07-31 | `code-review-and-quality` 引用的 `references/security-checklist.md` 与 `references/performance-checklist.md` 未随本地技能安装包提供 | 不重复读取不存在路径；终审使用技能正文已完整定义的 Correctness/Readability/Architecture/Security/Performance 五轴清单 |
+| 2026-07-31 | Phase 2 长任务恢复脚本在默认 10 秒工具窗口内超时，未返回恢复报告 | 不重复相同短窗口调用；改用 60 秒有界窗口，并以 Git 状态与现有计划文件交叉确认恢复结果 |
 | 2026-07-21 | 两次 PowerShell 删除命令被环境策略阻止 | 不再重复，改用 `apply_patch` 逐文件删除 |
 | 2026-07-21 | 一次一致性检查的工作目录误写为不存在的路径 | 改为在已验证的 `mine` 绝对路径重新执行 |
 | 2026-07-21 | 在尚未初始化 Git 的目录中执行 `git check-ignore` 无法验证忽略规则 | 改为直接检查 `.gitignore` 内容，并通过 Obsidian 生成的 `workspace.json` 验证匹配口径 |

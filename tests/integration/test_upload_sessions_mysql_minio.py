@@ -1030,6 +1030,8 @@ def test_real_worker_preflight_queries_mysql_and_authenticated_bucket_controls(
         "object_storage": "ok",
         "malware_scanner": "ok",
         "provider_result_storage": "ok",
+        "milvus": "ok",
+        "embedding_provider": "not_required",
         "vision_credential": "not_required",
     }
 

@@ -1,5 +1,187 @@
 # CommerceVision Agent 执行进度
 
+## 2026-07-31 — Phase 2 连续交付恢复
+
+- Ticket 08 提交 `2b79080` 与 GitHub Actions `30596872198` 已确认全绿，Ticket 09 正式解锁。
+- 已恢复 `task_plan.md`、`progress.md`、`findings.md`；session catchup 在 60 秒有界窗口内完成，
+  Git 基线为 `main == origin/main == 2b79080`，仅计划文件存在本轮记录改动。
+- Ticket 09 沿用已确认的 HTTP、Durable Worker/Event、真实 MySQL/MinIO/Milvus、Provider Adapter
+  和 Web 测试接缝，执行独立上下文 TDD，不重做 Ticket 08。
+- Ticket 09 只读架构侦察确认仓库尚无平行索引实现：Retrieval 包为空壳，但 Domain 已预留
+  `ASSET_INDEXING` / `RECONCILIATION` / `COLLECTION_REBUILD` Durable Operation，Contracts
+  已预留 INDEX queue/event，Compose 已有 Milvus。实现将替换 pending event payload、扩展现有
+  Operation Executor/Worker queue，并复用 Asset current-usability seam。
+- 首个 RED 纵切锁定公开 Domain/Contract：完整 Collection identity、`dynamic_fields=false`、
+  embedding-spec hash、确定性 Milvus primary key，以及严格 typed INDEX event。
+- Ticket 09 首批 TDD 证据：Collection Domain RED 因 `CollectionSpec` 缺失而失败，GREEN 为
+  `6 passed`；Provider/Admin Contract RED 因 typed request 缺失而失败，GREEN 为 `11 passed`；
+  typed INDEX event RED 因 `AssetIndexRequestedPayload` 缺失而失败。Domain、Contract 与既有
+  event suite 聚焦回归为 `24 passed in 0.40s`，对应 Ruff 全绿。
+- 持久化早审在真实 MySQL seam 前发现初版 migration 的 Check Constraint 引用了缺失的
+  `write_generation` 列；ORM-only schema tests 对此假绿。该问题已作为 P0 退回，要求先完成
+  ORM/DDL/约束与真实 Alembic roundtrip RED→GREEN。
+- 上述 migration P0 已修复：实现 Agent 先核对测试库 revision 与唯一 partial table，再仅清除
+  该次失败留下的测试表；`tests/integration/test_indexing_migration_mysql.py` 现为
+  `1 passed in 12.84s`，并在真实 MySQL 证明 generation 归属正确及四个时间列均为 `DATETIME(6)`。
+- Application/Persistence 早审发现并退回：Operation identity 错绑可变 Embedding CAS version、
+  crash-after-upsert reconcile 未提交 MySQL `INDEXED`、授权校验错用 `milvus` 而非真实
+  Embedding Provider 三项 P0，以及未同时比较 Rights Record ID/Version 的 P1。每项必须先有
+  公开 seam RED，再修复并给出聚焦 GREEN。
+- 增量早审确认 Operation target identity 已在进行中修正为不可变 Asset Version number；同时
+  新增必须覆盖的门禁：Milvus upsert 边界 timeout 进入 unknown-outcome reconciliation，claim/
+  final commit 对 Embedding state、Collection write authority、Operation 与 generation 做 CAS，
+  并在发送 Provider 前重算 input hash、验证 Record 与 Collection 冗余身份完全一致。
+- 依赖兼容探针：Python 3.13 下 `pymilvus==2.4.15` 裸导入因缺少 `pkg_resources` 失败；显式
+  `setuptools<81` 后成功导入 2.4.15，但存在官方弃用警告。该运行依赖与未来同步升级约束已反馈
+  实现 Agent，最终还需生产 Worker 镜像 import 与真实 Milvus CRUD 证明。
+- 早审修复 checkpoint：不可变 Operation identity、实际 Provider 授权、Rights ID+Version、
+  provider facts CAS、reconcile finalization、unknown upsert、generation-specific PK、合法状态/
+  Collection write authority、权威 hash/spec、durable DELETE_PENDING、Milvus 2.4 schema 上限与
+  Secret temporary input 已进入实现；公开 Domain/Contract/Executor 聚焦回归 `21 passed` 且 Ruff
+  全绿。下一门禁是这些不变量的真实 MySQL/public-seam 证据与原子 create/unique-winner reload。
+- 首轮 `tests/integration/test_indexing_mysql.py` 为 `6 failed / 107.17s`，失败均发生在测试
+  seed：fixture 先设置 `permissions_sealed_at` 再插 Rights permissions，数据库不可变 trigger
+  正确拒绝。生产栅栏保持不变，测试按“未封存父记录 → 子权限 → 一次性 seal”修正后重跑。
+- 修正 seed 后真实 MySQL 范围进至 `5 passed / 1 failed`；唯一生产缺陷是 Provider facts
+  已持久化但返回 target 未同步，已改为显式刷新 generation/provider request/actual model。
+  stale + typed delete Outbox 聚焦回归为 `1 passed in 13.26s`，完整 6 项正在复跑。
+- `uv run pytest -q tests/integration/test_indexing_mysql.py` 完整 GREEN：
+  `6 passed in 71.54s`。真实 MySQL 已证明并发/重复请求 unique-winner reload 后 Collection、
+  Embedding Record、Operation、requested Outbox 各一；crash-after-upsert reconcile 收敛为
+  `INDEXED` 并保留 Provider facts；Rights race 收敛为 `DELETE_PENDING` + typed delete Outbox；
+  非法状态、write-disabled Collection 与冗余模型身份漂移均关闭式失败。
+- Milvus Adapter 首批 RED 覆盖缺实现、并发 create race、缺 upsert、SDK secret timeout 与 lazy
+  lifecycle；当前 unit GREEN 为 `9 passed in 0.47s`。Retrieval 锁定 PyMilvus 2.4.15 与
+  setuptools 80.10.2，正在进入真实 Milvus CRUD。
+- Provider Adapter 侦察发现上层会丢失 stable error、Retry-After 与 unknown outcome；已锁定
+  provider-neutral typed failure + Application 映射，并要求相对 Retry-After 由 Durable Policy
+  的权威时钟计算。
+- HTTP index-status route 聚焦测试以正确 package context 运行后 `1 passed in 22.48s`；它锁定
+  Workspace membership forwarding 和严格有界响应字段，明确不暴露 Collection ID/name、
+  Milvus PK 或 Provider Request ID。该切片实现与测试同批落下，无可验证 behavioral RED，
+  已如实记录；真实 MySQL status projection 已覆盖 `NOT_REQUESTED → PENDING` 与相同禁泄漏面。
+- Typed Provider error 与相对 Retry-After 完成 RED→GREEN：RED 因
+  `EmbeddingProviderErrorV1` 缺失产生 2 个 collection error；新增 strict provider-neutral
+  failure、Executor durable 映射、relative delay 互斥与 RetryPolicy worker-now/
+  max-delay/deadline clamp 后，聚焦命令为 `4 passed, 37 deselected in 0.82s`。Ruff 自动修复
+  2 项并手工拆分 1 条长行，待后续全量门禁。
+- 真实 Milvus 2.4.15 Adapter 完成两轮 RED→GREEN：首轮发现 2.4.15 `get_load_state/drop`
+  不接受统一 retry kwargs，改为只在受支持 RPC 上禁用 SDK retry；第二轮发现逐次 flush 被真实
+  0.1/s RateLimiter 拒绝，删除 per-row flush，exact-PK proof 使用 Strong consistency，dirty
+  collections 仅在 bounded close 聚合 flush。最终
+  `tests/integration/test_milvus_index_adapter.py` 为 `3 passed, 1 warning in 12.07s`，覆盖并发
+  ensure、重复 generation PK upsert/prove、旧 generation delete 不伤新 generation；无 sleep/
+  rowcount，teardown 仅 drop 自有 `cv_ticket09_*` collection。
+- Milvus unit/integration 初版同 basename 会触发 pytest import-file-mismatch；未改全仓 import
+  mode，改为唯一 integration 文件名后在同一进程联合收集：
+  中间门禁 `14 passed, 1 warning in 11.96s`，无 mismatch。
+- Milvus owned scope 终版门禁：unit + 真实 2.4.15 integration 为
+  `21 passed, 1 warning in 12.19s`；Ruff format/check、`uv lock --check`、dependency/import
+  smoke 与 `git diff --check` 全绿。唯一警告是已显式锁 `setuptools<81` 的 PyMilvus
+  `pkg_resources` 上游弃用，后续必须随 client/server 同步升级。
+- Alibaba/Fixture Embedding Provider package 当前 `13 passed in 0.90s`；额外 HTTP 408
+  contract RED→GREEN 后 contract 子集 `5 passed`。Adapter 依据阿里云官方 multimodal embedding、
+  model、error-code 与 rate-limit 文档实现北京地域 IMAGE 请求、`enable_fusion=false`、受控
+  dimension/usage、限流/超时/错误归一化和 Secret 脱敏；官方 URL 不支持自定义 headers，因此
+  非空 required headers 关闭式拒绝。
+- Web index-status 完成严格 RED→GREEN：RED 为缺少 `index-status-state` module；实现 exact
+  runtime decoder、字段/state/date fail-closed、transient refresh policy、retry/nonretry
+  presentation、asset+request epoch late-response fence 与 2 秒轮询后，相关 2 files / 9 tests、
+  typecheck、lint 全绿；此前 Web 全量为 177 unit + 21 proxy 全绿。
+- Embedding Provider owned scope 已完成：Fixture/Alibaba 单元与契约最终 `18 passed`，连同
+  Vision、Content Safety、Malware、Provenance、依赖边界和 Worker deployment 的 Provider
+  回归为 `184 passed in 29.84s`；Ruff 与隔离 mypy 探针全绿。官方不返回 resolved revision，
+  因此 `actual_model` 只记录已提交模型 ID，`pinned_revision` 保持内部 Collection release epoch。
+- IMAGE Worker 首个公开接缝 RED→GREEN 已闭合：index queue 的内置 Operation Kind 与 typed
+  `asset.index.requested.v1` handler 初始 `2 failed`，接线后 `2 passed`；Embedding Settings
+  启动/生产边界初始 `3 failed`，配置收敛后 `3 passed`。主控复跑同一 focused 范围全绿。
+- Milvus owned scope 独立复审为 3 个 P1、3 个 P2、无 P0，当前明确不批准合并。P1 分别是
+  PyMilvus 内部等待未受顶层 retry/float timeout 约束、`close()` 超时遗留 daemon thread、
+  `setuptools 80.10.2` 命中 `PYSEC-2026-3447`；原 Milvus owner 已按同一范围恢复修复，业务
+  主实现不并发触碰 retrieval/lock 文件。
+- Embedding owned scope 独立复审为 4 个 P1、3 个 P2、无 P0，同样 Request changes。P1
+  覆盖原始 httpx request 经异常图泄漏 Secret、429 partial-body 丢失已知 Retry-After、取消
+  阶段无法区分 queued/dispatched/headers-observed，以及 qwen3 mainline alias 无 provider
+  resolved revision。原 owner 已恢复修复；主实现只配合可信 byte-size seam 与内部 release
+  epoch 的配置/运行手册栅栏。
+- 业务 P0 中间门禁：Worker/Application/Domain/Settings/Readiness 聚焦组合为 `180 passed`；
+  真实 MySQL 并发唯一 winner 为 `1 passed`，Provider retry、final-rights race、INDEXED 后撤权
+  和非 IMAGE 四项为 `4 passed`。当前已实现 `PROCESSING→RETRYABLE_FAILED`、Strong absence
+  confirmed-retryable、INDEXED 撤权原子 `DELETE_PENDING` + typed delete event；下一步仍需
+  terminal reconciliation convergence、regrant 新 Operation、迟到旧代删除与真实
+  Durable Worker/Event + MySQL/MinIO/Milvus 七场景。
+- Milvus 独立复审的 3 个 P1 / 3 个 P2 已全部关闭：Adapter 采用单一 monotonic deadline、
+  禁用 SDK 内部重试、移除后台 close/flush 线程，并以 setuptools 83 + 最小兼容层消除
+  `pkg_resources` 漏洞依赖。主控复验 unit + 真实 Milvus 为 `23 passed`，Ruff 与
+  `uv lock --check` 全绿；owner 的 `pip-audit` 为无已知漏洞。
+- Embedding Provider 独立复审的 Secret 异常图、429 partial body、取消阶段、float32/
+  HTTP-date Retry-After、preprocess 与可信 byte-size/5 MiB 上限均已关闭；主控复验 focused
+  `30 passed` 与 Ruff 全绿。Provider 更广回归由 owner 得到 `195 passed`，唯一共享工作树
+  失败是 index queue 已加入 Compose 而旧 deployment contract 尚未同步。
+- 主控继续审查发现两个未闭合的发布阻断：regrant 新 Operation 会撞
+  `uq_durable_operation_logical` 并被错误 reload 为旧 Operation；Embedding 数据出境
+  Workspace/Retention allowlist 当前只有启动配置校验、Provider submission 前尚未执行。
+  两项均已退回主实现，要求真实并发/零 Provider 调用与 Secret URL 零签发证据。
+- 上述阻断已进入实现：Operation epoch/hash 与 embedding input identity 分离，typed request
+  event 显式携带三套 identity 并由 EventRouter + MySQL authority 分层验证；外部传输策略在
+  URL 签发前执行。主控复跑主链 unit 为 `195 passed`，复跑真实 MySQL indexing 为
+  `11 passed in 159.14s`，覆盖 regrant 新 Operation、永久失败不自动复活、旧代 delete fencing
+  与既有并发/重试/撤权场景。当前仍需 Durable max-attempt terminal、INDEXED 直接 regrant
+  superseded delete，以及明文要求的真实 MySQL + MinIO + Milvus 七场景。
+- Durable `max_attempts` 耗尽把当前 `RETRYABLE_FAILED` 收敛为 `PERMANENT_FAILED`，以及
+  `INDEXED` 直接 rights reindex 原子发旧 gN `SUPERSEDED` delete 两项已落地；主控定向复验
+  `2 passed, 11 deselected in 24.08s`。旧 Operation terminal callback 受 operation identity
+  fence，不得覆盖 regrant 后的新当前 Operation。
+- HTTP 状态已由真实 MySQL projection + ASGI error handler 证明：authorized current status
+  返回有界 200，unknown 与 cross-workspace 返回完全一致的 404 envelope；主控定向复验
+  `1 passed, 13 deselected`。API route/health unit 为 `15 passed`，仅保留仓库既有
+  Starlette TestClient deprecation warning。
+- Ticket 09 明文七场景已由主控独立复验：真实 MySQL + MinIO + Milvus 的 incremental
+  upsert、duplicate delivery、dimension mismatch、Provider timeout、Milvus outage、
+  crash-after-upsert unknown outcome 与 Rights regrant/generation fence 为
+  `7 passed, 17 deselected in 122.29s`。Ticket 09 聚焦 unit/contract 为 `317 passed`，
+  迁移 + MySQL 主链 + Milvus integration 为 `28 passed in 383.60s`。
+- 完整 Web 门禁为 unit `181 passed`、BFF proxy `21 passed`、Playwright `89 passed`，
+  TypeScript、ESLint、generated types、production build、pnpm audit 均通过；Python 全量
+  unit + contract 为 `1082 passed, 1 skipped`，唯一 skip 为显式 opt-in Alibaba OSS。
+- Standards/Spec 双审均为 Request Changes。阻断项覆盖：post-upsert MySQL completion
+  必须进入同 generation reconciliation；authority completion 要在 Embedding 已提交但
+  Operation 未成功时幂等；operator DLQ replay 必须能受审计恢复；执行中 regrant 必须清理
+  已写旧代；Milvus delete identity conflict 不能误报 DELETED；SDK malformed response、
+  Provider close 异常图、生产 Milvus TLS/default token 与 Web Rights 后状态刷新必须闭合。
+- 2026-07-31 启动的全量 `tests/integration` 在用户中断时仍无失败输出，但进程随后不存在，
+  未取得 pytest 汇总，因此不计作通过证据。上述审查修复完成后将以分组或有界单进程重新运行。
+- 审查整改已全部闭合：post-upsert 迟到旧代写入会在同一事务记录 superseded completion marker
+  并发出精确 generation delete；提交回包丢失后可由旧 request event 依据静态身份与 completion
+  marker 幂等恢复；正常过期事件仍关闭式拒绝。真实故障注入覆盖“旧 g1 晚写、早期 delete 已
+  absence、MySQL superseded commit 成功但 transport timeout、重入恢复成功、g2 保留”。
+- Web 权威投影已在 Rights identity 不一致时立即返回 `STALE`，并以有界 authority grace polling
+  覆盖异步事务可见性；首个 `NOT_REQUESTED` 建立基线、连续未请求继续等待，503 后自动恢复会清除
+  错误，商品切换后的旧响应与旧 timer 均被 epoch fence 隔离。
+- Milvus 生产边界现拒绝非 HTTPS、默认 token、URI userinfo/path/query/fragment 与非法 host/port；
+  builder、consistency/proof malformed response、Provider close 等异常统一为固定安全错误，不保留
+  SDK 原始异常图或 Secret。真实集成 fixture 在所有 teardown 分支尽力清理 collection、版本化对象、
+  bucket、存储与向量客户端，并在全部清理后聚合报告失败。
+- Ticket 09 最终本地证据：owned integration `40 passed, 1 warning in 623.56s`；全量 unit +
+  contract `1099 passed, 1 skipped`（唯一 skip 为显式 live OSS opt-in）；Web unit `181 passed`、
+  proxy `21 passed`、Playwright `89 passed`；TypeScript、ESLint、production build、Ruff format/check、
+  Python/pnpm audit、OpenAPI 与 generated TypeScript、Compose config 均通过。两次无时间上限的完整
+  integration 尝试分别运行 20/30 分钟且没有失败输出，但桌面执行窗口未取得最终汇总，因此不冒充
+  通过；GitHub Actions 的完整 `uv run pytest` 是最终集成事实来源。
+- Ticket 09 Standards、Spec 与 Quality 最终复审全部 `APPROVE`，明确复核 superseded marker
+  recovery、旧事件静态身份、Web null baseline/自动恢复、Milvus URI/builders 与 fixture cleanup；
+  当前不启动 Ticket 10，只允许形成单一实现提交、推送并等待对应 GitHub Actions 全绿。
+- 首次发布候选 `af0e923` 的 CI `30784813677` 中 Web、Container、Security/SBOM 全绿，Python
+  完成 1604 项后报告 9 败：CI Milvus 暴露在 19531 但未注入 Worker Settings，级联 8 个既有
+  readiness/runtime 用例；Operation migration 的 workspace collation 期望漏列新
+  `embedding_records`。修复以 CI 部署契约先 RED 后 GREEN，注入精确 URI 与 10 秒冷启动 readiness
+  预算，并更新两个既有公开 readiness 形状和 migration 身份集合。
+- 修复后原 8 个 Worker/Runtime/Upload 失败全部定向通过，扩大后的四文件真实集成为
+  `170 passed, 1 skipped in 839.22s`；唯一 skip 为显式未启动的真实 ClamAV。Provider close
+  全量门禁另发现测试用 50ms read timeout 与 50ms sleep 竞争；生产状态机正确把已发出的第二请求
+  标为 unknown。测试改为等待两个 active lifecycle 的确定性排队事实，连续 `10/10` 通过，随后
+  全量 unit + contract 恢复为 `1099 passed, 1 skipped`。
+
 ## 2026-07-21
 
 ### 已完成

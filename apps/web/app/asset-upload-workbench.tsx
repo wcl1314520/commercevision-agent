@@ -1,6 +1,13 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   AssetApi,
@@ -10,6 +17,7 @@ import {
 } from "../lib/asset-api";
 import type {
   AssetKind,
+  AssetIndexStatusResponseV1,
   AssetResponseV1,
   AssetValidationStageResponseV1,
   AssetValidationStatusResponseV1,
@@ -29,6 +37,12 @@ import {
   operationPollDelayMs,
   shouldContinueOperationPolling,
 } from "../lib/operation-polling";
+import {
+  acceptIndexStatusResponse,
+  indexStatusRetryDelayMs,
+  indexStatusPresentation,
+  shouldRefreshIndexStatus,
+} from "../lib/index-status-state";
 import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
 import { useUploadWorkflow } from "../lib/use-upload-workflow";
 import type { PersistedSessionUpload } from "../lib/upload-workflow";
@@ -36,6 +50,7 @@ import { validationPresentation } from "../lib/validation-presentation";
 import { AssetRightsWorkbench } from "./asset-rights-workbench";
 
 const api = new AssetApi();
+const INDEX_AUTHORITY_GRACE_ATTEMPTS = 15;
 const TERMINAL_OPERATION_STATES = new Set<OperationState>([
   "SUCCEEDED",
   "FAILED",
@@ -47,6 +62,30 @@ const ASSET_KIND_LABELS: Record<AssetKind, string> = {
   PROMPT_TEMPLATE: "提示词模板",
   MODEL_CONFIGURATION: "模型配置",
 };
+const INDEX_STATUS_LABELS: Record<AssetIndexStatusResponseV1["state"], string> = {
+  NOT_REQUESTED: "尚未请求",
+  PENDING: "等待索引",
+  PROCESSING: "正在索引",
+  INDEXED: "可检索",
+  RETRYABLE_FAILED: "等待重试",
+  PERMANENT_FAILED: "索引失败",
+  STALE: "已失效",
+  DELETE_PENDING: "正在移除",
+  DELETED: "已移除",
+};
+
+function indexStatusFingerprint(status: AssetIndexStatusResponseV1 | null): string | null {
+  if (!status) return null;
+  return JSON.stringify([
+    status.asset_id,
+    status.asset_version_id,
+    status.state,
+    status.retryable,
+    status.failure_reason,
+    status.indexed_at,
+    status.updated_at,
+  ]);
+}
 const ROLE_OPTIONS: Record<AssetKind, Array<{ label: string; value: string }>> = {
   IMAGE: [
     { label: "商品主图", value: "product-primary" },
@@ -237,6 +276,18 @@ export function AssetUploadWorkbench({
     useState<AssetValidationStatusResponseV1 | null>(null);
   const [validationControlError, setValidationControlError] =
     useState<string | null>(null);
+  const [indexStatus, setIndexStatus] =
+    useState<AssetIndexStatusResponseV1 | null>(null);
+  const [indexStatusError, setIndexStatusError] = useState(false);
+  const [indexStatusRefreshEpoch, setIndexStatusRefreshEpoch] = useState(0);
+  const indexStatusRequestEpoch = useRef(0);
+  const indexStatusFailureCount = useRef(0);
+  const indexStatusAuthority = useRef<{ assetId: string; version: number } | null>(
+    null,
+  );
+  const indexStatusAuthorityBaseline = useRef<string | null>(null);
+  const indexStatusAuthorityRefreshBudget = useRef(0);
+  const indexStatusLastAccepted = useRef<AssetIndexStatusResponseV1 | null>(null);
   const [operationPollingPaused, setOperationPollingPaused] = useState(false);
   const [operationPollingEpoch, setOperationPollingEpoch] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -732,6 +783,111 @@ export function AssetUploadWorkbench({
     finalized?.validation_operation.state ??
     null;
   const displayAsset = asset ?? finalized?.asset ?? null;
+  const indexAssetId =
+    displayAsset?.asset_kind === "IMAGE" ? displayAsset.id : null;
+  useEffect(() => {
+    let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    setIndexStatus((current) =>
+      current?.asset_id === indexAssetId ? current : null,
+    );
+    setIndexStatusError(false);
+    if (!indexAssetId) {
+      indexStatusAuthority.current = null;
+      indexStatusAuthorityBaseline.current = null;
+      indexStatusAuthorityRefreshBudget.current = 0;
+      indexStatusLastAccepted.current = null;
+      return () => {
+        active = false;
+      };
+    }
+    const authorityVersion = displayAsset?.version ?? 0;
+    const previousAuthority = indexStatusAuthority.current;
+    if (previousAuthority?.assetId === indexAssetId) {
+      if (previousAuthority.version !== authorityVersion) {
+        indexStatusAuthorityBaseline.current = indexStatusFingerprint(
+          indexStatusLastAccepted.current,
+        );
+        indexStatusAuthorityRefreshBudget.current =
+          INDEX_AUTHORITY_GRACE_ATTEMPTS;
+      }
+    } else {
+      indexStatusAuthorityBaseline.current = null;
+      indexStatusAuthorityRefreshBudget.current =
+        INDEX_AUTHORITY_GRACE_ATTEMPTS;
+      indexStatusLastAccepted.current = null;
+    }
+    indexStatusAuthority.current = {
+      assetId: indexAssetId,
+      version: authorityVersion,
+    };
+    const requestStatus = (): void => {
+      const request = {
+        assetId: indexAssetId,
+        requestEpoch: ++indexStatusRequestEpoch.current,
+      };
+      void api
+        .getAssetIndexStatus(indexAssetId)
+        .then((status) => {
+          if (!active) return;
+          const accepted = acceptIndexStatusResponse(
+            {
+              assetId: indexAssetId,
+              requestEpoch: indexStatusRequestEpoch.current,
+            },
+            request,
+            status,
+          );
+          if (!accepted) return;
+          indexStatusFailureCount.current = 0;
+          setIndexStatusError(false);
+          indexStatusLastAccepted.current = accepted;
+          setIndexStatus(accepted);
+          const shouldRefresh = shouldRefreshIndexStatus(accepted.state);
+          if (shouldRefresh) {
+            indexStatusAuthorityRefreshBudget.current = 0;
+          } else if (indexStatusAuthorityRefreshBudget.current > 0) {
+            const firstAuthorityGraceResponse =
+              indexStatusAuthorityRefreshBudget.current ===
+              INDEX_AUTHORITY_GRACE_ATTEMPTS;
+            if (
+              firstAuthorityGraceResponse &&
+              indexStatusAuthorityBaseline.current === null
+            ) {
+              indexStatusAuthorityBaseline.current =
+                indexStatusFingerprint(accepted);
+            }
+            const authorityProjectionChanged =
+              !firstAuthorityGraceResponse &&
+              indexStatusFingerprint(accepted) !==
+                indexStatusAuthorityBaseline.current;
+            if (authorityProjectionChanged) {
+              indexStatusAuthorityRefreshBudget.current = 0;
+            } else {
+              indexStatusAuthorityRefreshBudget.current -= 1;
+            }
+          }
+          if (shouldRefresh || indexStatusAuthorityRefreshBudget.current > 0) {
+            refreshTimer = setTimeout(requestStatus, 2_000);
+          }
+        })
+        .catch(() => {
+          if (!active) return;
+          setIndexStatus(null);
+          setIndexStatusError(true);
+          indexStatusFailureCount.current += 1;
+          refreshTimer = setTimeout(
+            requestStatus,
+            indexStatusRetryDelayMs(indexStatusFailureCount.current),
+          );
+        });
+    };
+    requestStatus();
+    return () => {
+      active = false;
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+    };
+  }, [displayAsset?.version, indexAssetId, indexStatusRefreshEpoch]);
   useEffect(() => {
     if (
       displayAsset?.asset_kind === "IMAGE" &&
@@ -761,6 +917,9 @@ export function AssetUploadWorkbench({
     validationStatus,
     operationState,
   );
+  const indexStatusView = indexStatus
+    ? indexStatusPresentation(indexStatus)
+    : null;
   const canRetryFinalize =
     persisted !== null &&
       persisted.stage !== "CREATING" &&
@@ -1025,6 +1184,44 @@ export function AssetUploadWorkbench({
           <strong>无法读取校验状态</strong>
           <span>{validationControlError}</span>
         </div>
+      ) : null}
+      {displayAsset?.asset_kind === "IMAGE" ? (
+        <section
+          aria-labelledby="asset-index-heading"
+          className="asset-index-status"
+        >
+          <div>
+            <p className="eyebrow">RETRIEVAL INDEX</p>
+            <h3 id="asset-index-heading">图片检索索引</h3>
+          </div>
+          {indexStatusError ? (
+            <div className="asset-index-status-recovery" role="status" aria-live="polite">
+              <span className="asset-index-status-error">状态暂不可用，系统将自动重试</span>
+              <button
+                className="asset-index-status-retry"
+                onClick={() =>
+                  setIndexStatusRefreshEpoch((value) => value + 1)
+                }
+                type="button"
+              >
+                立即重试
+              </button>
+            </div>
+          ) : (
+            <span
+              aria-live="polite"
+              role="status"
+              className={`asset-index-status-badge asset-index-status-${indexStatus?.state ?? "LOADING"}`}
+            >
+              {indexStatus ? INDEX_STATUS_LABELS[indexStatus.state] : "正在读取"}
+            </span>
+          )}
+          {indexStatusView?.detail ? (
+            <p className="asset-index-status-reason">
+              {indexStatusView.detail}
+            </p>
+          ) : null}
+        </section>
       ) : null}
       {displayAsset ? (
         <AssetRightsWorkbench asset={displayAsset} onAssetChange={setAsset} />

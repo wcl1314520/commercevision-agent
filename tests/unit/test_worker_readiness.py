@@ -144,6 +144,7 @@ def test_worker_dependency_probe_queries_mysql_and_closes_all_clients(
     scanner = FakeMalwareScanner()
     broker = FakeBrokerConnection()
     artifact_target_probes: list[tuple[Settings, FakeDatabase, FakeStorage]] = []
+    index_probes: list[Settings] = []
     monkeypatch.setattr(
         readiness_module,
         "Connection",
@@ -182,6 +183,13 @@ def test_worker_dependency_probe_queries_mysql_and_closes_all_clients(
             (settings, database, storage)
         ),
     )
+    monkeypatch.setattr(
+        readiness_module,
+        "probe_image_indexing_dependencies",
+        lambda settings: (
+            index_probes.append(settings) or {"milvus": "ok", "embedding_provider": "not_required"}
+        ),
+    )
 
     settings = Settings(environment="ci")
     assert readiness_module.probe_worker_dependencies(settings) == {
@@ -191,6 +199,8 @@ def test_worker_dependency_probe_queries_mysql_and_closes_all_clients(
         "malware_scanner": "ok",
         "provider_result_storage": "ok",
         "vision_credential": "ok",
+        "milvus": "ok",
+        "embedding_provider": "not_required",
     }
     assert broker.connect_attempts == [0]
     assert broker.collect_calls == [0.0]
@@ -206,6 +216,7 @@ def test_worker_dependency_probe_queries_mysql_and_closes_all_clients(
     assert storage.closed is True
     assert scanner.probed is True
     assert artifact_target_probes == [(settings, database, storage)]
+    assert index_probes == [settings]
 
 
 def test_worker_dependency_probe_checks_configured_unsettled_historical_targets(
@@ -461,9 +472,65 @@ def test_workflow_only_worker_does_not_probe_object_storage(monkeypatch) -> None
         "malware_scanner": "not_required",
         "provider_result_storage": "not_required",
         "vision_credential": "not_required",
+        "milvus": "not_required",
+        "embedding_provider": "not_required",
     }
     assert database.disposed is True
     assert storage_built is False
+
+
+def test_index_only_worker_probes_mysql_storage_milvus_and_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = FakeDatabase(FakeConnection(1))
+    storage = FakeStorage()
+    index_probes: list[Settings] = []
+    monkeypatch.setattr(
+        readiness_module,
+        "Connection",
+        lambda *_args, **_kwargs: FakeBrokerConnection(),
+    )
+    monkeypatch.setattr(
+        readiness_module,
+        "create_readiness_database",
+        lambda _settings: database,
+    )
+    monkeypatch.setattr(
+        readiness_module,
+        "build_object_storage",
+        lambda _settings: storage,
+    )
+    monkeypatch.setattr(
+        readiness_module,
+        "probe_image_indexing_dependencies",
+        lambda settings: (
+            index_probes.append(settings) or {"milvus": "ok", "embedding_provider": "not_required"}
+        ),
+    )
+    settings = Settings(
+        environment="ci",
+        worker_queues=["commercevision.index"],
+        worker_required_operation_kinds=[OperationKind.ASSET_INDEXING],
+    )
+
+    assert readiness_module.probe_worker_dependencies(settings) == {
+        "broker": "ok",
+        "mysql": "ok",
+        "object_storage": "ok",
+        "malware_scanner": "not_required",
+        "provider_result_storage": "not_required",
+        "vision_credential": "not_required",
+        "milvus": "ok",
+        "embedding_provider": "not_required",
+    }
+    assert index_probes == [settings]
+    assert storage.probed_locations == (
+        StorageLocationClass.QUARANTINE,
+        StorageLocationClass.TASK,
+        StorageLocationClass.FOUNDATION,
+    )
+    assert storage.closed is True
+    assert database.disposed is True
 
 
 def test_live_supervisor_revokes_readiness_before_shutdown_after_failure_threshold(
@@ -552,6 +619,8 @@ def test_readiness_marker_fails_closed_when_missing_or_stale(tmp_path: Path) -> 
                 "malware_scanner": "ok",
                 "provider_result_storage": "ok",
                 "vision_credential": "ok",
+                "milvus": "ok",
+                "embedding_provider": "not_required",
                 "checked_at": 100.0,
                 "fresh_until": 120.0,
             }
@@ -721,6 +790,8 @@ def test_healthcheck_requires_fresh_master_and_live_ready_prefork_children(
                 "malware_scanner": "ok",
                 "provider_result_storage": "ok",
                 "vision_credential": "ok",
+                "milvus": "ok",
+                "embedding_provider": "not_required",
                 "checked_at": 100.0,
                 "fresh_until": 120.0,
             }

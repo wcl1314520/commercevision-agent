@@ -43,6 +43,21 @@ from .execution import (
     ProductBriefRecoveryClaim,
     StaleProductBriefContinuation,
 )
+from .indexing import (
+    EmbeddingProviderPort,
+    ExactImageReferencePort,
+    ImageIndexingExecutor,
+    ImageIndexingTarget,
+    ImageIndexStatusApplicationService,
+    ImageIndexStatusQueryPort,
+    IndexCommitDecision,
+    IndexingAuthorityPort,
+    VectorIndexPort,
+)
+from .indexing_transfer import (
+    ImageIndexDataTransferDenied,
+    ImageIndexDataTransferPolicy,
+)
 from .operation_recovery import OperationRecoveryService
 from .operations import (
     DurableOperationWorker,
@@ -138,6 +153,16 @@ __all__ = [
     "EventRoute",
     "EventRoutingError",
     "EventRoutingRegistry",
+    "EmbeddingProviderPort",
+    "ExactImageReferencePort",
+    "ImageIndexingExecutor",
+    "ImageIndexingTarget",
+    "ImageIndexStatusApplicationService",
+    "ImageIndexStatusQueryPort",
+    "ImageIndexDataTransferDenied",
+    "ImageIndexDataTransferPolicy",
+    "IndexCommitDecision",
+    "IndexingAuthorityPort",
     "build_event_routing_registry",
     "InboxCoordinator",
     "MalformedEventPayloadError",
@@ -181,5 +206,6 @@ __all__ = [
     "VisionDataTransferAuthorization",
     "VisionDataTransferDenied",
     "VisionDataTransferPolicy",
+    "VectorIndexPort",
     "WorkflowApplicationService",
 ]

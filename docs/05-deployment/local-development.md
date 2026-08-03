@@ -241,6 +241,22 @@ uv run pytest tests/contract/test_object_storage_oss_live.py -m live_oss -q
 冲突目标拒绝、临时读取、条件删除和缺失对象错误归一化。没有该门禁的成功记录，不能把
 离线 OSS Contract 当作目标账号的生产验证。
 
+## IMAGE Index Worker
+
+Compose 启动 etcd + Milvus Standalone，并让 Worker 同时消费 `commercevision.index`、注册
+`ASSET_INDEXING`。本地默认使用 deterministic embedding fixture；只有 Index Worker readiness
+探测 Milvus 与 Embedding 凭据，API readiness 不依赖 Milvus。
+
+生产启用 Alibaba 时必须同时配置 mounted API-key file、Milvus token、受控 HTTPS image
+origin，以及 workspace/retention/provider/region/host 五项数据出境 allowlist。单张 Provider
+输入上限 5 MiB，Milvus 普通调用 timeout 最大 60 秒。`CV_EMBEDDING_PINNED_REVISION` 是内部
+collection epoch，不得伪称 Provider snapshot。完整状态、迁移与故障处置见
+[IMAGE 索引 Runbook](../runbooks/image-indexing.md)。
+
+CI 的 Python job 在同一 network 启动 MySQL、MinIO、etcd、Milvus，并等待 health 后执行
+真实三基础设施集成门禁；compose contract 还精确验证 workflow/asset/index/maintenance 四个
+queue 与 required operation kinds。
+
 ## 配置优先级
 
 从高到低：

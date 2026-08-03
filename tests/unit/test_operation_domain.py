@@ -446,6 +446,45 @@ def test_operation_retry_policy_uses_exponential_jitter_and_stable_deadline() ->
     assert retry_at == NOW + timedelta(seconds=3)
 
 
+def test_operation_retry_policy_converts_relative_retry_after_from_worker_clock() -> None:
+    operation = create_operation()
+    token = operation.claim(
+        owner="worker-a",
+        lease_duration=timedelta(seconds=30),
+        now=NOW,
+    )
+    operation.start(lease_token=token, now=NOW)
+    failure = OperationExecutionFailure(
+        NormalizedOperationError(
+            code="PROVIDER_THROTTLED",
+            category="provider",
+            message="provider asked the worker to wait",
+            retryable=True,
+        ),
+        retry_after_seconds=120,
+    )
+    policy = OperationRetryPolicy(
+        initial_delay=timedelta(seconds=2),
+        maximum_delay=timedelta(seconds=30),
+        maximum_elapsed=timedelta(minutes=5),
+    )
+    decided_at = NOW + timedelta(seconds=1)
+
+    _, retry_at = policy.decide(
+        operation=operation,
+        failure=failure,
+        now=decided_at,
+    )
+
+    assert retry_at == decided_at + timedelta(seconds=30)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        OperationExecutionFailure(
+            failure.error,
+            retry_at=decided_at,
+            retry_after_seconds=1,
+        )
+
+
 def test_operation_retry_policy_normalizes_exhausted_attempts_to_terminal() -> None:
     operation = create_operation(max_attempts=1)
     token = operation.claim(

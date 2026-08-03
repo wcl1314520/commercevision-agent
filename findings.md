@@ -1,5 +1,102 @@
 # CommerceVision Agent 研究结论
 
+## Ticket 09 初始执行不变量
+
+- MySQL 是 Collection specification、Embedding Record、索引操作、lease/retry/reconciliation 与
+  stale-vector 删除的权威事实源；Milvus 只保存可重建的检索加速数据，不能成为授权真相。
+- IMAGE Collection identity 必须冻结 model family、pinned revision、dimension、vector kind、
+  schema version 与 index-spec version；Milvus schema 禁用动态字段。
+- 每次 Provider submission 前与提交 indexed state 前都重新验证当前 Asset/Rights 资格；
+  Milvus upsert 后发生失权时只允许进入可审计的 stale-vector 删除流程，不能继续被检索。
+- Embedding 数量、有限值与维度必须在 upsert 前验证；输入 hash 覆盖源 bytes、预处理、
+  model configuration 与 vector kind，唯一 Embedding Record 与确定性 Milvus 主键共同承担幂等。
+- 现有 ADR-003 与 ADR-006 已分别固定“MySQL 事实源 / Milvus 可重建”和“先停止使用、再异步
+  收敛索引与对象”的不可逆边界；Ticket 09 不需要新增 ADR，也不改变 `CONTEXT.md` 的领域词汇。
+- Indexing module 的外部 interface 只暴露请求索引、对账与查询索引状态；collection 命名、
+  Milvus schema/index 参数、Provider 响应校验和恢复细节保持在深模块实现内部。
+- `Milvus upsert -> MySQL Embedding completion -> Durable Operation SUCCEEDED` 是两个持久化
+  提交边界。任一边界后的崩溃都必须保持原 generation 进入 reconciliation；不得以普通 retry
+  claim 新 generation。相同 operation/input/spec/generation 已经 `INDEXED/DELETE_PENDING/DELETED`
+  时，completion 必须幂等返回既有决策且不重复写 Outbox。
+- DLQ terminal convergence 与 operator replay 是两个不同的权威动作：普通重复消息、Rights
+  reindex 与公开索引请求不得复活 `PERMANENT_FAILED`；只有带审计身份、原因和精确 dead-letter
+  identity 的控制面 replay 可以原子恢复并重新执行。
+- Milvus generation delete 需要三态结果：精确删除、确认不存在、identity conflict。只有前两者
+  可以提交 MySQL `DELETED`；冲突必须保持未收敛并进入可审计失败/修复路径。
+- 执行中 Rights regrant 不能只换绑当前 Operation。若旧 generation 已经或可能写入 Milvus，
+  所有权丢失必须产生 generation-specific cleanup fact，保证最终只保留当前 generation。
+- Milvus upsert 与 stale deletion 都必须带持久 generation fencing：旧删除不能删除后续
+  regrant/re-index 的新向量；未知结果对账必须读取 exact deterministic PK，并核对 input hash、
+  spec 与 generation，禁止盲目创建新 PK。
+- Generation fencing 还必须覆盖迟到 upsert，而不只是 delete：若多个 lease generation 对同一
+  PK 无条件写入，旧调用可在新 generation 已提交后覆盖 Milvus，再因 MySQL CAS 失败留下事实
+  漂移。外部写身份必须能区分 generation，迟到实体必须在读取时被当前 MySQL generation 拒绝，
+  并进入 durable repair/delete，最终只保留当前 generation。
+- 并发 ensure collection 不能以“同名已存在”视为成功；必须 describe 并逐字段验证 dimension、
+  dynamic-fields=false、schema 与 index-spec。任何不兼容同名集合都应关闭式失败。
+- 第二次 eligibility 检查需在锁定当前 Asset/Rights/Embedding head 后使用 MySQL 当前时间；
+  MinIO、Embedding Provider 和 Milvus I/O 全部在事务/锁外执行。Lease、attempt、retry 与
+  reconciliation 继续只由 `durable_operations` 作为单一权威。
+- Milvus 官方 2.4.x 兼容矩阵为 Milvus 2.4.x 搭配 PyMilvus 2.4.x，2.4.15 文档明确推荐
+  `pymilvus==2.4.15`；当前仓库的 Milvus 2.4.15 不应搭配最新 2.6/3.0 客户端。官方 schema
+  文档确认 VARCHAR 可作为 primary key，custom schema 可显式关闭 auto-id 与 dynamic field，
+  upsert 按 primary key 覆盖。最终仍需用本机 Python 3.13 + 真实 Milvus 2.4.15 验证。
+  Sources: https://milvus.io/api-reference/pymilvus/v2.4.x/About.md/ ,
+  https://milvus.io/docs/v2.4.x/manage-collections.md ,
+  https://milvus.io/docs/v2.4.x/insert-update-delete.md
+- 隔离 Python 3.13 实测表明 `pymilvus==2.4.15` 裸导入失败：SDK import path 使用
+  `pkg_resources`，但隔离解析的运行依赖没有提供 setuptools。不能仅凭 `Requires-Python >=3.8`
+  宣称兼容；若显式 setuptools 探针可用，必须把它视为生产运行依赖并在 Worker 镜像中验证。
+- 第二个隔离探针在显式 `setuptools<81` 后成功导入 PyMilvus 2.4.15（Python 3.13.9），同时
+  SDK 发出 `pkg_resources` 已弃用且将移除的警告。因此 Ticket 09 如使用官方 2.4 SDK，必须
+  显式锁这一兼容依赖并把未来 Milvus/client 同步升级记入运维约束，不能依赖 dev 环境偶然提供。
+- 当前根 `pyproject.toml` 与 GitHub Actions 的 Python 静态门禁只有 Ruff format/check，
+  没有配置 mypy/pyright；Phase 2 locked spec 要求的 Python type checking 仍是最终 Release
+  Acceptance 需要闭合的工程缺口，不能把未安装的临时 `pyright` 调用冒充已有门禁。
+- Embedding Provider 的错误必须是 provider-neutral typed contract：稳定 code/category、
+  safe message、retryable、bounded relative Retry-After、可选 Provider Request ID 与
+  outcome-unknown。Adapter 不应依赖 Application；Application 把普通失败映射为 Durable retry，
+  把已 dispatch 的未知结果映射为 reconciliation。相对 Retry-After 必须由 Durable Worker 的
+  权威 `now` 转为绝对时间并受 maximum delay/deadline 限制，不能由 Provider/主机时钟决定。
+- 阿里云官方 qwen3 multimodal embedding 契约使用北京地域
+  `/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding`；IMAGE 输入位于
+  `input.contents[].image`，独立向量必须 `enable_fusion=false`，qwen3 输出 type 为 `vl`。
+  官方支持 256/512/768/1024/1536/2048/2560 维，并返回 input/image/total token usage。
+  该 URL 输入契约不支持调用方附带自定义 headers，故任何 required headers 必须关闭式拒绝。
+  Sources: https://www.alibabacloud.com/help/en/model-studio/multimodal-embedding-api-reference ,
+  https://www.alibabacloud.com/help/en/model-studio/embedding ,
+  https://www.alibabacloud.com/help/en/model-studio/error-code ,
+  https://www.alibabacloud.com/help/en/model-studio/rate-limit
+- 官方 qwen3-vl-embedding 契约只暴露 mainline model ID，不接受 snapshot/revision 参数，成功
+  响应也不返回底层模型 revision；文档中的 2026-03-06 snapshot 仅属于另一
+  `tongyi-embedding-vision-plus` 模型。因此 `actual_model` 只能诚实表示实际提交的 model ID，
+  Collection 的 `pinned_revision` 是内部审核/发布 epoch，而非 Provider-confirmed revision。
+  官方 alias 更新时必须停止旧 Collection 写入、提升内部 revision、创建并评测新 Collection，
+  禁止把不同潜在向量空间继续混写到旧 Collection。
+- Embedding 独立审查证明只检查异常 `repr` 不足以保护 Secret：首版 normalized failure 的
+  `__context__.__cause__.request` 仍可访问 Authorization、签名 URL 和 request body。生产 seam
+  必须在离开原始 `except` 后抛出全新错误，使 cause/context 图和格式化 traceback 都不含原始
+  transport 对象。审查同时锁定：已收到 429 headers 时 partial body 不得覆盖 THROTTLED/
+  Retry-After；取消必须区分排队未 dispatch、已 dispatch 与 headers-observed；provider 输入
+  需要从不可变 Object fact 携带可信 byte size 并在提交前执行官方 5 MB 上限。
+- Milvus 2.4 的 scalar schema 不提供 `DATETIME`；索引时间应存为 UTC epoch microseconds 的
+  `INT64`。2.4 dense vector dimension 的生产上限需按 32,768 约束，不能只让 Pydantic 接受
+  65,535 后等真实 collection create 才失败。
+- Milvus 独立审查确认首版 Adapter 尚有 3 个发布阻断：顶层 `retry_times=0` 不会传入
+  create-index/load/schema-cache 等 SDK 内部等待，生产 `float` timeout 可越过 lease；
+  daemon-thread `close()` 超时后仍继续运行；为 `pkg_resources` 增加的 `setuptools<81`
+  命中 `PYSEC-2026-3447`。修复必须以 Adapter 自有 monotonic 总 deadline、不遗留后台线程
+  和依赖审计全绿为准，不能用未批准例外消除门禁。
+- 同一 Asset Version 撤权删除后重授权不能直接用原 embedding input hash 创建新
+  Durable Operation：`uq_durable_operation_logical` 同时固定 target/type/version/input hash，
+  因而新行必然冲突，异常 fallback 还会返回已经终态的旧 Operation。索引操作需要与向量内容
+  hash 分离的、可审计的 authorization/write epoch identity；Milvus input hash 仍只表示 bytes /
+  preprocess / model config / vector kind，不能为绕开唯一键而混入不透明随机值。
+- Embedding 出境策略不能只证明 production Settings 中 allowlist 非空。Worker 在签发临时
+  URL 和调用外部 Provider 前必须以当前 MySQL Asset/Workspace/Retention facts 执行 policy，
+  未授权 Workspace 或 retention class 必须做到 URL 零签发、Provider 零调用；Rights Record
+  的 provider permission 不能代替系统级出境策略。
+
 ## 项目方向
 
 - 电商生图领域适合作为 Agent 应用开发作品，但必须以 Agent Runtime、评测和可靠执行为主线。

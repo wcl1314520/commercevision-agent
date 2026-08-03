@@ -600,6 +600,7 @@ def test_worker_runtime_registers_required_operation_executor(
             "required_kinds": ["ASSET_VALIDATION"],
             "registered_kinds": [
                 "ASSET_DELETION",
+                "ASSET_INDEXING",
                 "ASSET_VALIDATION",
                 "PRODUCT_BRIEF_ANALYSIS",
             ],

@@ -309,8 +309,6 @@ services:
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_REDIS_URL: redis://redis:6379/0
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
-      CV_MILVUS_URI: http://milvus:19530
-      CV_MILVUS_HEALTH_URI: http://milvus:9091/healthz
       CV_UPLOAD_SESSION_EXPIRY_SECONDS: ${CV_UPLOAD_SESSION_EXPIRY_SECONDS:-900}
       CV_UPLOAD_FINALIZE_LEASE_SECONDS: ${CV_UPLOAD_FINALIZE_LEASE_SECONDS:-120}
       CV_UPLOAD_MAX_BYTES: ${CV_UPLOAD_MAX_BYTES:-10485760}
@@ -346,8 +344,6 @@ services:
         condition: service_healthy
       object-storage-init:
         condition: service_completed_successfully
-      milvus:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test:
@@ -387,8 +383,34 @@ services:
       CV_WORKER_READINESS_PATH: /tmp/commercevision-worker-ready.json
       CV_WORKER_READINESS_MAX_AGE_SECONDS: ${CV_WORKER_READINESS_MAX_AGE_SECONDS:-50}
       CV_WORKER_STOP_GRACE_PERIOD_SECONDS: ${CV_WORKER_STOP_GRACE_PERIOD_SECONDS:-90}
-      CV_WORKER_QUEUES: '["commercevision.workflow", "commercevision.asset", "commercevision.maintenance"]'
-      CV_WORKER_REQUIRED_OPERATION_KINDS: '["ASSET_VALIDATION", "ASSET_DELETION", "PRODUCT_BRIEF_ANALYSIS"]'
+      CV_WORKER_QUEUES: '["commercevision.workflow", "commercevision.asset", "commercevision.index", "commercevision.maintenance"]'
+      CV_WORKER_REQUIRED_OPERATION_KINDS: '["ASSET_VALIDATION", "ASSET_DELETION", "ASSET_INDEXING", "PRODUCT_BRIEF_ANALYSIS"]'
+      CV_MILVUS_URI: http://milvus:19530
+      CV_MILVUS_TOKEN: ${CV_MILVUS_TOKEN:-}
+      CV_MILVUS_DATABASE: default
+      CV_MILVUS_TIMEOUT_SECONDS: ${CV_MILVUS_TIMEOUT_SECONDS:-10}
+      CV_MILVUS_READINESS_TIMEOUT_SECONDS: ${CV_MILVUS_READINESS_TIMEOUT_SECONDS:-1}
+      CV_EMBEDDING_ADAPTER: ${CV_EMBEDDING_ADAPTER:-deterministic}
+      CV_EMBEDDING_PROVIDER: ${CV_EMBEDDING_PROVIDER:-fixture}
+      CV_DETERMINISTIC_EMBEDDING_SCENARIO: ${CV_DETERMINISTIC_EMBEDDING_SCENARIO:-SUCCESS}
+      CV_EMBEDDING_MODEL_FAMILY: ${CV_EMBEDDING_MODEL_FAMILY:-deterministic-image-embedding}
+      CV_EMBEDDING_MODEL_ID: ${CV_EMBEDDING_MODEL_ID:-deterministic-image-embedding-v1}
+      CV_EMBEDDING_PINNED_REVISION: ${CV_EMBEDDING_PINNED_REVISION:-fixture-epoch-v1}
+      CV_EMBEDDING_DIMENSION: ${CV_EMBEDDING_DIMENSION:-256}
+      CV_EMBEDDING_MODEL_CONFIGURATION_VERSION: ${CV_EMBEDDING_MODEL_CONFIGURATION_VERSION:-image-embedding-config-v1}
+      CV_EMBEDDING_PREPROCESSING_VERSION: ${CV_EMBEDDING_PREPROCESSING_VERSION:-image-preprocess-v1}
+      CV_IMAGE_INDEX_TEMPORARY_REFERENCE_LIFETIME_SECONDS: ${CV_IMAGE_INDEX_TEMPORARY_REFERENCE_LIFETIME_SECONDS:-60}
+      CV_IMAGE_INDEX_MAX_ATTEMPTS: ${CV_IMAGE_INDEX_MAX_ATTEMPTS:-5}
+      CV_IMAGE_INDEX_MAX_RECONCILIATION_ATTEMPTS: ${CV_IMAGE_INDEX_MAX_RECONCILIATION_ATTEMPTS:-8}
+      CV_EMBEDDING_DATA_TRANSFER_ENABLED: ${CV_EMBEDDING_DATA_TRANSFER_ENABLED:-false}
+      CV_EMBEDDING_DATA_TRANSFER_POLICY_VERSION: ${CV_EMBEDDING_DATA_TRANSFER_POLICY_VERSION:-embedding-transfer-deny-v1}
+      CV_EMBEDDING_DATA_TRANSFER_ALLOWED_WORKSPACE_IDS: '${CV_EMBEDDING_DATA_TRANSFER_ALLOWED_WORKSPACE_IDS:-[]}'
+      CV_EMBEDDING_DATA_TRANSFER_ALLOWED_RETENTION_CLASSES: '${CV_EMBEDDING_DATA_TRANSFER_ALLOWED_RETENTION_CLASSES:-[]}'
+      CV_EMBEDDING_DATA_TRANSFER_ALLOWED_PROVIDERS: '${CV_EMBEDDING_DATA_TRANSFER_ALLOWED_PROVIDERS:-[]}'
+      CV_EMBEDDING_DATA_TRANSFER_ALLOWED_ENDPOINT_REGIONS: '${CV_EMBEDDING_DATA_TRANSFER_ALLOWED_ENDPOINT_REGIONS:-[]}'
+      CV_EMBEDDING_DATA_TRANSFER_ALLOWED_ENDPOINT_HOSTS: '${CV_EMBEDDING_DATA_TRANSFER_ALLOWED_ENDPOINT_HOSTS:-[]}'
+      CV_ALIBABA_EMBEDDING_API_KEY_FILE: /run/secrets/alibaba-embedding-api-key
+      CV_ALIBABA_EMBEDDING_ALLOWED_IMAGE_ORIGINS: '${CV_ALIBABA_EMBEDDING_ALLOWED_IMAGE_ORIGINS:-[]}'
       CV_UPLOAD_MAX_BYTES: ${CV_UPLOAD_MAX_BYTES:-10485760}
       CV_UPLOAD_MAX_LORA_BYTES: ${CV_UPLOAD_MAX_LORA_BYTES:-104857600}
       CV_UPLOAD_MAX_PROMPT_TEMPLATE_BYTES: ${CV_UPLOAD_MAX_PROMPT_TEMPLATE_BYTES:-262144}
@@ -422,6 +444,10 @@ services:
         source: "${CV_ALIBABA_VISION_API_KEY_HOST_PATH:-./fixtures/blank-alibaba-vision-api-key}"
         target: /run/secrets/alibaba-vision-api-key
         read_only: true
+      - type: bind
+        source: "${CV_ALIBABA_EMBEDDING_API_KEY_HOST_PATH:-./fixtures/blank-alibaba-vision-api-key}"
+        target: /run/secrets/alibaba-embedding-api-key
+        read_only: true
     depends_on:
       clamav:
         condition: service_healthy
@@ -431,6 +457,8 @@ services:
         condition: service_completed_successfully
       object-storage-init:
         condition: service_completed_successfully
+      milvus:
+        condition: service_healthy
     stop_grace_period: "${CV_WORKER_STOP_GRACE_PERIOD_SECONDS:-90}s"
     restart: unless-stopped
     healthcheck:

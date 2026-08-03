@@ -10,7 +10,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:proxy": "node --experimental-strip-types --test tests/proxy-route.test.mjs",
-    "test:unit": "vitest run --config tests/vitest.config.ts tests/asset-api.test.mjs tests/asset-upload-policy.test.mjs tests/brand-profile-api.test.mjs tests/brand-profile-ui-state.test.mjs tests/brand-profile-workbench.test.mjs tests/e2e-server-process.test.mjs tests/operation-polling.test.mjs tests/product-brief-api.test.mjs tests/product-brief-persistence.test.mjs tests/product-brief-workbench.test.mjs tests/upload-workflow.test.mjs tests/validation-presentation.test.mjs",
+    "test:unit": "vitest run --config tests/vitest.config.ts tests/index-status-state.test.mjs tests/asset-api.test.mjs tests/asset-upload-policy.test.mjs tests/brand-profile-api.test.mjs tests/brand-profile-ui-state.test.mjs tests/brand-profile-workbench.test.mjs tests/e2e-server-process.test.mjs tests/operation-polling.test.mjs tests/product-brief-api.test.mjs tests/product-brief-persistence.test.mjs tests/product-brief-workbench.test.mjs tests/upload-workflow.test.mjs tests/validation-presentation.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

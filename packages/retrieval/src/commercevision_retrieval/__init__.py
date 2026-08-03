@@ -1,1 +1,5 @@
-"""Multimodal retrieval boundary; indexing starts in Phase 2."""
+"""Multimodal retrieval and vector-index adapters."""
+
+from .milvus import MilvusVectorIndexAdapter
+
+__all__ = ["MilvusVectorIndexAdapter"]

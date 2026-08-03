@@ -60,13 +60,16 @@ flowchart LR
 
 ### MySQL 到 Milvus
 
-- 资产事务提交时写 `asset_index_requested` Outbox。
-- Indexer 生成 Embedding 并 upsert Milvus。
-- 成功后更新 MySQL `embedding_status` 和版本。
-- 删除资产时先标记不可检索，再异步删除向量。
+- 资产/Rights 事务提交时写 typed `asset.index.requested` Outbox；Index Worker 通过
+  Durable Operation 执行，不直接消费裸对象路径。
+- Indexer 对精确 AssetVersion 签发短期 URL，生成 Embedding，并用 generation-specific
+  primary key upsert Milvus。
+- 成功后在一个 MySQL 事务更新 `embedding_records` 并写 `asset.index.completed` Outbox。
+- 删除或失权时先进入 `DELETE_PENDING`，再用 input/spec/generation 精确删除旧向量。
 - Milvus 全量丢失时可以从 MySQL + OSS 重建。
 
-允许短时间最终一致，但未授权或已删除资产必须在 MySQL 过滤阶段被剔除。
+允许短时间最终一致，但 Ticket 10 retrieval 必须按 MySQL 当前 generation、AssetVersion 与
+Rights 二次过滤；Milvus 命中或 `INDEXED` 历史事实都不能单独授予访问。
 
 ### MySQL 到 RabbitMQ
 

@@ -290,6 +290,8 @@ def worker_bootstrap_readiness() -> dict[str, object]:
         and (_dependency_readiness or {}).get("malware_scanner") in {"ok", "not_required"}
         and (_dependency_readiness or {}).get("provider_result_storage") in {"ok", "not_required"}
         and (_dependency_readiness or {}).get("vision_credential") in {"ok", "not_required"}
+        and (_dependency_readiness or {}).get("milvus") in {"ok", "not_required"}
+        and (_dependency_readiness or {}).get("embedding_provider") in {"ok", "not_required"}
     )
     return {
         "ready": _consumer_ready and dependencies_ready and not missing,
@@ -314,6 +316,11 @@ def worker_bootstrap_readiness() -> dict[str, object]:
         ),
         "vision_credential": (_dependency_readiness or {}).get(
             "vision_credential",
+            "not_checked",
+        ),
+        "milvus": (_dependency_readiness or {}).get("milvus", "not_checked"),
+        "embedding_provider": (_dependency_readiness or {}).get(
+            "embedding_provider",
             "not_checked",
         ),
         "error": _startup_error,

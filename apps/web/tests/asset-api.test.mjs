@@ -39,6 +39,34 @@ describe("AssetApi validation status reads", () => {
     );
   });
 
+  it("gets the sanitized IMAGE index status without vector infrastructure facts", async () => {
+    const assetId = "019f8a00-0000-7000-8000-000000000011";
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        asset_id: assetId,
+        asset_version_id: "019f8a00-0000-7000-8000-000000000012",
+        state: "INDEXED",
+        retryable: false,
+        failure_reason: null,
+        indexed_at: "2026-07-31T00:00:00Z",
+        updated_at: "2026-07-31T00:00:00Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const status = await new AssetApi({
+      baseUrl: "https://web.example",
+      workspaceId: "catalog-demo",
+    }).getAssetIndexStatus(assetId);
+
+    expect(status.state).toBe("INDEXED");
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `https://web.example/api/v1/assets/${assetId}/index-status`,
+    );
+    expect(status).not.toHaveProperty("collection_name");
+    expect(status).not.toHaveProperty("milvus_primary_key");
+  });
+
   it("aborts a control-plane request at the configured deadline", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(

@@ -2,6 +2,16 @@
 
 export type AssetKind = "IMAGE" | "LORA" | "PROMPT_TEMPLATE" | "MODEL_CONFIGURATION";
 
+export interface AssetIndexStatusResponseV1 {
+  asset_id: string;
+  asset_version_id: string | null;
+  state: "NOT_REQUESTED" | "PENDING" | "PROCESSING" | "INDEXED" | "RETRYABLE_FAILED" | "PERMANENT_FAILED" | "STALE" | "DELETE_PENDING" | "DELETED";
+  retryable: boolean;
+  failure_reason: string | null;
+  indexed_at: string | null;
+  updated_at: string | null;
+}
+
 export interface AssetAdministratorBlockRequestV1 {
   expected_asset_version: number;
   reason: string;

@@ -1,4 +1,5 @@
 import type {
+  AssetIndexStatusResponseV1,
   AssetResponseV1,
   AssetValidationStatusResponseV1,
   ErrorResponse,
@@ -15,6 +16,7 @@ import type {
   UploadSessionCreateResponseV1,
   UploadSessionResponseV1,
 } from "./generated/catalog-api";
+import { decodeAssetIndexStatus } from "./index-status-state";
 
 export type WorkspaceCapabilities = {
   administrator: boolean;
@@ -183,6 +185,12 @@ export class AssetApi {
     return this.request<AssetValidationStatusResponseV1>(
       `/api/v1/assets/${encodeURIComponent(assetId)}/validation`,
     );
+  }
+
+  getAssetIndexStatus(assetId: string): Promise<AssetIndexStatusResponseV1> {
+    return this.request<unknown>(
+      `/api/v1/assets/${encodeURIComponent(assetId)}/index-status`,
+    ).then(decodeAssetIndexStatus);
   }
 
   registerRights(

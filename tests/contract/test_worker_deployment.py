@@ -290,6 +290,8 @@ def test_ci_runs_alembic_with_the_migration_identity_only() -> None:
     steps = {step.get("name"): step for step in python_job["steps"]}
 
     assert environment["CV_MYSQL_DSN"].startswith("mysql+pymysql://commercevision:commercevision@")
+    assert environment["CV_MILVUS_URI"] == "http://127.0.0.1:19531"
+    assert environment["CV_MILVUS_READINESS_TIMEOUT_SECONDS"] == "10"
     assert "CV_MIGRATION_MYSQL_DSN" not in environment
     assert steps["Reconcile runtime database grants"]["run"].endswith(
         "< infra/mysql/reconcile-runtime-grants.sql"
@@ -317,7 +319,7 @@ def test_mysql_readiness_requires_authenticated_tcp_query() -> None:
         assert "SELECT 1" in healthcheck
 
 
-def test_compose_worker_consumes_asset_product_brief_and_maintenance_work() -> None:
+def test_compose_worker_consumes_all_deployed_operation_queues() -> None:
     worker_environment = _compose_services()["worker"]["environment"]
     configured = json.loads(worker_environment["CV_WORKER_QUEUES"])
     required = json.loads(worker_environment["CV_WORKER_REQUIRED_OPERATION_KINDS"])
@@ -325,11 +327,13 @@ def test_compose_worker_consumes_asset_product_brief_and_maintenance_work() -> N
     assert configured == [
         "commercevision.workflow",
         "commercevision.asset",
+        "commercevision.index",
         "commercevision.maintenance",
     ]
     assert required == [
         "ASSET_VALIDATION",
         "ASSET_DELETION",
+        "ASSET_INDEXING",
         "PRODUCT_BRIEF_ANALYSIS",
     ]
 

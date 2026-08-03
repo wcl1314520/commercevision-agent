@@ -25,6 +25,8 @@ def available_builtin_operation_kinds(settings: Settings) -> frozenset[Operation
         )
     if settings.maintenance_queue_name in queues:
         kinds.add(OperationKind.ASSET_DELETION)
+    if settings.index_queue_name in queues:
+        kinds.add(OperationKind.ASSET_INDEXING)
     return frozenset(kinds)
 
 

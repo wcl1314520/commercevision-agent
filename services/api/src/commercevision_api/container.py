@@ -13,6 +13,7 @@ from commercevision_application import (
     BrandProfileCursorCodec,
     CatalogApplicationService,
     DeadLetterOperatorService,
+    ImageIndexStatusApplicationService,
     OperationApplicationService,
     ProductBriefApplicationService,
     ProductBriefPolicy,
@@ -36,6 +37,7 @@ from commercevision_persistence import (
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyCatalogUnitOfWork,
+    SqlAlchemyImageIndexStatusQueries,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyOperatorUnitOfWork,
     SqlAlchemyProductBriefUnitOfWork,
@@ -128,6 +130,7 @@ class ApiContainer:
     principal_resolver: SignedTrustedPrincipalResolver
     access_policy: PrincipalAccessPolicy
     object_storage_readiness: ObjectStorageReadiness
+    image_index_status: ImageIndexStatusApplicationService
 
     @classmethod
     def build(
@@ -258,6 +261,9 @@ class ApiContainer:
             principal_resolver=principal_resolver,
             access_policy=access_policy,
             object_storage_readiness=object_storage,
+            image_index_status=ImageIndexStatusApplicationService(
+                SqlAlchemyImageIndexStatusQueries(database.session_factory)
+            ),
         )
 
     def close(self) -> None:

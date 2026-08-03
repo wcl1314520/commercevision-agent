@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from . import product_brief
 from .asset_validation import build_malware_scanner
+from .image_indexing import probe_image_indexing_dependencies
 from .product_brief import validate_product_brief_vision_credential
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ _REQUIRED_DEPENDENCY_STATES = {
     "malware_scanner": {"ok", "not_required"},
     "provider_result_storage": {"ok", "not_required"},
     "vision_credential": {"ok", "not_required"},
+    "milvus": {"ok", "not_required"},
+    "embedding_provider": {"ok", "not_required"},
 }
 
 
@@ -332,6 +335,12 @@ def probe_worker_dependencies(settings: Settings) -> dict[str, str]:
             scanner = build_malware_scanner(settings)
             scanner.assert_ready()
             malware_status = "ok"
+        indexing_status = {
+            "milvus": "not_required",
+            "embedding_provider": "not_required",
+        }
+        if settings.index_queue_name in settings.configured_worker_queues:
+            indexing_status = probe_image_indexing_dependencies(settings)
         return {
             "broker": "ok",
             "mysql": "ok",
@@ -339,6 +348,7 @@ def probe_worker_dependencies(settings: Settings) -> dict[str, str]:
             "malware_scanner": malware_status,
             "provider_result_storage": provider_result_storage_status,
             "vision_credential": validate_product_brief_vision_credential(settings),
+            **indexing_status,
         }
     finally:
         database.dispose()

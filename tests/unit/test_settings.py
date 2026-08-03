@@ -27,6 +27,134 @@ def test_vision_transfer_and_provider_configuration_deny_by_default() -> None:
     assert "beauty.medical_like_claim_flags" in (settings.product_brief_sensitive_claim_paths)
 
 
+def test_image_embedding_defaults_are_local_fixture_only() -> None:
+    settings = Settings()
+
+    assert settings.embedding_adapter == "deterministic"
+    assert settings.embedding_provider == "fixture"
+    assert settings.embedding_dimension == 256
+    assert settings.alibaba_embedding_api_key is None
+    assert settings.alibaba_embedding_api_key_file is None
+    assert settings.embedding_data_transfer_enabled is False
+    assert settings.embedding_data_transfer_allowed_workspace_ids == []
+
+
+def test_production_image_index_worker_requires_controlled_alibaba_boundary() -> None:
+    common = {
+        "environment": "production",
+        "worker_queues": ["commercevision.index"],
+        "worker_required_operation_kinds": [OperationKind.ASSET_INDEXING],
+        "object_store_endpoint": "https://object-storage.internal.example",
+        "object_store_presign_endpoint": "https://assets.example",
+        "object_store_secret_key": "production-object-store-secret",
+        "object_store_require_encryption": True,
+        "embedding_adapter": "alibaba",
+        "embedding_provider": "alibaba-model-studio",
+        "embedding_model_family": "qwen3-vl-embedding",
+        "embedding_model_id": "qwen3-vl-embedding",
+        "embedding_pinned_revision": "commercevision-qwen3-vl-embedding-epoch-2026-07-31",
+        "embedding_dimension": 1024,
+        "alibaba_embedding_allowed_image_origins": ["https://assets.example"],
+        "embedding_data_transfer_enabled": True,
+        "embedding_data_transfer_policy_version": "embedding-transfer-v1",
+        "embedding_data_transfer_allowed_workspace_ids": ["Catalog-A"],
+        "embedding_data_transfer_allowed_retention_classes": ["TASK", "FOUNDATION"],
+        "embedding_data_transfer_allowed_providers": ["alibaba-model-studio"],
+        "embedding_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
+        "embedding_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+        "milvus_uri": "https://milvus.internal.example:19530",
+        "milvus_token": "milvus-production-secret",
+    }
+
+    with pytest.raises(ValidationError, match="mounted API key"):
+        Settings(**common)
+
+    settings = Settings(
+        **common,
+        alibaba_embedding_api_key_file="/run/secrets/model-studio-api-key",
+    )
+
+    assert settings.alibaba_embedding_endpoint == "https://dashscope.aliyuncs.com/api/v1"
+    assert settings.alibaba_embedding_endpoint_host == "dashscope.aliyuncs.com"
+    assert settings.embedding_pinned_revision.startswith("commercevision-")
+    assert "milvus-production-secret" not in repr(settings)
+
+    without_milvus_auth = dict(common)
+    without_milvus_auth.pop("milvus_token")
+    with pytest.raises(ValidationError, match="Milvus authentication"):
+        Settings(
+            **without_milvus_auth,
+            alibaba_embedding_api_key_file="/run/secrets/model-studio-api-key",
+        )
+
+    with pytest.raises(ValidationError, match="Milvus TLS"):
+        Settings(
+            **{**common, "milvus_uri": "http://milvus.internal.example:19530"},
+            alibaba_embedding_api_key_file="/run/secrets/model-studio-api-key",
+        )
+
+    with pytest.raises(ValidationError, match="credential-free"):
+        Settings(
+            **{
+                **common,
+                "milvus_uri": "https://root:uri-secret@milvus.internal.example:19530",
+            },
+            alibaba_embedding_api_key_file="/run/secrets/model-studio-api-key",
+        )
+
+    for invalid_endpoint in (
+        "https://milvus.internal.example:19530/tenant",
+        "https://milvus.internal.example:19530?token=uri-secret",
+        "https://milvus.internal.example:19530#uri-secret",
+    ):
+        with pytest.raises(ValidationError, match="without path"):
+            Settings(
+                **{**common, "milvus_uri": invalid_endpoint},
+                alibaba_embedding_api_key_file="/run/secrets/model-studio-api-key",
+            )
+
+    with pytest.raises(ValidationError, match="default Milvus credential"):
+        Settings(
+            **{**common, "milvus_token": "root:Milvus"},
+            alibaba_embedding_api_key_file="/run/secrets/model-studio-api-key",
+        )
+
+
+def test_alibaba_embedding_rejects_provider_snapshot_semantics_and_static_prod_secret() -> None:
+    with pytest.raises(ValidationError, match="qwen3-vl-embedding"):
+        Settings(
+            embedding_adapter="alibaba",
+            embedding_provider="alibaba-model-studio",
+            embedding_model_id="qwen3-vl-embedding-2026-07-31",
+        )
+
+    with pytest.raises(ValidationError, match="mounted API key"):
+        Settings(
+            environment="production",
+            worker_queues=["commercevision.index"],
+            worker_required_operation_kinds=[OperationKind.ASSET_INDEXING],
+            object_store_endpoint="https://object-storage.internal.example",
+            object_store_presign_endpoint="https://assets.example",
+            object_store_secret_key="production-object-store-secret",
+            object_store_require_encryption=True,
+            embedding_adapter="alibaba",
+            embedding_provider="alibaba-model-studio",
+            embedding_model_family="qwen3-vl-embedding",
+            embedding_model_id="qwen3-vl-embedding",
+            embedding_pinned_revision="commercevision-qwen3-vl-embedding-epoch-2026-07-31",
+            embedding_dimension=1024,
+            alibaba_embedding_api_key="must-not-be-static-in-production",
+            alibaba_embedding_allowed_image_origins=["https://assets.example"],
+            embedding_data_transfer_enabled=True,
+            embedding_data_transfer_policy_version="embedding-transfer-v1",
+            embedding_data_transfer_allowed_workspace_ids=["Catalog-A"],
+            embedding_data_transfer_allowed_retention_classes=["TASK"],
+            embedding_data_transfer_allowed_providers=["alibaba-model-studio"],
+            embedding_data_transfer_allowed_endpoint_regions=["cn-beijing"],
+            embedding_data_transfer_allowed_endpoint_hosts=["dashscope.aliyuncs.com"],
+        )
+
+
 def test_vision_provider_budgets_are_explicitly_bounded() -> None:
     settings = Settings(
         alibaba_vision_maximum_output_tokens=2048,

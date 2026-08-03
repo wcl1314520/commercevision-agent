@@ -486,6 +486,82 @@ textarea {
   padding-top: 18px;
 }
 
+.asset-index-status {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr auto;
+  margin-top: 18px;
+  padding: 16px;
+}
+
+.asset-index-status h3,
+.asset-index-status p {
+  margin: 0;
+}
+
+.asset-index-status-badge,
+.asset-index-status-error {
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 7px 11px;
+}
+
+.asset-index-status-INDEXED {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.asset-index-status-RETRYABLE_FAILED,
+.asset-index-status-PENDING,
+.asset-index-status-PROCESSING,
+.asset-index-status-LOADING {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.asset-index-status-PERMANENT_FAILED,
+.asset-index-status-STALE,
+.asset-index-status-DELETE_PENDING,
+.asset-index-status-DELETED,
+.asset-index-status-error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.asset-index-status-NOT_REQUESTED {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.asset-index-status-reason {
+  color: var(--muted);
+  font-size: 0.86rem;
+  grid-column: 1 / -1;
+}
+
+.asset-index-status-recovery {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.asset-index-status-retry {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+@media (max-width: 640px) {
+  .asset-index-status {
+    align-items: start;
+    grid-template-columns: 1fr;
+  }
+}
+
 .rights-form,
 .rights-actions,
 .rights-decision {

@@ -46,6 +46,15 @@ from .brand_profiles import (
 )
 from .catalog import SKU, DuplicateExternalIdentifierError, Product
 from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
+from .indexing import (
+    CollectionSpec,
+    CollectionState,
+    EmbeddingRecord,
+    EmbeddingState,
+    VectorKind,
+    compute_embedding_input_hash,
+    generation_milvus_primary_key,
+)
 from .operations import (
     DurableOperation,
     NormalizedOperationError,
@@ -147,11 +156,15 @@ __all__ = [
     "BrandRule",
     "BrandRuleScope",
     "ConcurrencyError",
+    "CollectionSpec",
+    "CollectionState",
     "CurrentUsabilityDecision",
     "DataIntegrityError",
     "DomainError",
     "DuplicateExternalIdentifierError",
     "DurableOperation",
+    "EmbeddingState",
+    "EmbeddingRecord",
     "InvalidDataError",
     "InvalidTransitionError",
     "LeaseConflictError",
@@ -207,6 +220,7 @@ __all__ = [
     "UploadSessionState",
     "ValidationStage",
     "ValidationVerdict",
+    "VectorKind",
     "UUID_PATTERN",
     "UniqueConstraintError",
     "Workflow",
@@ -227,6 +241,8 @@ __all__ = [
     "normalize_provider_request_id",
     "validate_workspace_id",
     "evaluate_current_usability",
+    "compute_embedding_input_hash",
+    "generation_milvus_primary_key",
     "assert_product_brief_schema",
     "product_brief_field_paths",
     "product_brief_field_value_kind",

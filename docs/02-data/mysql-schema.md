@@ -221,17 +221,23 @@ Asset 状态，并写入 Audit 和 Durable Outbox。并发替换由聚合行锁�
 `UTC_TIMESTAMP(6)` 条件的 DML 重新检查 retention、当前 Rights Record、有效期和非空许可
 集合；边界已跨越时整笔事务回滚。
 
-### `asset_embeddings`
+### `collection_registry` 与 `embedding_records`
 
-MySQL 不保存向量本体，只保存索引事实：
+MySQL 不保存向量本体，但保存全部索引 authority：
 
-- `asset_id`
-- `embedding_model`
-- `embedding_version`
-- `milvus_collection`
-- `milvus_primary_key`
-- `status`
-- `indexed_at`
+- `collection_registry` 用 immutable spec hash 绑定 model family、内部 pinned epoch、dimension、
+  schema/index spec、read/write enablement 与 Milvus physical collection。
+- `embedding_records` 以 `(asset_version_id, embedding_spec_hash)` 唯一，绑定精确 AssetVersion、
+  current Rights identity、current Durable Operation、embedding input/spec hash、状态与
+  单调 `write_generation`。
+- Milvus 主键按 generation 生成 `<embedding_record_id>:g<N>`；重试、重授权和模型迁移不得
+  覆盖旧 generation。
+- operation epoch/hash 是调度身份，与 immutable embedding input hash 分离；重授权复用一条
+  `embedding_records`，但创建新的 Durable Operation。
+
+claim/commit 的锁顺序固定为 Asset authority → collection → embedding record。Provider 调用和
+Milvus I/O 均在事务外；commit 后以 generation CAS 更新 `INDEXED`，失权时原子进入
+`DELETE_PENDING` 并写 exact delete Outbox。Milvus、缓存或事件中的历史 Rights 不是授权源。
 
 ## ProductBrief
 

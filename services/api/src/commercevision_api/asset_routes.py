@@ -5,6 +5,7 @@ from typing import Annotated
 from commercevision_application import AuthenticatedPrincipal
 from commercevision_contracts import (
     AssetAdministratorBlockRequestV1,
+    AssetIndexStatusResponseV1,
     AssetResponseV1,
     AssetValidationStatusResponseV1,
     ErrorResponse,
@@ -244,6 +245,28 @@ def get_asset_validation(
         trusted_principal=trusted_principal,
     )
     return request.app.state.container.assets.get_asset_validation(
+        workspace_id=workspace_id,
+        asset_id=asset_id,
+    )
+
+
+@asset_router.get(
+    "/{asset_id}/index-status",
+    response_model=AssetIndexStatusResponseV1,
+    responses=UPLOAD_ERROR_RESPONSES,
+)
+def get_asset_index_status(
+    asset_id: str,
+    request: Request,
+    workspace_id: WorkspaceHeader,
+    trusted_principal: PrincipalHeader = None,
+) -> AssetIndexStatusResponseV1:
+    _require_workspace_principal(
+        request,
+        workspace_id=workspace_id,
+        trusted_principal=trusted_principal,
+    )
+    return request.app.state.container.image_index_status.get_current(
         workspace_id=workspace_id,
         asset_id=asset_id,
     )

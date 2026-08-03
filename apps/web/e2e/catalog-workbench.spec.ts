@@ -2330,6 +2330,8 @@ test("manages immutable rights history and current usability", async ({ page }) 
   };
   const rightsHistory: Record<string, unknown>[] = [];
   let conflictNextReplacement = true;
+  let indexStatusAttempts = 0;
+  let postRightsIndexStatusAttempts = 0;
 
   const rightsRecord = (
     version: number,
@@ -2403,6 +2405,26 @@ test("manages immutable rights history and current usability", async ({ page }) 
       const request = route.request();
       const path = new URL(request.url()).pathname;
 
+      if (path.endsWith("/index-status") && request.method() === "GET") {
+        indexStatusAttempts += 1;
+        if (currentAsset.current_rights_record_id !== null) {
+          postRightsIndexStatusAttempts += 1;
+        }
+        const rightsProjectionCaughtUp = postRightsIndexStatusAttempts >= 2;
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            asset_id: quarantinedAsset.id,
+            asset_version_id: assetVersion.id,
+            state: rightsProjectionCaughtUp ? "STALE" : "INDEXED",
+            retryable: false,
+            failure_reason: rightsProjectionCaughtUp ? "RIGHTS_CHANGED" : null,
+            indexed_at: "2026-07-31T00:00:00Z",
+            updated_at: "2026-07-31T00:00:00Z",
+          }),
+        });
+        return;
+      }
       if (path.endsWith("/rights") && request.method() === "GET") {
         const beforeVersion = Number(
           new URL(request.url()).searchParams.get("before_version"),
@@ -2578,6 +2600,9 @@ test("manages immutable rights history and current usability", async ({ page }) 
   await expect(page.locator(".rights-history")).toContainText(
     "evidence://rights/register",
   );
+  await expect(page.locator(".asset-index-status")).toContainText("已失效");
+  expect(postRightsIndexStatusAttempts).toBe(2);
+  expect(indexStatusAttempts).toBeGreaterThanOrEqual(3);
   await page.getByRole("button", { name: "检查当前可用性" }).click();
   await expect(page.locator(".rights-authorized")).toContainText("AUTHORIZED");
   await expect(page.locator(".rights-authorized")).toContainText("决策时间");
@@ -2693,4 +2718,256 @@ test("manages immutable rights history and current usability", async ({ page }) 
       delete clockWindow.__commercevisionRealDateNow;
     }
   });
+});
+
+test("automatically recovers IMAGE index status after a failed request", async ({
+  page,
+}) => {
+  await mockReadyCatalog(page);
+  await page.addInitScript(
+    ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: `commercevision:upload:catalog-demo:${product.id}`,
+      value: {
+        sessionId: uploadSession.id,
+        finalizeIdempotencyKey: "web-index-status-recovery-0001",
+        finalizeExpectedVersion: 1,
+        stage: "FINALIZED",
+        assetId: quarantinedAsset.id,
+      },
+    },
+  );
+  await page.route(
+    `**/api/v1/upload-sessions/${uploadSession.id}`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(finalizeResponse.upload_session),
+      });
+    },
+  );
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(quarantinedAsset),
+    });
+  });
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/validation`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          asset_status: "PENDING_RIGHTS",
+          validation_policy_version: "asset-validation-v1",
+          operation: {
+            id: durableOperation.id,
+            state: "SUCCEEDED",
+            attempt_count: 1,
+            max_attempts: 3,
+            next_attempt_at: null,
+            retryable: false,
+            failure_code: null,
+            failure_category: null,
+            completed_at: "2026-07-24T12:45:05Z",
+          },
+          stages: [],
+        }),
+      });
+    },
+  );
+  let indexAttempts = 0;
+  await page.route(
+    `**/api/v1/assets/${quarantinedAsset.id}/index-status`,
+    async (route) => {
+      indexAttempts += 1;
+      if (indexAttempts === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...errorEnvelope,
+            code: "SERVICE_UNAVAILABLE",
+            message: "index status unavailable",
+          }),
+        });
+        return;
+      }
+      const projectionCaughtUp = indexAttempts >= 4;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          asset_id: quarantinedAsset.id,
+          asset_version_id: assetVersion.id,
+          state: projectionCaughtUp ? "INDEXED" : "NOT_REQUESTED",
+          retryable: false,
+          failure_reason: null,
+          indexed_at: projectionCaughtUp ? "2026-07-31T00:00:00Z" : null,
+          updated_at: "2026-07-31T00:00:00Z",
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  const indexSection = page.locator(".asset-index-status");
+  await expect(indexSection).toContainText("状态暂不可用，系统将自动重试");
+  const retryButton = page.getByRole("button", { name: "立即重试" });
+  await expect(retryButton).toBeVisible();
+  expect((await retryButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await expect(indexSection).toContainText("可检索", { timeout: 10_000 });
+  await expect(indexSection).not.toContainText("状态暂不可用");
+  expect(indexAttempts).toBe(4);
+});
+
+test("ignores an old asset index response and timer after product switch", async ({
+  page,
+}) => {
+  const secondProduct = {
+    ...product,
+    id: "019f8a00-0000-7000-8000-000000000090",
+    external_id: "SERUM-090",
+    title: "Second Product",
+  };
+  const secondSession = {
+    ...finalizeResponse.upload_session,
+    id: "019f8a00-0000-7000-8000-000000000091",
+    reserved_asset_id: "019f8a00-0000-7000-8000-000000000092",
+    product_id: secondProduct.id,
+    asset_version_id: "019f8a00-0000-7000-8000-000000000093",
+  };
+  const secondVersion = {
+    ...assetVersion,
+    id: secondSession.asset_version_id,
+    asset_id: secondSession.reserved_asset_id,
+  };
+  const secondAsset = {
+    ...quarantinedAsset,
+    id: secondSession.reserved_asset_id,
+    product_id: secondProduct.id,
+    current_version_id: secondVersion.id,
+    current_version: secondVersion,
+  };
+  for (const [productId, sessionId, assetId] of [
+    [product.id, uploadSession.id, quarantinedAsset.id],
+    [secondProduct.id, secondSession.id, secondAsset.id],
+  ]) {
+    await page.addInitScript(
+      ({ key, value }) => localStorage.setItem(key, JSON.stringify(value)),
+      {
+        key: `commercevision:upload:catalog-demo:${productId}`,
+        value: {
+          sessionId,
+          finalizeIdempotencyKey: `web-index-switch-${productId}`,
+          finalizeExpectedVersion: 1,
+          stage: "FINALIZED",
+          assetId,
+        },
+      },
+    );
+  }
+  await page.route("**/api/v1/products**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const body =
+      path === `/api/v1/products/${product.id}`
+        ? product
+        : path === `/api/v1/products/${secondProduct.id}`
+          ? secondProduct
+          : { items: [product, secondProduct], next_cursor: null };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+  await page.route("**/api/v1/upload-sessions/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        path.endsWith(secondSession.id)
+          ? secondSession
+          : finalizeResponse.upload_session,
+      ),
+    });
+  });
+  await page.route("**/api/v1/assets/**/validation", async (route) => {
+    const second = route.request().url().includes(secondAsset.id);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset_id: second ? secondAsset.id : quarantinedAsset.id,
+        asset_version_id: second ? secondVersion.id : assetVersion.id,
+        asset_status: "PENDING_RIGHTS",
+        validation_policy_version: "asset-validation-v1",
+        operation: {
+          id: durableOperation.id,
+          state: "SUCCEEDED",
+          attempt_count: 1,
+          max_attempts: 3,
+          next_attempt_at: null,
+          retryable: false,
+          failure_code: null,
+          failure_category: null,
+          completed_at: "2026-07-24T12:45:05Z",
+        },
+        stages: [],
+      }),
+    });
+  });
+  await page.route(`**/api/v1/assets/${quarantinedAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(quarantinedAsset),
+    });
+  });
+  await page.route(`**/api/v1/assets/${secondAsset.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(secondAsset),
+    });
+  });
+  let signalOldStarted!: () => void;
+  let releaseOld!: () => void;
+  const oldStarted = new Promise<void>((resolve) => {
+    signalOldStarted = resolve;
+  });
+  const oldGate = new Promise<void>((resolve) => {
+    releaseOld = resolve;
+  });
+  let secondIndexRequests = 0;
+  await page.route("**/api/v1/assets/**/index-status", async (route) => {
+    const second = route.request().url().includes(secondAsset.id);
+    if (!second) {
+      signalOldStarted();
+      await oldGate;
+    } else {
+      secondIndexRequests += 1;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset_id: second ? secondAsset.id : quarantinedAsset.id,
+        asset_version_id: second ? secondVersion.id : assetVersion.id,
+        state: second ? "INDEXED" : "RETRYABLE_FAILED",
+        retryable: !second,
+        failure_reason: second ? null : "PROVIDER_THROTTLED",
+        indexed_at: second ? "2026-07-31T00:00:00Z" : null,
+        updated_at: "2026-07-31T00:00:00Z",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await oldStarted;
+  await page.getByRole("button", { name: /Second Product/ }).click();
+  const indexSection = page.locator(".asset-index-status");
+  await expect(indexSection).toContainText("可检索");
+  releaseOld();
+  await page.waitForTimeout(2_300);
+  await expect(indexSection).toContainText("可检索");
+  await expect(indexSection).not.toContainText("等待重试");
+  expect(secondIndexRequests).toBe(2);
 });

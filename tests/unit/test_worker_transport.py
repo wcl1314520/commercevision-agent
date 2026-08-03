@@ -16,10 +16,12 @@ from commercevision_application import (
 )
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
+    ASSET_INDEX_REQUESTED_V1,
     ASSET_RIGHTS_CHANGED_V1,
     ASSET_UPLOAD_FINALIZED_V1,
     ASSET_VALIDATION_COMPLETED_V1,
     ASSET_VALIDATION_FAILED_V1,
+    AssetIndexRequestedPayload,
     AssetRightsChangedPayload,
     AssetUploadFinalizedPayload,
     AssetValidationCompletedPayload,
@@ -176,6 +178,34 @@ def _production_worker_settings(
                 "vision_data_transfer_allowed_providers": ["alibaba-model-studio"],
                 "vision_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
                 "vision_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+            }
+        )
+    if queue == "commercevision.index":
+        api_key_path = (readiness_path.parent / "embedding-api-key").resolve()
+        api_key_path.parent.mkdir(parents=True, exist_ok=True)
+        api_key_path.write_text("test-mounted-embedding-key\n", encoding="utf-8")
+        values.update(
+            {
+                "embedding_adapter": "alibaba",
+                "embedding_provider": "alibaba-model-studio",
+                "embedding_model_family": "qwen3-vl-embedding",
+                "embedding_model_id": "qwen3-vl-embedding",
+                "embedding_pinned_revision": ("commercevision-qwen3-vl-embedding-epoch-2026-07-31"),
+                "embedding_dimension": 1024,
+                "alibaba_embedding_api_key_file": str(api_key_path),
+                "alibaba_embedding_allowed_image_origins": ["https://uploads.example"],
+                "embedding_data_transfer_enabled": True,
+                "embedding_data_transfer_policy_version": "embedding-transfer-v1",
+                "embedding_data_transfer_allowed_workspace_ids": ["production-workspace"],
+                "embedding_data_transfer_allowed_retention_classes": [
+                    "TASK",
+                    "FOUNDATION",
+                ],
+                "embedding_data_transfer_allowed_providers": ["alibaba-model-studio"],
+                "embedding_data_transfer_allowed_endpoint_regions": ["cn-beijing"],
+                "embedding_data_transfer_allowed_endpoint_hosts": ["dashscope.aliyuncs.com"],
+                "milvus_uri": "https://milvus.internal.example:19530",
+                "milvus_token": "test-milvus-token",
             }
         )
     return Settings(**values)
@@ -466,6 +496,8 @@ def _dependencies_ready(settings: Settings) -> dict[str, str]:
         "vision_credential": (
             product_brief_module.validate_product_brief_vision_credential(settings)
         ),
+        "milvus": "ok",
+        "embedding_provider": "not_required",
     }
 
 
@@ -633,6 +665,60 @@ def test_asset_queue_has_a_builtin_validation_executor_and_requires_storage() ->
         OperationKind.PRODUCT_BRIEF_ANALYSIS,
     }
     assert settings.worker_requires_object_storage is True
+
+
+def test_index_queue_has_a_builtin_indexing_executor_and_requires_storage() -> None:
+    settings = Settings(
+        environment="ci",
+        worker_queues=["commercevision.index"],
+        worker_required_operation_kinds=[OperationKind.ASSET_INDEXING],
+    )
+
+    assert available_builtin_operation_kinds(settings) == {
+        OperationKind.ASSET_INDEXING,
+    }
+    assert settings.worker_requires_object_storage is True
+
+
+def test_worker_registers_typed_image_index_command_handler() -> None:
+    runtime = WorkerRuntime.build(
+        Settings(
+            environment="ci",
+            worker_queues=["commercevision.workflow"],
+        )
+    )
+    payload = AssetIndexRequestedPayload(
+        operation_id="018f5f4d-7c11-7d11-8a11-111111111111",
+        operation_epoch=2,
+        operation_input_hash="c" * 64,
+        embedding_record_id="018f5f4d-7c11-7d11-8a11-222222222222",
+        workspace_id="catalog-workspace",
+        asset_id="018f5f4d-7c11-7d11-8a11-333333333333",
+        asset_version_id="018f5f4d-7c11-7d11-8a11-444444444444",
+        asset_version_number=3,
+        rights_record_id="018f5f4d-7c11-7d11-8a11-555555555555",
+        rights_record_version=2,
+        collection_id="018f5f4d-7c11-7d11-8a11-666666666666",
+        vector_kind="IMAGE",
+        provider="fixture",
+        embedding_input_hash="a" * 64,
+        embedding_spec_sha256="b" * 64,
+    )
+    envelope = EventEnvelope.create(
+        event_type=ASSET_INDEX_REQUESTED_V1.event_type.value,
+        aggregate_type="embedding_record",
+        aggregate_id=payload.embedding_record_id,
+        aggregate_version=1,
+        trace_id=payload.operation_id,
+        payload=payload.model_dump(mode="json"),
+    )
+
+    try:
+        handler = runtime.event_router.resolve(envelope)
+        assert handler.__self__ is runtime
+        assert handler.__name__ == "_handle_asset_index"
+    finally:
+        runtime.close()
 
 
 def test_workflow_only_runtime_does_not_construct_object_storage(monkeypatch) -> None:
@@ -831,6 +917,7 @@ def test_celery_worker_fails_fast_before_consumer_when_executor_is_missing(
     )
     monkeypatch.setattr(worker_module, "settings", settings)
     monkeypatch.setattr(executor_module, "entry_points", lambda **_kwargs: ())
+    monkeypatch.setattr(worker_module, "available_builtin_operation_kinds", lambda _settings: ())
 
     with pytest.raises(SystemExit, match="ASSET_INDEXING"):
         WorkController(
@@ -951,6 +1038,8 @@ def test_worker_process_eagerly_builds_runtime_with_discovered_executors(
         "malware_scanner": "ok",
         "provider_result_storage": "ok",
         "vision_credential": "ok",
+        "milvus": "ok",
+        "embedding_provider": "not_required",
         "error": None,
     }
     assert readiness_path.is_file()

@@ -4,7 +4,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 import aio_pika
-import httpx
 import redis.asyncio as redis
 from commercevision_contracts import Settings
 from sqlalchemy import text
@@ -35,12 +34,6 @@ async def _probe_rabbitmq(settings: Settings) -> None:
     await connection.close()
 
 
-async def _probe_http(url: str) -> None:
-    async with httpx.AsyncClient(timeout=3) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-
-
 async def _run_probe(probe: Probe, *, timeout_seconds: float = 3) -> str:
     try:
         async with asyncio.timeout(timeout_seconds):
@@ -57,20 +50,18 @@ async def probe_dependencies(
 ) -> dict[str, str]:
     """Probe dependencies required for accepting new workflows."""
 
-    names = ("mysql", "redis", "rabbitmq", "object_store", "milvus")
+    names = ("mysql", "redis", "rabbitmq", "object_store")
     probes: tuple[Probe, ...] = (
         lambda: _probe_mysql(settings),
         lambda: _probe_redis(settings),
         lambda: _probe_rabbitmq(settings),
         lambda: asyncio.to_thread(object_storage_probe),
-        lambda: _probe_http(settings.milvus_health_uri),
     )
     timeouts = (
         3,
         3,
         3,
         settings.object_store_readiness_timeout_seconds * 3 + 1,
-        3,
     )
     results = await asyncio.gather(
         *(

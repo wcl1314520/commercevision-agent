@@ -52,6 +52,8 @@ jobs:
       CV_MYSQL_DSN: mysql+pymysql://commercevision:commercevision@127.0.0.1:3306/commercevision
       CV_TEST_MYSQL_DSN: mysql+pymysql://root:root-change-me@127.0.0.1:3306/commercevision_test
       CV_TEST_RABBITMQ_URL: amqp://commercevision:commercevision@127.0.0.1:5672//
+      CV_MILVUS_URI: http://127.0.0.1:19531
+      CV_MILVUS_READINESS_TIMEOUT_SECONDS: "10"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -60,7 +62,9 @@ jobs:
       - run: uv sync --locked --all-packages
       - name: Start MinIO integration service
         run: |
+          docker network create commercevision-test
           docker run --detach --rm --name commercevision-test-minio \
+            --network commercevision-test \
             --publish 19000:9000 \
             --env MINIO_ROOT_USER=commercevision \
             --env MINIO_ROOT_PASSWORD=commercevision-secret \
@@ -72,6 +76,28 @@ jobs:
             sleep 1
           done
           curl --fail http://127.0.0.1:19000/minio/health/live
+      - name: Start Milvus integration service
+        run: |
+          docker run --detach --rm --name commercevision-test-etcd \
+            --network commercevision-test \
+            quay.io/coreos/etcd:v3.5.15 \
+            etcd --advertise-client-urls=http://commercevision-test-etcd:2379 \
+            --listen-client-urls=http://0.0.0.0:2379
+          docker run --detach --rm --name commercevision-test-milvus \
+            --network commercevision-test \
+            --publish 19531:19530 --publish 19091:9091 \
+            --env ETCD_ENDPOINTS=commercevision-test-etcd:2379 \
+            --env MINIO_ADDRESS=commercevision-test-minio:9000 \
+            --env MINIO_ACCESS_KEY_ID=commercevision \
+            --env MINIO_SECRET_ACCESS_KEY=commercevision-secret \
+            milvusdb/milvus:v2.4.15 milvus run standalone
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:19091/healthz; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:19091/healthz
       - name: Reconcile runtime database grants
         run: >-
           docker exec --interactive

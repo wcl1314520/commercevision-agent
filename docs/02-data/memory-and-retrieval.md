@@ -41,7 +41,7 @@ MySQL 保存业务和权利元数据，Milvus 保存向量。
 
 ## Milvus Collection
 
-建议按 Embedding 模型版本隔离 Collection：
+按 Embedding model family + CommerceVision 内部 pinned epoch 隔离 Collection：
 
 ```text
 commerce_asset_embedding_{model_family}_{version}
@@ -49,14 +49,16 @@ commerce_asset_embedding_{model_family}_{version}
 
 字段：
 
-- `vector_id`
-- `asset_id`
+- `milvus_primary_key`（`<embedding_record_id>:g<N>`）
+- `embedding_record_id`
+- `asset_version_id`
 - `workspace_id`
 - `category_code`
 - `brand_id`
 - `asset_role`
 - `embedding`
-- `created_at`
+- `input_hash`、`embedding_spec_sha256`、`write_generation`
+- `indexed_at_epoch_micros`
 
 权利、有效期和复杂业务过滤仍以 MySQL 为准。
 
@@ -65,12 +67,14 @@ commerce_asset_embedding_{model_family}_{version}
 1. 资产通过安全和权利校验。
 2. MySQL 写入资产和 Outbox。
 3. Indexer 获取 OSS 临时签名 URL。
-4. 调用版本锁定的 Embedding 模型。
-5. 写 Milvus。
-6. 更新 `asset_embeddings`。
+4. 在 workspace/retention/provider/region/host 数据出境策略通过后调用 Embedding Provider。
+5. 以 generation-specific 主键写 Milvus；unknown outcome 必须做 exact proof，禁止盲重投。
+6. 更新 `embedding_records` 并写 completed Outbox。
 7. 运行抽样检索验证。
 
-更新 Embedding 模型时建立新 Collection，完成双写、回填、评测和切换，不覆盖旧向量。
+Alibaba mainline model ID 不是不可变快照；内部 pinned epoch 是 collection 发布栅栏。Provider
+alias 变化时先 write-disable 旧 collection，再提升 epoch 建新 collection，经 Ticket 16 评测后
+切换读取/回填；不同 epoch 不得混写同一 collection。
 
 ## 查询流程
 

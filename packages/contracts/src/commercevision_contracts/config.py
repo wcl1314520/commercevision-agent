@@ -127,6 +127,10 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://commercevision:commercevision@rabbitmq:5672//"
     milvus_uri: str = "http://milvus:19530"
     milvus_health_uri: str = "http://milvus:9091/healthz"
+    milvus_token: SecretStr | None = None
+    milvus_database: str = "default"
+    milvus_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    milvus_readiness_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
 
     object_store_backend: Literal["minio", "oss"] = "minio"
     object_store_credential_mode: Literal[
@@ -403,6 +407,64 @@ class Settings(BaseSettings):
     alibaba_vision_maximum_output_tokens: int = Field(default=4096, ge=1, le=32_768)
     alibaba_vision_maximum_repair_attempts: int = Field(default=1, ge=0, le=1)
     alibaba_vision_allowed_image_origins: list[str] = Field(default_factory=list)
+    embedding_adapter: Literal["deterministic", "alibaba"] = "deterministic"
+    embedding_provider: Literal["fixture", "alibaba-model-studio"] = "fixture"
+    deterministic_embedding_scenario: Literal[
+        "SUCCESS",
+        "THROTTLED",
+        "TIMEOUT",
+        "UNAVAILABLE",
+        "REJECTED",
+        "INVALID_RESPONSE",
+        "UNKNOWN",
+    ] = "SUCCESS"
+    embedding_model_family: str = "deterministic-image-embedding"
+    embedding_model_id: str = "deterministic-image-embedding-v1"
+    embedding_pinned_revision: str = "fixture-epoch-v1"
+    embedding_dimension: int = Field(default=256, ge=1, le=32_768)
+    embedding_model_configuration_version: str = "image-embedding-config-v1"
+    embedding_preprocessing_version: str = "image-preprocess-v1"
+    embedding_collection_schema_version: int = Field(default=1, ge=1, le=2_147_483_647)
+    embedding_collection_index_spec_version: str = "hnsw-cosine-v1"
+    image_index_temporary_reference_lifetime_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+    )
+    image_index_max_attempts: int = Field(default=5, ge=1, le=50)
+    image_index_max_reconciliation_attempts: int = Field(default=8, ge=1, le=100)
+    embedding_data_transfer_enabled: bool = False
+    embedding_data_transfer_policy_version: str = "embedding-transfer-deny-v1"
+    embedding_data_transfer_allowed_workspace_ids: list[str] = Field(default_factory=list)
+    embedding_data_transfer_allowed_retention_classes: list[RetentionClass] = Field(
+        default_factory=list
+    )
+    embedding_data_transfer_allowed_providers: list[str] = Field(default_factory=list)
+    embedding_data_transfer_allowed_endpoint_regions: list[str] = Field(default_factory=list)
+    embedding_data_transfer_allowed_endpoint_hosts: list[str] = Field(default_factory=list)
+    alibaba_embedding_api_key: SecretStr | None = None
+    alibaba_embedding_api_key_file: str | None = None
+    alibaba_embedding_api_key_file_max_bytes: int = Field(
+        default=4096,
+        ge=1,
+        le=64 * 1024,
+    )
+    alibaba_embedding_endpoint: str = "https://dashscope.aliyuncs.com/api/v1"
+    alibaba_embedding_endpoint_region: str = "cn-beijing"
+    alibaba_embedding_connect_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
+    alibaba_embedding_read_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    alibaba_embedding_end_to_end_timeout_seconds: float = Field(
+        default=45.0,
+        gt=0,
+        le=600,
+    )
+    alibaba_embedding_maximum_concurrency: int = Field(default=4, ge=1, le=128)
+    alibaba_embedding_maximum_response_bytes: int = Field(
+        default=2 * 1024 * 1024,
+        ge=1,
+        lt=8 * 1024 * 1024,
+    )
+    alibaba_embedding_allowed_image_origins: list[str] = Field(default_factory=list)
     asset_provenance_adapter: Literal["deterministic", "c2pa"] = "deterministic"
     deterministic_provenance_status: Literal[
         "VERIFIED",
@@ -565,6 +627,15 @@ class Settings(BaseSettings):
         "alibaba_vision_model",
         "alibaba_vision_model_snapshot",
         "alibaba_vision_adapter_version",
+        "embedding_model_family",
+        "embedding_model_id",
+        "embedding_pinned_revision",
+        "embedding_model_configuration_version",
+        "embedding_preprocessing_version",
+        "embedding_collection_index_spec_version",
+        "embedding_data_transfer_policy_version",
+        "alibaba_embedding_endpoint_region",
+        "milvus_database",
         "c2pa_trust_config_version",
         "worker_consumer_name",
         "worker_readiness_path",
@@ -589,6 +660,10 @@ class Settings(BaseSettings):
         "product_brief_review_policy_version",
         "vision_data_transfer_policy_version",
         "alibaba_vision_adapter_version",
+        "embedding_model_configuration_version",
+        "embedding_preprocessing_version",
+        "embedding_collection_index_spec_version",
+        "embedding_data_transfer_policy_version",
         "c2pa_trust_config_version",
     )
     @classmethod
@@ -600,6 +675,7 @@ class Settings(BaseSettings):
     @field_validator(
         "validation_data_transfer_allowed_workspace_ids",
         "vision_data_transfer_allowed_workspace_ids",
+        "embedding_data_transfer_allowed_workspace_ids",
     )
     @classmethod
     def _validate_transfer_workspaces(cls, value: list[str]) -> list[str]:
@@ -616,6 +692,8 @@ class Settings(BaseSettings):
         "validation_data_transfer_allowed_endpoint_regions",
         "vision_data_transfer_allowed_providers",
         "vision_data_transfer_allowed_endpoint_regions",
+        "embedding_data_transfer_allowed_providers",
+        "embedding_data_transfer_allowed_endpoint_regions",
     )
     @classmethod
     def _validate_transfer_canonical_allowlists(
@@ -632,6 +710,7 @@ class Settings(BaseSettings):
     @field_validator(
         "validation_data_transfer_allowed_endpoint_hosts",
         "vision_data_transfer_allowed_endpoint_hosts",
+        "embedding_data_transfer_allowed_endpoint_hosts",
     )
     @classmethod
     def _validate_transfer_endpoint_hosts(cls, value: list[str]) -> list[str]:
@@ -644,6 +723,7 @@ class Settings(BaseSettings):
         "validation_data_transfer_allowed_asset_kinds",
         "validation_data_transfer_allowed_retention_classes",
         "vision_data_transfer_allowed_retention_classes",
+        "embedding_data_transfer_allowed_retention_classes",
     )
     @classmethod
     def _validate_transfer_enum_allowlists(cls, value: list[object]) -> list[object]:
@@ -734,6 +814,31 @@ class Settings(BaseSettings):
             raise ValueError("Vision origins must be unique")
         return normalized
 
+    @field_validator("alibaba_embedding_allowed_image_origins")
+    @classmethod
+    def _validate_embedding_origins(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for origin in value:
+            parsed = urlsplit(origin)
+            try:
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError("Embedding origins must be valid HTTPS origins") from exc
+            if (
+                parsed.scheme.lower() != "https"
+                or parsed.hostname is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Embedding origins must be credential-free HTTPS origins")
+            normalized.append(origin.rstrip("/"))
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("Embedding origins must be unique")
+        return normalized
+
     @field_validator("alibaba_vision_endpoint")
     @classmethod
     def _validate_alibaba_vision_endpoint(cls, value: str) -> str:
@@ -753,6 +858,28 @@ class Settings(BaseSettings):
             raise ValueError("Alibaba Vision endpoint must be a credential-free HTTPS URL")
         return value.rstrip("/")
 
+    @field_validator("alibaba_embedding_endpoint")
+    @classmethod
+    def _validate_alibaba_embedding_endpoint(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Alibaba embedding endpoint must be a valid HTTPS URL") from exc
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path.rstrip("/") != "/api/v1"
+        ):
+            raise ValueError(
+                "Alibaba embedding endpoint must be a credential-free /api/v1 HTTPS URL"
+            )
+        return value.rstrip("/")
+
     @field_validator(
         "object_store_ram_role_name",
         "object_store_oidc_role_arn",
@@ -762,6 +889,9 @@ class Settings(BaseSettings):
         "object_store_session_token",
         "alibaba_vision_api_key",
         "alibaba_vision_api_key_file",
+        "alibaba_embedding_api_key",
+        "alibaba_embedding_api_key_file",
+        "milvus_token",
         mode="before",
     )
     @classmethod
@@ -1102,6 +1232,9 @@ class Settings(BaseSettings):
         worker_executes_product_briefs = (
             OperationKind.PRODUCT_BRIEF_ANALYSIS in self.worker_required_operation_kinds
         )
+        worker_executes_image_indexing = (
+            OperationKind.ASSET_INDEXING in self.worker_required_operation_kinds
+        )
         historical_target_identities = tuple(
             (
                 target.object_store_backend,
@@ -1249,6 +1382,114 @@ class Settings(BaseSettings):
             and self.vision_adapter != "alibaba"
         ):
             raise ValueError("production ProductBrief workers require the Alibaba Vision adapter")
+        if self.embedding_adapter == "deterministic":
+            if self.embedding_provider != "fixture":
+                raise ValueError("deterministic embedding requires the fixture provider identity")
+        else:
+            if (
+                self.embedding_provider != "alibaba-model-studio"
+                or self.embedding_model_family != "qwen3-vl-embedding"
+                or self.embedding_model_id != "qwen3-vl-embedding"
+            ):
+                raise ValueError(
+                    "Alibaba IMAGE embedding requires the mainline qwen3-vl-embedding "
+                    "model identity"
+                )
+            if self.embedding_dimension not in {256, 512, 768, 1024, 1536, 2048, 2560}:
+                raise ValueError("Alibaba qwen3-vl-embedding dimension is unsupported")
+            if (
+                self.alibaba_embedding_api_key is not None
+                and self.alibaba_embedding_api_key_file is not None
+            ):
+                raise ValueError(
+                    "Alibaba embedding requires exactly one configured credential source"
+                )
+            if self.alibaba_embedding_api_key_file is not None and not (
+                PurePosixPath(self.alibaba_embedding_api_key_file).is_absolute()
+                or PureWindowsPath(self.alibaba_embedding_api_key_file).is_absolute()
+            ):
+                raise ValueError("Alibaba embedding API key file path must be absolute")
+            if worker_executes_image_indexing:
+                if self.environment == "production" and self.alibaba_embedding_api_key_file is None:
+                    raise ValueError("production Alibaba embedding requires a mounted API key file")
+                if (
+                    self.alibaba_embedding_api_key is None
+                    and self.alibaba_embedding_api_key_file is None
+                ):
+                    raise ValueError("Alibaba embedding requires exactly one credential source")
+                if not self.alibaba_embedding_allowed_image_origins:
+                    raise ValueError("Alibaba embedding requires controlled HTTPS origins")
+                if (
+                    self.alibaba_embedding_end_to_end_timeout_seconds
+                    <= self.alibaba_embedding_connect_timeout_seconds
+                    + self.alibaba_embedding_read_timeout_seconds
+                ):
+                    raise ValueError(
+                        "Alibaba embedding deadline must exceed its transport timeout budget"
+                    )
+                if (
+                    self.image_index_temporary_reference_lifetime_seconds
+                    <= self.alibaba_embedding_end_to_end_timeout_seconds
+                ):
+                    raise ValueError(
+                        "Embedding temporary reference lifetime must exceed provider execution"
+                    )
+            embedding_transfer_allowlists = (
+                self.embedding_data_transfer_allowed_workspace_ids,
+                self.embedding_data_transfer_allowed_retention_classes,
+                self.embedding_data_transfer_allowed_providers,
+                self.embedding_data_transfer_allowed_endpoint_regions,
+                self.embedding_data_transfer_allowed_endpoint_hosts,
+            )
+            if (
+                not self.embedding_data_transfer_enabled
+                or any(not allowlist for allowlist in embedding_transfer_allowlists)
+                or "alibaba-model-studio" not in self.embedding_data_transfer_allowed_providers
+                or self.alibaba_embedding_endpoint_region
+                not in self.embedding_data_transfer_allowed_endpoint_regions
+                or self.alibaba_embedding_endpoint_host
+                not in self.embedding_data_transfer_allowed_endpoint_hosts
+            ):
+                raise ValueError(
+                    "Alibaba embedding requires an explicit enabled data transfer "
+                    "policy with exact allowlists"
+                )
+        if (
+            self.environment == "production"
+            and worker_executes_image_indexing
+            and self.embedding_adapter != "alibaba"
+        ):
+            raise ValueError("production IMAGE index workers require the Alibaba embedding adapter")
+        if (
+            self.environment == "production"
+            and worker_executes_image_indexing
+            and self.milvus_token is None
+        ):
+            raise ValueError("production IMAGE index workers require Milvus authentication")
+        if self.environment == "production" and worker_executes_image_indexing:
+            try:
+                milvus_endpoint = urlsplit(self.milvus_uri)
+                _ = milvus_endpoint.port
+            except ValueError:
+                raise ValueError("production Milvus endpoint is invalid") from None
+            if milvus_endpoint.username is not None or milvus_endpoint.password is not None:
+                raise ValueError("production Milvus URI must be credential-free")
+            if milvus_endpoint.scheme.lower() != "https":
+                raise ValueError("production IMAGE index workers require Milvus TLS")
+            if (
+                milvus_endpoint.hostname is None
+                or milvus_endpoint.path
+                or milvus_endpoint.query
+                or milvus_endpoint.fragment
+            ):
+                raise ValueError(
+                    "production Milvus endpoint must be an origin without path, query, or fragment"
+                )
+            assert self.milvus_token is not None
+            if self.milvus_token.get_secret_value().strip().casefold() == "root:milvus":
+                raise ValueError(
+                    "production IMAGE index workers reject the default Milvus credential"
+                )
         c2pa_anchors = self.c2pa_trust_anchors_pem
         c2pa_eku = self.c2pa_trust_eku_policy
         if (c2pa_anchors is None) != (c2pa_eku is None):
@@ -1295,6 +1536,7 @@ class Settings(BaseSettings):
         return bool(
             {
                 self.asset_queue_name,
+                self.index_queue_name,
                 self.maintenance_queue_name,
             }.intersection(self.configured_worker_queues)
         )
@@ -1366,6 +1608,12 @@ class Settings(BaseSettings):
     @property
     def alibaba_vision_endpoint_host(self) -> str:
         hostname = urlsplit(self.alibaba_vision_endpoint).hostname
+        assert hostname is not None
+        return validate_canonical_endpoint_host(hostname)
+
+    @property
+    def alibaba_embedding_endpoint_host(self) -> str:
+        hostname = urlsplit(self.alibaba_embedding_endpoint).hostname
         assert hostname is not None
         return validate_canonical_endpoint_host(hostname)
 
