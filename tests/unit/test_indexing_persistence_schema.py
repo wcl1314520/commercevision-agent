@@ -44,5 +44,5 @@ def test_index_registry_schema_keeps_mysql_as_the_complete_index_fact_source() -
         for constraint in embeddings.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
-    assert ("asset_version_id", "embedding_spec_hash") in unique_sets
+    assert ("asset_version_id", "embedding_spec_hash", "input_hash") in unique_sets
     assert ("collection_id", "milvus_primary_key") in unique_sets

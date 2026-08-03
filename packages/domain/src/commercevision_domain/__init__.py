@@ -49,11 +49,15 @@ from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
 from .indexing import (
     CollectionSpec,
     CollectionState,
+    ControlledProductText,
     EmbeddingRecord,
     EmbeddingState,
     VectorKind,
+    build_controlled_product_text,
     compute_embedding_input_hash,
+    compute_product_fused_input_hash,
     generation_milvus_primary_key,
+    serialize_controlled_product_sections,
 )
 from .operations import (
     DurableOperation,
@@ -157,6 +161,7 @@ __all__ = [
     "BrandRuleScope",
     "ConcurrencyError",
     "CollectionSpec",
+    "ControlledProductText",
     "CollectionState",
     "CurrentUsabilityDecision",
     "DataIntegrityError",
@@ -249,4 +254,7 @@ __all__ = [
     "product_brief_field_value_kinds",
     "validate_product_brief_evidence_reference",
     "validate_product_brief_field_value",
+    "build_controlled_product_text",
+    "compute_product_fused_input_hash",
+    "serialize_controlled_product_sections",
 ]

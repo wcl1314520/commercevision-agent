@@ -52,6 +52,8 @@ from .indexing import (
     ImageIndexStatusQueryPort,
     IndexCommitDecision,
     IndexingAuthorityPort,
+    IndexingTarget,
+    VectorIndexingExecutor,
     VectorIndexPort,
 )
 from .indexing_transfer import (
@@ -157,12 +159,14 @@ __all__ = [
     "ExactImageReferencePort",
     "ImageIndexingExecutor",
     "ImageIndexingTarget",
+    "IndexingTarget",
     "ImageIndexStatusApplicationService",
     "ImageIndexStatusQueryPort",
     "ImageIndexDataTransferDenied",
     "ImageIndexDataTransferPolicy",
     "IndexCommitDecision",
     "IndexingAuthorityPort",
+    "VectorIndexingExecutor",
     "build_event_routing_registry",
     "InboxCoordinator",
     "MalformedEventPayloadError",

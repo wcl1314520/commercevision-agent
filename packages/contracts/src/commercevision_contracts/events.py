@@ -388,10 +388,15 @@ class AssetIndexRequestedPayload(StrictEventPayload):
     rights_record_id: str = Field(pattern=UUID_PATTERN)
     rights_record_version: int = Field(ge=1)
     collection_id: str = Field(pattern=UUID_PATTERN)
-    vector_kind: Literal["IMAGE"]
+    vector_kind: Literal["IMAGE", "PRODUCT_FUSED"]
     provider: str = Field(min_length=1, max_length=64)
     embedding_input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     embedding_spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    product_brief_version_id: str | None = Field(default=None, pattern=UUID_PATTERN)
+    controlled_text_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
     @field_validator(
         "operation_id",
@@ -406,6 +411,19 @@ class AssetIndexRequestedPayload(StrictEventPayload):
         if canonicalize_uuid(value) != value:
             raise ValueError("index event identifiers must be canonical lowercase UUIDs")
         return value
+
+    @model_validator(mode="after")
+    def validate_controlled_product_identity(self) -> AssetIndexRequestedPayload:
+        has_controlled_identity = (
+            self.product_brief_version_id is not None and self.controlled_text_sha256 is not None
+        )
+        if self.vector_kind == "PRODUCT_FUSED" and not has_controlled_identity:
+            raise ValueError("PRODUCT_FUSED index event requires ProductBrief controlled identity")
+        if self.vector_kind == "IMAGE" and (
+            self.product_brief_version_id is not None or self.controlled_text_sha256 is not None
+        ):
+            raise ValueError("IMAGE index event cannot carry ProductBrief controlled identity")
+        return self
 
 
 class AssetIndexTerminalIdentity(StrictEventPayload):

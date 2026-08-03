@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import socket
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -103,6 +104,8 @@ from commercevision_persistence import (
     MySQLCheckpointSaver,
     MySqlImageIndexRequestService,
     MySqlIndexingAuthority,
+    MySqlProductFusedIndexRequestService,
+    ProductFusedIndexNotApplicable,
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
@@ -122,7 +125,11 @@ from . import product_brief
 from .asset_cleanup import UploadSessionCleanupExecutor
 from .asset_validation import build_asset_validation_executor
 from .executors import available_builtin_operation_kinds
-from .image_indexing import build_image_index_request_service, build_image_indexing
+from .image_indexing import (
+    build_image_index_request_service,
+    build_image_indexing,
+    build_product_fused_index_request_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +147,7 @@ class WorkerRuntime:
     object_storage: ObjectStorage | None
     resources: tuple[object, ...]
     image_index_requests: MySqlImageIndexRequestService | None = None
+    product_fused_index_requests: MySqlProductFusedIndexRequestService | None = None
     image_index_authority: MySqlIndexingAuthority | None = None
     image_vector_index: object | None = None
     brand_profile_invalidation: BrandProfileInvalidationPort | None = None
@@ -170,6 +178,7 @@ class WorkerRuntime:
         )
         resources: list[object] = []
         image_index_requests: MySqlImageIndexRequestService | None = None
+        product_fused_index_requests: MySqlProductFusedIndexRequestService | None = None
         image_index_authority: MySqlIndexingAuthority | None = None
         image_vector_index: object | None = None
         if (
@@ -233,6 +242,14 @@ class WorkerRuntime:
             settings.index_queue_name,
         }.intersection(settings.configured_worker_queues) and image_index_requests is None:
             image_index_requests = build_image_index_request_service(
+                settings=settings,
+                database=database,
+            )
+        if (
+            settings.asset_queue_name in settings.configured_worker_queues
+            and product_fused_index_requests is None
+        ):
+            product_fused_index_requests = build_product_fused_index_request_service(
                 settings=settings,
                 database=database,
             )
@@ -346,6 +363,7 @@ class WorkerRuntime:
             object_storage=object_storage,
             resources=tuple(resources),
             image_index_requests=image_index_requests,
+            product_fused_index_requests=product_fused_index_requests,
             image_index_authority=image_index_authority,
             image_vector_index=image_vector_index,
             lifecycle=lifecycle,
@@ -1000,10 +1018,10 @@ class WorkerRuntime:
     def _handle_asset_index(self, event: OutboxEvent) -> None:
         payload = ASSET_INDEX_REQUESTED_V1.validate_payload(event.envelope.payload)
         if not isinstance(payload, AssetIndexRequestedPayload):
-            raise TypeError("IMAGE index request contract returned an unexpected payload")
+            raise TypeError("vector index request contract returned an unexpected payload")
         if event.workspace_id != payload.workspace_id:
             raise EventRoutingError(
-                "IMAGE index workspace does not match its Outbox envelope",
+                "vector index workspace does not match its Outbox envelope",
                 reason="workspace_mismatch",
             )
         if (
@@ -1011,7 +1029,7 @@ class WorkerRuntime:
             or event.envelope.aggregate_id != payload.embedding_record_id
         ):
             raise EventRoutingError(
-                "IMAGE index identity does not match its Outbox aggregate",
+                "vector index identity does not match its Outbox aggregate",
                 reason="aggregate_mismatch",
             )
         with SqlAlchemyOperationUnitOfWork(self.database.session_factory) as uow:
@@ -1028,7 +1046,7 @@ class WorkerRuntime:
             or operation.input_hash != payload.operation_input_hash
         ):
             raise EventRoutingError(
-                "IMAGE index request does not match its Durable Operation target",
+                "vector index request does not match its Durable Operation target",
                 reason="aggregate_mismatch",
             )
         if (
@@ -1036,7 +1054,7 @@ class WorkerRuntime:
             or not self.image_index_authority.validate_request_event(payload)
         ):
             raise EventRoutingError(
-                "IMAGE index request does not match its Embedding or AssetVersion identity",
+                "vector index request does not match its Embedding or AssetVersion identity",
                 reason="aggregate_mismatch",
             )
         self.operation_worker.execute(
@@ -1047,10 +1065,10 @@ class WorkerRuntime:
     def _observe_asset_index_completed(self, event: OutboxEvent) -> None:
         payload = ASSET_INDEX_COMPLETED_V1.validate_payload(event.envelope.payload)
         if not isinstance(payload, AssetIndexCompletedPayload):
-            raise TypeError("IMAGE index completion contract returned an unexpected payload")
+            raise TypeError("vector index completion contract returned an unexpected payload")
         if event.workspace_id != payload.workspace_id:
             raise EventRoutingError(
-                "IMAGE index completion workspace does not match its Outbox envelope",
+                "vector index completion workspace does not match its Outbox envelope",
                 reason="workspace_mismatch",
             )
         if (
@@ -1059,17 +1077,17 @@ class WorkerRuntime:
             or event.envelope.trace_id != payload.operation_id
         ):
             raise EventRoutingError(
-                "IMAGE index completion does not match its Outbox aggregate",
+                "vector index completion does not match its Outbox aggregate",
                 reason="aggregate_mismatch",
             )
 
     def _handle_asset_index_delete(self, event: OutboxEvent) -> None:
         payload = ASSET_INDEX_DELETE_REQUESTED_V1.validate_payload(event.envelope.payload)
         if not isinstance(payload, AssetIndexDeleteRequestedPayload):
-            raise TypeError("IMAGE index delete contract returned an unexpected payload")
+            raise TypeError("vector index delete contract returned an unexpected payload")
         if event.workspace_id != payload.workspace_id:
             raise EventRoutingError(
-                "IMAGE index delete workspace does not match its Outbox envelope",
+                "vector index delete workspace does not match its Outbox envelope",
                 reason="workspace_mismatch",
             )
         if (
@@ -1077,20 +1095,19 @@ class WorkerRuntime:
             or event.envelope.aggregate_id != payload.embedding_record_id
         ):
             raise EventRoutingError(
-                "IMAGE index delete identity does not match its Outbox aggregate",
+                "vector index delete identity does not match its Outbox aggregate",
                 reason="aggregate_mismatch",
             )
         if self.image_index_authority is None or self.image_vector_index is None:
-            raise RuntimeError("IMAGE index deletion is not configured")
+            raise RuntimeError("vector index deletion is not configured")
         identity = self.image_index_authority.load_delete_target(payload)
         delete = getattr(self.image_vector_index, "delete_if_generation", None)
         if not callable(delete):
-            raise RuntimeError("IMAGE vector index cannot delete an exact generation")
+            raise RuntimeError("vector index cannot delete an exact generation")
         delete(identity)
         self.image_index_authority.complete_delete(payload)
 
-    @staticmethod
-    def _observe_product_brief_state(event: OutboxEvent) -> None:
+    def _observe_product_brief_state(self, event: OutboxEvent) -> None:
         contract = (
             PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1
             if event.envelope.event_type == EventType.PRODUCT_BRIEF_AWAITING_CONFIRMATION.value
@@ -1108,6 +1125,14 @@ class WorkerRuntime:
             product_brief_id=payload.product_brief_id,
             product_brief_version=payload.product_brief_version,
         )
+        if isinstance(payload, ProductBriefConfirmedPayload):
+            if self.product_fused_index_requests is None:
+                raise RuntimeError("PRODUCT_FUSED index requests are not configured")
+            self.product_fused_index_requests.request_confirmed_brief(
+                workspace_id=payload.workspace_id,
+                product_brief_id=payload.product_brief_id,
+                product_brief_version_id=payload.product_brief_version_id,
+            )
 
     @staticmethod
     def _validate_product_brief_event_identity(
@@ -1176,13 +1201,18 @@ class WorkerRuntime:
         ):
             if self.image_index_requests is None:
                 raise RuntimeError("IMAGE index request service is not configured")
-            try:
+            with suppress(ImageIndexNotApplicable):
                 self.image_index_requests.request_current_image(
                     workspace_id=payload.workspace_id,
                     asset_id=payload.asset_id,
                 )
-            except ImageIndexNotApplicable:
-                return
+            if self.product_fused_index_requests is None:
+                raise RuntimeError("PRODUCT_FUSED index request service is not configured")
+            with suppress(ProductFusedIndexNotApplicable):
+                self.product_fused_index_requests.request_current_product_fused_for_asset(
+                    workspace_id=payload.workspace_id,
+                    asset_id=payload.asset_id,
+                )
         elif (
             payload.required_convergence == "REMOVE_EXTERNAL_DERIVATIVES"
             and self.settings.asset_queue_name in self.settings.configured_worker_queues

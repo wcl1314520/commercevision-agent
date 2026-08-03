@@ -1,7 +1,8 @@
-"""MySQL authority adapter for IMAGE indexing."""
+"""MySQL authority adapter for vector indexing."""
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -33,11 +34,14 @@ from commercevision_domain import (
     CollectionState,
     EmbeddingState,
     OperationState,
+    RetentionClass,
     StorageLocationClass,
     VectorKind,
     compute_embedding_input_hash,
+    compute_product_fused_input_hash,
     evaluate_current_usability,
     generation_milvus_primary_key,
+    serialize_controlled_product_sections,
 )
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 from pydantic import SecretStr
@@ -45,8 +49,12 @@ from sqlalchemy import literal_column, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .assets import AssetRepository
-from .indexing_identity import compute_image_index_operation_hash
-from .indexing_models import CollectionRegistryModel, EmbeddingRecordModel
+from .indexing_identity import compute_index_operation_hash
+from .indexing_models import (
+    CollectionRegistryModel,
+    EmbeddingRecordModel,
+    ProductSearchDocumentModel,
+)
 from .models import (
     AssetObjectModel,
     AssetVersionModel,
@@ -54,6 +62,7 @@ from .models import (
     OutboxEventModel,
     ProductModel,
 )
+from .product_brief_models import ProductBriefModel, ProductBriefVersionModel
 from .repositories import OutboxRepository
 
 INDEX_PURPOSE = "RETRIEVAL"
@@ -225,13 +234,13 @@ class MySqlIndexingAuthority:
             except ValueError:
                 invalid_payload = True
             if invalid_payload or payload is None:
-                raise ValueError("committed IMAGE index outcome is invalid")
+                raise ValueError("committed vector index outcome is invalid")
             if (
                 payload.operation_id != request.operation_id
                 or payload.embedding_record_id != request.target_id
                 or payload.workspace_id != request.workspace_id
             ):
-                raise ValueError("committed IMAGE index outcome identity is invalid")
+                raise ValueError("committed vector index outcome identity is invalid")
             return IndexCommitDecision(
                 indexed=payload.outcome == "INDEXED",
                 stale_reason=None if payload.outcome == "INDEXED" else "COMMITTED_STALE",
@@ -284,6 +293,12 @@ class MySqlIndexingAuthority:
             )
             embedding.version += 1
             embedding.updated_at = database_now
+            if not retryable:
+                self._stale_fused_document(
+                    session=session,
+                    embedding=embedding,
+                    now=database_now,
+                )
             session.flush()
 
     def mark_terminal_failure(self, request: OperationExecutionRequest) -> bool:
@@ -301,7 +316,19 @@ class MySqlIndexingAuthority:
                 return False
             if not self._operation_identity_matches(session, request, embedding):
                 return False
-            if embedding.state == EmbeddingState.PERMANENT_FAILED.value:
+            document = (
+                self._load_fused_document(
+                    session,
+                    embedding,
+                    for_update=True,
+                    require_current_brief=False,
+                )
+                if embedding.vector_kind == VectorKind.PRODUCT_FUSED.value
+                else None
+            )
+            if embedding.state == EmbeddingState.PERMANENT_FAILED.value and (
+                document is None or document.state == "STALE"
+            ):
                 return True
             if embedding.state not in {
                 EmbeddingState.PENDING.value,
@@ -317,6 +344,13 @@ class MySqlIndexingAuthority:
             embedding.state = EmbeddingState.PERMANENT_FAILED.value
             embedding.version += 1
             embedding.updated_at = database_now
+            if document is not None:
+                self._stale_fused_document(
+                    session=session,
+                    embedding=embedding,
+                    now=database_now,
+                    document=document,
+                )
             session.flush()
             return True
 
@@ -338,6 +372,7 @@ class MySqlIndexingAuthority:
                     EmbeddingRecordModel.provider == payload.provider,
                     EmbeddingRecordModel.input_hash == payload.embedding_input_hash,
                     EmbeddingRecordModel.embedding_spec_hash == payload.embedding_spec_sha256,
+                    EmbeddingRecordModel.controlled_text_sha256 == payload.controlled_text_sha256,
                 )
             )
             if embedding is None:
@@ -353,6 +388,8 @@ class MySqlIndexingAuthority:
                         EmbeddingRecordModel.provider == payload.provider,
                         EmbeddingRecordModel.input_hash == payload.embedding_input_hash,
                         EmbeddingRecordModel.embedding_spec_hash == payload.embedding_spec_sha256,
+                        EmbeddingRecordModel.controlled_text_sha256
+                        == payload.controlled_text_sha256,
                     )
                 )
                 completed = session.scalar(
@@ -393,6 +430,12 @@ class MySqlIndexingAuthority:
                     )
                 ):
                     return False
+            if not self._request_event_provenance_matches(
+                session=session,
+                embedding=embedding,
+                payload=payload,
+            ):
+                return False
             asset_version = session.scalar(
                 select(AssetVersionModel).where(
                     AssetVersionModel.workspace_id == payload.workspace_id,
@@ -403,12 +446,52 @@ class MySqlIndexingAuthority:
             )
             return asset_version is not None
 
+    @staticmethod
+    def _request_event_provenance_matches(
+        *,
+        session: Session,
+        embedding: EmbeddingRecordModel,
+        payload: AssetIndexRequestedPayload,
+    ) -> bool:
+        if embedding.vector_kind != VectorKind.PRODUCT_FUSED.value:
+            return (
+                payload.product_brief_version_id is None and payload.controlled_text_sha256 is None
+            )
+        if payload.product_brief_version_id is None:
+            return False
+        document = session.scalar(
+            select(ProductSearchDocumentModel).where(
+                ProductSearchDocumentModel.workspace_id == embedding.workspace_id,
+                ProductSearchDocumentModel.embedding_record_id == embedding.id,
+            )
+        )
+        if document is None:
+            return False
+        version = session.scalar(
+            select(ProductBriefVersionModel.id).where(
+                ProductBriefVersionModel.workspace_id == embedding.workspace_id,
+                ProductBriefVersionModel.id == payload.product_brief_version_id,
+                ProductBriefVersionModel.product_brief_id == document.product_brief_id,
+            )
+        )
+        return version is not None
+
     def commit_after_upsert(
         self,
         target: ImageIndexingTarget,
     ) -> IndexCommitDecision:
         with self._session_factory.begin() as session:
             embedding = self._lock_embedding_after_upsert(session, target)
+            document = (
+                self._load_fused_document(
+                    session,
+                    embedding,
+                    for_update=True,
+                    require_current_brief=False,
+                )
+                if embedding.vector_kind == VectorKind.PRODUCT_FUSED.value
+                else None
+            )
             if embedding.operation_id != target.operation_id:
                 database_now = session.scalar(select(literal_column("UTC_TIMESTAMP(6)")))
                 if database_now is None:
@@ -431,6 +514,10 @@ class MySqlIndexingAuthority:
                 return IndexCommitDecision(indexed=False, stale_reason="SUPERSEDED")
             self._assert_provider_provenance(embedding=embedding, target=target)
             if embedding.state == EmbeddingState.INDEXED.value:
+                if document is not None:
+                    self._assert_current_fused_brief(session, embedding, document)
+                if document is not None and document.state != "INDEXED":
+                    raise ValueError("PRODUCT_FUSED completion facts are inconsistent")
                 return IndexCommitDecision(indexed=True)
             if embedding.state in {
                 EmbeddingState.DELETE_PENDING.value,
@@ -449,6 +536,8 @@ class MySqlIndexingAuthority:
                 and not replaying_permanent_failure
             ):
                 raise ValueError("only the current PROCESSING generation can complete")
+            if document is not None:
+                self._assert_current_fused_brief(session, embedding, document)
             snapshot = AssetRepository(session).get_current_usability_snapshot(
                 workspace_id=target.workspace_id,
                 asset_id=target.asset_id,
@@ -470,6 +559,10 @@ class MySqlIndexingAuthority:
                 embedding.stale_at = None
                 embedding.stale_reason = None
                 embedding.updated_at = snapshot.database_now
+                if document is not None:
+                    document.state = "INDEXED"
+                    document.version += 1
+                    document.updated_at = snapshot.database_now
                 self._enqueue_completed(
                     session=session,
                     target=target,
@@ -483,6 +576,10 @@ class MySqlIndexingAuthority:
             embedding.stale_at = now
             embedding.stale_reason = reason
             embedding.updated_at = now
+            if document is not None:
+                document.state = "DELETE_PENDING"
+                document.version += 1
+                document.updated_at = now
             self._enqueue_completed(
                 session=session,
                 target=target,
@@ -635,6 +732,20 @@ class MySqlIndexingAuthority:
             embedding.state = EmbeddingState.DELETED.value
             embedding.version += 1
             embedding.updated_at = database_now
+            if embedding.vector_kind == VectorKind.PRODUCT_FUSED.value:
+                document = self._load_fused_document(
+                    session,
+                    embedding,
+                    for_update=True,
+                    require_current_brief=False,
+                )
+                if document.state == "DELETED":
+                    return False
+                if document.state != "DELETE_PENDING":
+                    raise ValueError("PRODUCT_FUSED delete completion lost its state fence")
+                document.state = "DELETED"
+                document.version += 1
+                document.updated_at = database_now
             session.flush()
             return True
 
@@ -660,37 +771,62 @@ class MySqlIndexingAuthority:
                         EmbeddingRecordModel.workspace_id == workspace_id,
                         EmbeddingRecordModel.asset_id == asset_id,
                         EmbeddingRecordModel.asset_version_id == asset_version_id,
-                        EmbeddingRecordModel.vector_kind == VectorKind.IMAGE.value,
-                        EmbeddingRecordModel.state == EmbeddingState.INDEXED.value,
+                        EmbeddingRecordModel.state.not_in(
+                            {
+                                EmbeddingState.STALE.value,
+                                EmbeddingState.DELETE_PENDING.value,
+                                EmbeddingState.DELETED.value,
+                            }
+                        ),
                     )
                     .order_by(EmbeddingRecordModel.id)
                     .with_for_update()
                 )
             )
             for embedding in embeddings:
-                embedding.state = EmbeddingState.DELETE_PENDING.value
+                document = (
+                    self._load_fused_document(
+                        session,
+                        embedding,
+                        for_update=True,
+                        require_current_brief=False,
+                    )
+                    if embedding.vector_kind == VectorKind.PRODUCT_FUSED.value
+                    else None
+                )
+                requires_delete = embedding.write_generation > 0
+                embedding.state = (
+                    EmbeddingState.DELETE_PENDING.value
+                    if requires_delete
+                    else EmbeddingState.STALE.value
+                )
                 embedding.stale_at = snapshot.database_now
                 embedding.stale_reason = reason
                 embedding.updated_at = snapshot.database_now
                 embedding.version += 1
-                payload = AssetIndexDeleteRequestedPayload(
-                    operation_id=embedding.operation_id,
-                    embedding_record_id=embedding.id,
-                    workspace_id=embedding.workspace_id,
-                    asset_id=embedding.asset_id,
-                    asset_version_id=embedding.asset_version_id,
-                    collection_id=embedding.collection_id,
-                    input_hash=embedding.input_hash,
-                    embedding_spec_sha256=embedding.embedding_spec_hash,
-                    write_generation=embedding.write_generation,
-                    reason=reason,
-                )
-                self._enqueue_delete_payload(
-                    session=session,
-                    payload=payload,
-                    aggregate_version=embedding.version,
-                    now=snapshot.database_now,
-                )
+                if document is not None:
+                    document.state = "DELETE_PENDING" if requires_delete else "STALE"
+                    document.version += 1
+                    document.updated_at = snapshot.database_now
+                if requires_delete:
+                    payload = AssetIndexDeleteRequestedPayload(
+                        operation_id=embedding.operation_id,
+                        embedding_record_id=embedding.id,
+                        workspace_id=embedding.workspace_id,
+                        asset_id=embedding.asset_id,
+                        asset_version_id=embedding.asset_version_id,
+                        collection_id=embedding.collection_id,
+                        input_hash=embedding.input_hash,
+                        embedding_spec_sha256=embedding.embedding_spec_hash,
+                        write_generation=embedding.write_generation,
+                        reason=reason,
+                    )
+                    self._enqueue_delete_payload(
+                        session=session,
+                        payload=payload,
+                        aggregate_version=embedding.version,
+                        now=snapshot.database_now,
+                    )
             session.flush()
             return len(embeddings)
 
@@ -719,7 +855,7 @@ class MySqlIndexingAuthority:
         self._assert_eligible(session, target, unlocked_embedding)
         collection = self._lock_collection(session, unlocked_embedding.collection_id)
         if collection.state != CollectionState.ACTIVE.value or not collection.is_write_enabled:
-            raise ValueError("IMAGE collection is not ACTIVE and write-enabled")
+            raise ValueError("vector collection is not ACTIVE and write-enabled")
         embedding = self._lock_exact_embedding(session, target)
         return self._target_from_models(target=target, embedding=embedding), embedding
 
@@ -736,9 +872,8 @@ class MySqlIndexingAuthority:
         embedding = session.scalar(statement)
         if embedding is None:
             raise ValueError("embedding record is not bound to the durable operation")
-        if (
-            not self._operation_identity_matches(session, request, embedding)
-            or embedding.vector_kind != VectorKind.IMAGE.value
+        if not self._operation_identity_matches(session, request, embedding) or (
+            embedding.vector_kind not in {VectorKind.IMAGE.value, VectorKind.PRODUCT_FUSED.value}
         ):
             raise ValueError("embedding operation identity is stale")
         collection = session.get(CollectionRegistryModel, embedding.collection_id)
@@ -752,6 +887,24 @@ class MySqlIndexingAuthority:
         if collection is None or asset_version is None:
             raise ValueError("embedding registry facts are incomplete")
         product_brand = ""
+        product_id: str | None = None
+        controlled_text: str | None = None
+        fused_document: ProductSearchDocumentModel | None = None
+        if embedding.vector_kind == VectorKind.PRODUCT_FUSED.value:
+            fused_document = self._load_fused_document(session, embedding)
+            controlled_text = serialize_controlled_product_sections(
+                title=fused_document.title,
+                labels=fused_document.labels.splitlines(),
+                ocr_summary=fused_document.ocr_summary,
+                product_brief_summary=fused_document.product_brief_summary,
+                notes=fused_document.approved_notes.splitlines(),
+            )
+            if (
+                hashlib.sha256(controlled_text.encode("utf-8")).hexdigest()
+                != embedding.controlled_text_sha256
+            ):
+                raise ValueError("PRODUCT_FUSED controlled text hash is inconsistent")
+            product_id = fused_document.product_id
         asset_snapshot = AssetRepository(session).get_current_usability_snapshot(
             workspace_id=embedding.workspace_id,
             asset_id=embedding.asset_id,
@@ -762,12 +915,16 @@ class MySqlIndexingAuthority:
             embedding=embedding,
             collection=collection,
             content_sha256=asset_version.sha256,
+            product_brief_id=(
+                fused_document.product_brief_id if fused_document is not None else None
+            ),
         )
-        if asset_snapshot.asset.product_id is not None:
+        product_id = product_id or asset_snapshot.asset.product_id
+        if product_id is not None:
             product = session.scalar(
                 select(ProductModel).where(
                     ProductModel.workspace_id == embedding.workspace_id,
-                    ProductModel.id == asset_snapshot.asset.product_id,
+                    ProductModel.id == product_id,
                 )
             )
             if product is not None:
@@ -806,10 +963,98 @@ class MySqlIndexingAuthority:
             actual_model=embedding.actual_model,
             indexed_at=database_now,
             retention_class=asset_snapshot.asset.retention_class,
+            vector_kind=VectorKind(embedding.vector_kind),
+            product_brief_version_id=embedding.product_brief_version_id,
+            controlled_text_sha256=embedding.controlled_text_sha256,
+            controlled_text=controlled_text,
             replay_source_dead_letter_id=request.replay_source_dead_letter_id,
             replay_attempt=request.replay_attempt,
         )
+        if fused_document is not None:
+            target = replace(
+                target,
+                retention_class=RetentionClass(fused_document.retention_class),
+            )
         return target, embedding
+
+    @staticmethod
+    def _load_fused_document(
+        session: Session,
+        embedding: EmbeddingRecordModel,
+        *,
+        for_update: bool = False,
+        require_current_brief: bool = True,
+    ) -> ProductSearchDocumentModel:
+        statement = select(ProductSearchDocumentModel).where(
+            ProductSearchDocumentModel.workspace_id == embedding.workspace_id,
+            ProductSearchDocumentModel.embedding_record_id == embedding.id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        document = session.scalar(statement)
+        if document is None:
+            raise ValueError("PRODUCT_FUSED Search Document is missing")
+        if (
+            document.product_brief_version_id != embedding.product_brief_version_id
+            or document.asset_id != embedding.asset_id
+            or document.asset_version_id != embedding.asset_version_id
+            or document.rights_record_id != embedding.rights_record_id
+            or document.rights_record_version != embedding.rights_record_version
+            or document.input_hash != embedding.input_hash
+            or document.controlled_text_sha256 != embedding.controlled_text_sha256
+            or document.preprocessing_version != embedding.preprocessing_version
+        ):
+            raise ValueError("PRODUCT_FUSED Search Document identity is inconsistent")
+        if require_current_brief:
+            MySqlIndexingAuthority._assert_current_fused_brief(
+                session,
+                embedding,
+                document,
+            )
+        return document
+
+    @staticmethod
+    def _assert_current_fused_brief(
+        session: Session,
+        embedding: EmbeddingRecordModel,
+        document: ProductSearchDocumentModel,
+    ) -> None:
+        brief = session.scalar(
+            select(ProductBriefModel).where(
+                ProductBriefModel.workspace_id == embedding.workspace_id,
+                ProductBriefModel.id == document.product_brief_id,
+            )
+        )
+        if (
+            brief is None
+            or brief.state != "CONFIRMED"
+            or brief.current_version_id != document.product_brief_version_id
+            or brief.confirmed_version_id != document.product_brief_version_id
+        ):
+            raise ValueError("PRODUCT_FUSED ProductBrief authority is stale")
+
+    def _stale_fused_document(
+        self,
+        *,
+        session: Session,
+        embedding: EmbeddingRecordModel,
+        now: datetime,
+        document: ProductSearchDocumentModel | None = None,
+    ) -> None:
+        if embedding.vector_kind != VectorKind.PRODUCT_FUSED.value:
+            return
+        if document is None:
+            document = self._load_fused_document(
+                session,
+                embedding,
+                for_update=True,
+                require_current_brief=False,
+            )
+        if document.state == "STALE":
+            return
+        document.state = "STALE"
+        document.version += 1
+        document.updated_at = now
 
     @staticmethod
     def _operation_identity_matches(
@@ -823,7 +1068,8 @@ class MySqlIndexingAuthority:
                 DurableOperationModel.id == request.operation_id,
             )
         )
-        expected_hash = compute_image_index_operation_hash(
+        expected_hash = compute_index_operation_hash(
+            vector_kind=embedding.vector_kind,
             embedding_input_hash=embedding.input_hash,
             rights_record_id=embedding.rights_record_id,
             rights_record_version=embedding.rights_record_version,
@@ -856,8 +1102,17 @@ class MySqlIndexingAuthority:
             rights_record_version=embedding.rights_record_version,
             provider=target.provider,
         )
+        if reason is None and target.vector_kind is VectorKind.PRODUCT_FUSED:
+            document = self._load_fused_document(session, embedding)
+            if document.retention_class == RetentionClass.TASK.value and (
+                document.retention_deadline is None
+                or document.retention_deadline <= target.indexed_at
+            ):
+                reason = "PRODUCT_BRIEF_RETENTION_EXPIRED"
+            elif document.state in {"STALE", "DELETE_PENDING", "DELETED"}:
+                reason = "PRODUCT_SEARCH_DOCUMENT_STALE"
         if reason is not None:
-            raise ValueError(f"asset is not eligible for IMAGE indexing: {reason}")
+            raise ValueError(f"asset is not eligible for vector indexing: {reason}")
 
     @staticmethod
     def _eligibility_reason(
@@ -894,6 +1149,7 @@ class MySqlIndexingAuthority:
         embedding: EmbeddingRecordModel,
         collection: CollectionRegistryModel,
         content_sha256: str,
+        product_brief_id: str | None,
     ) -> None:
         spec = CollectionSpec.create(
             model_family=collection.model_family,
@@ -915,15 +1171,29 @@ class MySqlIndexingAuthority:
             or embedding.vector_kind != collection.vector_kind
         ):
             raise ValueError("embedding and collection registry facts are inconsistent")
-        expected_hash = compute_embedding_input_hash(
-            content_sha256=content_sha256,
-            provider=embedding.provider,
-            preprocessing_version=embedding.preprocessing_version,
-            model_configuration_version=embedding.model_configuration_version,
-            vector_kind=VectorKind(embedding.vector_kind),
-        )
+        vector_kind = VectorKind(embedding.vector_kind)
+        if vector_kind is VectorKind.PRODUCT_FUSED:
+            if embedding.controlled_text_sha256 is None or product_brief_id is None:
+                raise ValueError("PRODUCT_FUSED controlled text identity is missing")
+            expected_hash = compute_product_fused_input_hash(
+                product_brief_id=product_brief_id,
+                content_sha256=content_sha256,
+                controlled_text_sha256=embedding.controlled_text_sha256,
+                provider=embedding.provider,
+                preprocessing_version=embedding.preprocessing_version,
+                model_configuration_version=embedding.model_configuration_version,
+                vector_kind=vector_kind,
+            )
+        else:
+            expected_hash = compute_embedding_input_hash(
+                content_sha256=content_sha256,
+                provider=embedding.provider,
+                preprocessing_version=embedding.preprocessing_version,
+                model_configuration_version=embedding.model_configuration_version,
+                vector_kind=vector_kind,
+            )
         if embedding.input_hash != expected_hash:
-            raise ValueError("embedding input hash does not match authoritative IMAGE facts")
+            raise ValueError("embedding input hash does not match authoritative index facts")
 
     @staticmethod
     def _lock_collection(session: Session, collection_id: str) -> CollectionRegistryModel:
@@ -994,7 +1264,7 @@ class MySqlIndexingAuthority:
             and embedding.asset_version_id == target.asset_version_id
             and embedding.asset_version_number == target.asset_version_number
             and embedding.collection_id == target.collection_id
-            and embedding.vector_kind == VectorKind.IMAGE.value
+            and embedding.vector_kind == target.vector_kind.value
             and embedding.provider == target.provider
             and embedding.input_hash == target.input_hash
             and embedding.embedding_spec_hash == target.embedding_spec_sha256

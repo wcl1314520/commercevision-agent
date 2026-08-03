@@ -49,7 +49,11 @@ def test_indexing_migration_creates_generation_fenced_microsecond_facts(
     command.upgrade(config, "head")
 
     inspector = inspect(engine)
-    assert {"collection_registry", "embedding_records"}.issubset(inspector.get_table_names())
+    assert {
+        "collection_registry",
+        "embedding_records",
+        "product_search_documents",
+    }.issubset(inspector.get_table_names())
     collection_columns = {
         column["name"]: column for column in inspector.get_columns("collection_registry")
     }
@@ -59,6 +63,22 @@ def test_indexing_migration_creates_generation_fenced_microsecond_facts(
     assert "write_generation" not in collection_columns
     assert embedding_columns["write_generation"]["nullable"] is False
     assert embedding_columns["provider"]["nullable"] is False
+    assert embedding_columns["product_brief_version_id"]["nullable"] is True
+    assert embedding_columns["controlled_text_sha256"]["nullable"] is True
     for name in ("indexed_at", "stale_at", "created_at", "updated_at"):
         assert isinstance(embedding_columns[name]["type"], DATETIME)
         assert embedding_columns[name]["type"].fsp == 6
+    search_columns = {
+        column["name"]: column for column in inspector.get_columns("product_search_documents")
+    }
+    assert search_columns["controlled_text_sha256"]["nullable"] is False
+    for name in ("retention_deadline", "created_at", "updated_at"):
+        assert isinstance(search_columns[name]["type"], DATETIME)
+        assert search_columns[name]["type"].fsp == 6
+    with engine.connect() as connection:
+        create_table = connection.execute(text("SHOW CREATE TABLE product_search_documents")).one()[
+            1
+        ]
+    assert "FULLTEXT KEY `ft_product_search_cjk`" in create_table
+    assert "WITH PARSER `ngram`" in create_table
+    command.check(config)

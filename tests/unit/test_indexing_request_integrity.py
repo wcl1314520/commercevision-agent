@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from commercevision_persistence.indexing_requests import (
     is_expected_image_index_request_race,
+    is_expected_index_request_race,
 )
 from sqlalchemy.exc import IntegrityError
 
@@ -17,6 +18,9 @@ def _integrity(message: str) -> IntegrityError:
         "uq_durable_operation_logical",
         "uq_embedding_records_asset_spec",
         "uq_embedding_records_operation",
+        "uq_product_search_documents_asset_input",
+        "uq_product_search_documents_workspace_id",
+        "uq_product_search_documents_embedding_record",
     ],
 )
 def test_known_duplicate_request_constraints_are_concurrent_winners(
@@ -24,6 +28,7 @@ def test_known_duplicate_request_constraints_are_concurrent_winners(
 ) -> None:
     error = _integrity(f"Duplicate entry 'same' for key '{constraint}'")
 
+    assert is_expected_index_request_race(error) is True
     assert is_expected_image_index_request_race(error) is True
 
 

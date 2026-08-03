@@ -159,6 +159,8 @@ class EmbeddingRecord:
     embedding_spec_hash: str
     input_hash: str
     vector_kind: VectorKind
+    product_brief_version_id: str | None
+    controlled_text_sha256: str | None
     milvus_primary_key: str
     state: EmbeddingState
     write_generation: int
@@ -183,6 +185,13 @@ class EmbeddingRecord:
             canonicalize_uuid(value)
         _require_sha256(self.embedding_spec_hash, "embedding_spec_hash")
         _require_sha256(self.input_hash, "input_hash")
+        if self.vector_kind is VectorKind.PRODUCT_FUSED:
+            if self.product_brief_version_id is None or self.controlled_text_sha256 is None:
+                raise ValueError("PRODUCT_FUSED records require controlled ProductBrief identity")
+            canonicalize_uuid(self.product_brief_version_id)
+            _require_sha256(self.controlled_text_sha256, "controlled_text_sha256")
+        elif self.product_brief_version_id is not None or self.controlled_text_sha256 is not None:
+            raise ValueError("IMAGE records cannot carry controlled ProductBrief identity")
         if self.asset_version_number < 1 or self.rights_record_version < 1:
             raise ValueError("record versions must be positive")
         if self.milvus_primary_key != self.id:
@@ -204,13 +213,19 @@ class EmbeddingRecord:
         embedding_spec_hash: str,
         input_hash: str,
         vector_kind: VectorKind,
+        product_brief_version_id: str | None = None,
+        controlled_text_sha256: str | None = None,
         now: datetime | None = None,
     ) -> EmbeddingRecord:
         created_at = now or datetime.now(UTC)
         deterministic_id = str(
             uuid5(
                 _EMBEDDING_RECORD_NAMESPACE,
-                f"{asset_version_id}:{embedding_spec_hash}",
+                (
+                    f"{asset_version_id}:{embedding_spec_hash}:{input_hash}"
+                    if vector_kind is VectorKind.PRODUCT_FUSED
+                    else f"{asset_version_id}:{embedding_spec_hash}"
+                ),
             )
         )
         return cls(
@@ -225,6 +240,8 @@ class EmbeddingRecord:
             embedding_spec_hash=embedding_spec_hash,
             input_hash=input_hash,
             vector_kind=vector_kind,
+            product_brief_version_id=product_brief_version_id,
+            controlled_text_sha256=controlled_text_sha256,
             milvus_primary_key=deterministic_id,
             state=EmbeddingState.PENDING,
             write_generation=0,

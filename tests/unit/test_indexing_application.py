@@ -9,9 +9,11 @@ from commercevision_application import (
     ImageIndexingExecutor,
     ImageIndexingTarget,
     IndexCommitDecision,
+    IndexingTarget,
     OperationExecutionFailure,
     OperationExecutionRequest,
     UnknownOperationOutcome,
+    VectorIndexingExecutor,
 )
 from commercevision_contracts import (
     EmbeddingImageInputV1,
@@ -261,6 +263,48 @@ def test_milvus_upsert_boundary_timeout_enters_reconciliation_without_resubmissi
         )
 
     assert authority.commits == 0
+
+
+def test_product_fused_execution_submits_controlled_text_and_fused_vector_metadata() -> None:
+    class CapturingEmbedding(_Embedding):
+        request: EmbeddingProviderRequestV1 | None = None
+
+        def embed(self, request: EmbeddingProviderRequestV1) -> EmbeddingProviderResultV1:
+            self.request = request
+            return super().embed(request)
+
+    request = _request()
+    target: IndexingTarget = replace(
+        _target(request),
+        collection_spec=CollectionSpec.create(
+            model_family="qwen3-vl-embedding",
+            pinned_revision="2026-06-30",
+            dimension=4,
+            vector_kind=VectorKind.PRODUCT_FUSED,
+            schema_version=1,
+            index_spec_version="hnsw-cosine-v1",
+        ),
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        product_brief_version_id=new_uuid7(),
+        controlled_text_sha256="d" * 64,
+        controlled_text='{"title":"鎏金口红 summer"}',
+    )
+    authority = _Authority(target)
+    embedding = CapturingEmbedding()
+    vectors = _Vectors()
+
+    VectorIndexingExecutor(
+        authority=authority,
+        references=_References(),
+        embedding=embedding,
+        vectors=vectors,
+    ).execute(request)
+
+    assert embedding.request is not None
+    assert embedding.request.vector_kind is VectorKind.PRODUCT_FUSED
+    assert embedding.request.controlled_text == target.controlled_text
+    assert vectors.last_upsert is not None
+    assert vectors.last_upsert.row.vector_kind is VectorKind.PRODUCT_FUSED
 
 
 def test_post_upsert_mysql_timeout_enters_same_generation_reconciliation() -> None:

@@ -424,6 +424,7 @@ class Settings(BaseSettings):
     embedding_dimension: int = Field(default=256, ge=1, le=32_768)
     embedding_model_configuration_version: str = "image-embedding-config-v1"
     embedding_preprocessing_version: str = "image-preprocess-v1"
+    product_fused_preprocessing_version: str = "product-fused-v1"
     embedding_collection_schema_version: int = Field(default=1, ge=1, le=2_147_483_647)
     embedding_collection_index_spec_version: str = "hnsw-cosine-v1"
     image_index_temporary_reference_lifetime_seconds: int = Field(
@@ -632,6 +633,7 @@ class Settings(BaseSettings):
         "embedding_pinned_revision",
         "embedding_model_configuration_version",
         "embedding_preprocessing_version",
+        "product_fused_preprocessing_version",
         "embedding_collection_index_spec_version",
         "embedding_data_transfer_policy_version",
         "alibaba_embedding_endpoint_region",
@@ -662,6 +664,7 @@ class Settings(BaseSettings):
         "alibaba_vision_adapter_version",
         "embedding_model_configuration_version",
         "embedding_preprocessing_version",
+        "product_fused_preprocessing_version",
         "embedding_collection_index_spec_version",
         "embedding_data_transfer_policy_version",
         "c2pa_trust_config_version",
@@ -1392,7 +1395,7 @@ class Settings(BaseSettings):
                 or self.embedding_model_id != "qwen3-vl-embedding"
             ):
                 raise ValueError(
-                    "Alibaba IMAGE embedding requires the mainline qwen3-vl-embedding "
+                    "Alibaba vector embedding requires the mainline qwen3-vl-embedding "
                     "model identity"
                 )
             if self.embedding_dimension not in {256, 512, 768, 1024, 1536, 2048, 2560}:

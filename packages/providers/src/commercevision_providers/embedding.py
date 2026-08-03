@@ -1,4 +1,4 @@
-"""Deterministic and Alibaba Model Studio IMAGE embedding adapters.
+"""Deterministic and Alibaba Model Studio vector embedding adapters.
 
 DashScope currently returns no resolved revision for qwen3-vl-embedding. ``actual_model``
 therefore records the submitted model ID; ``pinned_revision`` is the internal collection
@@ -77,7 +77,7 @@ def _normalized_fixture_vector(seed: bytes, dimension: int) -> list[float]:
 
 
 class DeterministicEmbeddingProvider:
-    """Stable fixture implementing the public IMAGE embedding seam."""
+    """Stable fixture implementing the public vector embedding seam."""
 
     __slots__ = (
         "_clock",
@@ -85,6 +85,7 @@ class DeterministicEmbeddingProvider:
         "_model_id",
         "_pinned_revision",
         "_preprocessing_version",
+        "_preprocessing_versions",
         "_provider",
         "_scenario",
     )
@@ -97,6 +98,7 @@ class DeterministicEmbeddingProvider:
         pinned_revision: str,
         model_configuration_version: str,
         preprocessing_version: str = "image-preprocess-v1",
+        additional_preprocessing_versions: frozenset[str] = frozenset(),
         scenario: DeterministicEmbeddingScenario = DeterministicEmbeddingScenario.SUCCESS,
         clock: Any | None = None,
     ) -> None:
@@ -115,6 +117,11 @@ class DeterministicEmbeddingProvider:
         self._pinned_revision = pinned_revision
         self._model_configuration_version = model_configuration_version
         self._preprocessing_version = preprocessing_version
+        self._preprocessing_versions = frozenset(
+            {preprocessing_version, *additional_preprocessing_versions}
+        )
+        if any(not value or value != value.strip() for value in self._preprocessing_versions):
+            raise ValueError("Deterministic embedding preprocessing identity is invalid")
         self._scenario = scenario
         self._clock = clock or (lambda: datetime.now(UTC))
 
@@ -181,18 +188,18 @@ class DeterministicEmbeddingProvider:
                 safe_message="Embedding request configuration does not match the adapter",
                 retryable=False,
             )
-        if request.preprocessing_version != self._preprocessing_version:
+        if request.preprocessing_version not in self._preprocessing_versions:
             self._raise_failure(
                 code="EMBEDDING_REQUEST_IDENTITY_MISMATCH",
                 category="REJECTED",
                 safe_message=("Embedding request preprocessing version does not match the adapter"),
                 retryable=False,
             )
-        if request.vector_kind.value != "IMAGE":
+        if request.vector_kind.value not in {"IMAGE", "PRODUCT_FUSED"}:
             self._raise_failure(
                 code="EMBEDDING_VECTOR_KIND_UNSUPPORTED",
                 category="REJECTED",
-                safe_message="Embedding provider supports IMAGE vectors only",
+                safe_message="Embedding provider does not support the requested vector kind",
                 retryable=False,
             )
         if any(not 1 <= image.byte_size <= _MAXIMUM_IMAGE_BYTES for image in request.images):
@@ -309,7 +316,7 @@ class DeterministicEmbeddingProvider:
 
 
 class AlibabaEmbeddingProvider:
-    """Bounded DashScope adapter for qwen3-vl-embedding IMAGE vectors."""
+    """Bounded DashScope adapter for qwen3-vl-embedding vectors."""
 
     __slots__ = (
         "_active_lifecycles",
@@ -327,6 +334,7 @@ class AlibabaEmbeddingProvider:
         "_model_id",
         "_pinned_revision",
         "_preprocessing_version",
+        "_preprocessing_versions",
         "_transport",
     )
 
@@ -341,6 +349,7 @@ class AlibabaEmbeddingProvider:
         pinned_revision: str,
         model_configuration_version: str,
         preprocessing_version: str = "image-preprocess-v1",
+        additional_preprocessing_versions: frozenset[str] = frozenset(),
         connect_timeout_seconds: float,
         read_timeout_seconds: float,
         end_to_end_timeout_seconds: float,
@@ -370,7 +379,7 @@ class AlibabaEmbeddingProvider:
         if parsed.path.rstrip("/") != "/api/v1":
             raise ValueError("Alibaba embedding endpoint must identify the /api/v1 base")
         if model_id != "qwen3-vl-embedding":
-            raise ValueError("Alibaba IMAGE embedding requires qwen3-vl-embedding")
+            raise ValueError("Alibaba vector embedding requires qwen3-vl-embedding")
         if not all(
             (
                 endpoint_region,
@@ -400,6 +409,11 @@ class AlibabaEmbeddingProvider:
         self._pinned_revision = pinned_revision
         self._model_configuration_version = model_configuration_version
         self._preprocessing_version = preprocessing_version
+        self._preprocessing_versions = frozenset(
+            {preprocessing_version, *additional_preprocessing_versions}
+        )
+        if any(not value or value != value.strip() for value in self._preprocessing_versions):
+            raise ValueError("Alibaba embedding preprocessing identity is invalid")
         self._deadline = end_to_end_timeout_seconds
         self._maximum_response_bytes = maximum_response_bytes
         self._allowed_image_origins = normalized_origins
@@ -464,17 +478,17 @@ class AlibabaEmbeddingProvider:
         self._validate_request(request)
         started = time.monotonic()
         deadline_at = started + self._deadline
+        contents = []
+        if request.controlled_text is not None:
+            contents.append({"text": request.controlled_text})
+        contents.extend({"image": image.url.get_secret_value()} for image in request.images)
         request_bytes = json.dumps(
             {
                 "model": self._model_id,
-                "input": {
-                    "contents": [
-                        {"image": image.url.get_secret_value()} for image in request.images
-                    ]
-                },
+                "input": {"contents": contents},
                 "parameters": {
                     "dimension": request.expected_dimension,
-                    "enable_fusion": False,
+                    "enable_fusion": request.vector_kind.value == "PRODUCT_FUSED",
                     "output_type": "dense",
                 },
             },
@@ -597,11 +611,6 @@ class AlibabaEmbeddingProvider:
                 self._model_configuration_version,
                 "configuration",
             ),
-            (
-                request.preprocessing_version,
-                self._preprocessing_version,
-                "preprocessing version",
-            ),
         )
         for actual, expected, label in mismatches:
             if actual != expected:
@@ -611,11 +620,18 @@ class AlibabaEmbeddingProvider:
                     safe_message=f"Embedding request {label} does not match the adapter",
                     retryable=False,
                 )
-        if request.vector_kind.value != "IMAGE":
+        if request.preprocessing_version not in self._preprocessing_versions:
+            self._raise_failure(
+                code="EMBEDDING_REQUEST_IDENTITY_MISMATCH",
+                category="REJECTED",
+                safe_message=("Embedding request preprocessing version does not match the adapter"),
+                retryable=False,
+            )
+        if request.vector_kind.value not in {"IMAGE", "PRODUCT_FUSED"}:
             self._raise_failure(
                 code="EMBEDDING_VECTOR_KIND_UNSUPPORTED",
                 category="REJECTED",
-                safe_message="Embedding provider supports IMAGE vectors only",
+                safe_message="Embedding provider does not support the requested vector kind",
                 retryable=False,
             )
         if request.expected_dimension not in _QWEN3_DIMENSIONS:
@@ -706,8 +722,9 @@ class AlibabaEmbeddingProvider:
         if not isinstance(raw_embeddings, list):
             raise ValueError
         by_index: dict[int, EmbeddingVectorV1] = {}
+        expected_type = "fusion" if request.vector_kind.value == "PRODUCT_FUSED" else "vl"
         for item in raw_embeddings:
-            if not isinstance(item, dict) or item.get("type") != "vl":
+            if not isinstance(item, dict) or item.get("type") != expected_type:
                 raise ValueError
             index = self._nonnegative_int(item.get("index"))
             if index in by_index:

@@ -117,6 +117,13 @@
   Alembic、生产配置与 Runbook 均已闭合；Standards、Spec 与 Quality 终审全部批准，无剩余阻断。
 - Ticket 09 单一实现提交及对应 GitHub Actions 全绿是进入 Ticket 10 的最终放行门槛；在该门槛
   完成前不启动下一 Ticket。
+- Ticket 09 最终单一实现提交为 `73c2194`；GitHub Actions `30786845917` 的 Python、Web、
+  Container builds、Gitleaks 与 SBOM 全部通过，Ticket 10 已正式解锁并进入独立上下文实现。
+- Ticket 10 的 PRODUCT_FUSED 原子增量索引、受控文本、CJK ngram Search Document、Rights
+  撤销/重授权收敛、Worker 事件接线与受 MySQL eligibility 围栏约束的 Milvus ANN primitive 已
+  完整落地并通过本地发布门禁：unit/contract `1120 passed, 1 skipped`、PRODUCT_FUSED/Milvus/
+  migration `28 passed`、完整 Phase 1 IMAGE MySQL 兼容 `36 passed`。当前只允许形成单一提交、
+  推送并等待精确 GitHub Actions 全绿，未启动 Ticket 11。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

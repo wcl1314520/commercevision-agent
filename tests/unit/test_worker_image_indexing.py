@@ -10,9 +10,11 @@ from commercevision_contracts.events import (
     ASSET_INDEX_DELETE_REQUESTED_V1,
     ASSET_INDEX_REQUESTED_V1,
     ASSET_RIGHTS_CHANGED_V1,
+    PRODUCT_BRIEF_CONFIRMED_V1,
     AssetIndexDeleteRequestedPayload,
     AssetIndexRequestedPayload,
     AssetRightsChangedPayload,
+    ProductBriefConfirmedPayload,
 )
 from commercevision_domain import OperationKind
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
@@ -142,6 +144,7 @@ def test_rights_reindex_requests_once_and_non_applicable_assets_are_noop() -> No
         required_convergence="REINDEX",
     )
     calls: list[tuple[str, str]] = []
+    fused_calls: list[tuple[str, str]] = []
 
     class Requests:
         def request_current_image(self, *, workspace_id: str, asset_id: str) -> None:
@@ -149,7 +152,18 @@ def test_rights_reindex_requests_once_and_non_applicable_assets_are_noop() -> No
             if len(calls) == 2:
                 raise ImageIndexNotApplicable("not an IMAGE")
 
-    runtime = _runtime(image_index_requests=Requests())
+    class FusedRequests:
+        @staticmethod
+        def request_current_product_fused_for_asset(
+            *, workspace_id: str, asset_id: str
+        ) -> tuple[object, ...]:
+            fused_calls.append((workspace_id, asset_id))
+            return ()
+
+    runtime = _runtime(
+        image_index_requests=Requests(),
+        product_fused_index_requests=FusedRequests(),
+    )
     event = _event(ASSET_RIGHTS_CHANGED_V1, payload, aggregate_id=ASSET_ID)
 
     runtime._handle_asset_rights_changed(event)
@@ -159,6 +173,53 @@ def test_rights_reindex_requests_once_and_non_applicable_assets_are_noop() -> No
         ("catalog-workspace", ASSET_ID),
         ("catalog-workspace", ASSET_ID),
     ]
+    assert fused_calls == [
+        ("catalog-workspace", ASSET_ID),
+        ("catalog-workspace", ASSET_ID),
+    ]
+
+
+def test_confirmed_product_brief_requests_product_fused_indexing_once() -> None:
+    brief_id = "018f5f4d-7c11-7d11-8a11-777777777777"
+    brief_version_id = "018f5f4d-7c11-7d11-8a11-888888888888"
+    payload = ProductBriefConfirmedPayload(
+        workspace_id="catalog-workspace",
+        product_brief_id=brief_id,
+        product_brief_version=3,
+        product_brief_version_id=brief_version_id,
+        product_brief_version_number=2,
+        workflow_id="018f5f4d-7c11-7d11-8a11-999999999999",
+        operation_id=OPERATION_ID,
+        confirmation_id=None,
+        confirmation_source="POLICY",
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    class Requests:
+        @staticmethod
+        def request_confirmed_brief(
+            *,
+            workspace_id: str,
+            product_brief_id: str,
+            product_brief_version_id: str,
+        ) -> tuple[object, ...]:
+            calls.append((workspace_id, product_brief_id, product_brief_version_id))
+            return ()
+
+    event = _event(PRODUCT_BRIEF_CONFIRMED_V1, payload, aggregate_id=brief_id)
+    event = replace(
+        event,
+        envelope=replace(
+            event.envelope,
+            aggregate_type="ProductBrief",
+            aggregate_version=payload.product_brief_version,
+        ),
+    )
+    runtime = _runtime(product_fused_index_requests=Requests())
+
+    runtime._observe_product_brief_state(event)
+
+    assert calls == [("catalog-workspace", brief_id, brief_version_id)]
 
 
 def test_settings_maximum_milvus_timeout_builds_exact_adapter_boundary(

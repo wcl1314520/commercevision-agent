@@ -1,4 +1,4 @@
-"""IMAGE indexing dependency composition owned by the index Worker."""
+"""Vector indexing dependency composition owned by the index Worker."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from commercevision_persistence import (
     MySqlExactImageReference,
     MySqlImageIndexRequestService,
     MySqlIndexingAuthority,
+    MySqlProductFusedIndexRequestService,
 )
 from commercevision_providers import (
     AlibabaEmbeddingProvider,
@@ -47,6 +48,17 @@ def collection_spec_from_settings(settings: Settings) -> CollectionSpec:
     )
 
 
+def product_fused_collection_spec_from_settings(settings: Settings) -> CollectionSpec:
+    return CollectionSpec.create(
+        model_family=settings.embedding_model_family,
+        pinned_revision=settings.embedding_pinned_revision,
+        dimension=settings.embedding_dimension,
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        schema_version=settings.embedding_collection_schema_version,
+        index_spec_version=settings.embedding_collection_index_spec_version,
+    )
+
+
 def _build_embedding_provider(settings: Settings) -> object:
     if settings.embedding_adapter == "deterministic":
         return DeterministicEmbeddingProvider(
@@ -54,6 +66,10 @@ def _build_embedding_provider(settings: Settings) -> object:
             model_id=settings.embedding_model_id,
             pinned_revision=settings.embedding_pinned_revision,
             model_configuration_version=settings.embedding_model_configuration_version,
+            preprocessing_version=settings.embedding_preprocessing_version,
+            additional_preprocessing_versions=frozenset(
+                {settings.product_fused_preprocessing_version}
+            ),
             scenario=DeterministicEmbeddingScenario(settings.deterministic_embedding_scenario),
         )
     api_key_file = settings.alibaba_embedding_api_key_file
@@ -75,6 +91,7 @@ def _build_embedding_provider(settings: Settings) -> object:
         pinned_revision=settings.embedding_pinned_revision,
         model_configuration_version=settings.embedding_model_configuration_version,
         preprocessing_version=settings.embedding_preprocessing_version,
+        additional_preprocessing_versions=frozenset({settings.product_fused_preprocessing_version}),
         connect_timeout_seconds=settings.alibaba_embedding_connect_timeout_seconds,
         read_timeout_seconds=settings.alibaba_embedding_read_timeout_seconds,
         end_to_end_timeout_seconds=settings.alibaba_embedding_end_to_end_timeout_seconds,
@@ -126,6 +143,23 @@ def build_image_index_request_service(
         model_id=settings.embedding_model_id,
         model_configuration_version=settings.embedding_model_configuration_version,
         preprocessing_version=settings.embedding_preprocessing_version,
+        max_attempts=settings.image_index_max_attempts,
+        max_reconciliation_attempts=settings.image_index_max_reconciliation_attempts,
+    )
+
+
+def build_product_fused_index_request_service(
+    *,
+    settings: Settings,
+    database: Database,
+) -> MySqlProductFusedIndexRequestService:
+    return MySqlProductFusedIndexRequestService(
+        session_factory=database.session_factory,
+        collection_spec=product_fused_collection_spec_from_settings(settings),
+        provider=settings.embedding_provider,
+        model_id=settings.embedding_model_id,
+        model_configuration_version=settings.embedding_model_configuration_version,
+        preprocessing_version=settings.product_fused_preprocessing_version,
         max_attempts=settings.image_index_max_attempts,
         max_reconciliation_attempts=settings.image_index_max_reconciliation_attempts,
     )
@@ -206,6 +240,6 @@ def probe_image_indexing_dependencies(settings: Settings) -> dict[str, str]:
             try:
                 close()
             except Exception:
-                failures.append(ConnectionError("IMAGE indexing adapter cleanup failed"))
+                failures.append(ConnectionError("vector indexing adapter cleanup failed"))
         if failures:
-            raise ExceptionGroup("IMAGE indexing readiness cleanup failed", failures)
+            raise ExceptionGroup("vector indexing readiness cleanup failed", failures)

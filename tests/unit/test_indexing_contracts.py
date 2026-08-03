@@ -1,5 +1,5 @@
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from commercevision_contracts import (
@@ -9,6 +9,7 @@ from commercevision_contracts import (
     EmbeddingProviderRequestV1,
     EmbeddingProviderResultV1,
     EmbeddingVectorV1,
+    MilvusAnnSearchRequestV1,
     MilvusCollectionCreateRequestV1,
     collection_create_request,
 )
@@ -61,6 +62,55 @@ def test_collection_admin_contract_disables_dynamic_fields_and_limits_scalars() 
     assert request.fields[-1].data_type == "FLOAT_VECTOR"
     with pytest.raises(ValidationError):
         MilvusCollectionCreateRequestV1(**(request.model_dump() | {"dynamic_fields_enabled": True}))
+
+
+@pytest.mark.parametrize(
+    ("eligible_ids", "limit"),
+    [
+        (["018f5f4d-7c11-7d11-8a11-111111111111"] * 2, 1),
+        (["018f5f4d-7c11-7d11-8a11-111111111111"], 2),
+        (["not-a-canonical-embedding-id"], 1),
+        (["018F5F4D-7C11-7D11-8A11-111111111111"], 1),
+    ],
+)
+def test_ann_request_rejects_unbounded_or_ambiguous_mysql_identity_fences(
+    eligible_ids: list[str],
+    limit: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        MilvusAnnSearchRequestV1(
+            collection_name="cv_product_fused_test",
+            workspace_id="catalog-workspace",
+            vector_kind=VectorKind.PRODUCT_FUSED,
+            eligible_embedding_record_ids=eligible_ids,
+            query_vector=[0.1, 0.2, 0.3, 0.4],
+            limit=limit,
+        )
+
+
+def test_ann_request_rejects_boolean_limit_under_strict_contracts() -> None:
+    with pytest.raises(ValidationError):
+        MilvusAnnSearchRequestV1(
+            collection_name="cv_product_fused_test",
+            workspace_id="catalog-workspace",
+            vector_kind=VectorKind.PRODUCT_FUSED,
+            eligible_embedding_record_ids=["018f5f4d-7c11-7d11-8a11-111111111111"],
+            query_vector=[0.1, 0.2, 0.3, 0.4],
+            limit=True,
+        )
+
+
+def test_ann_request_accepts_deterministic_embedding_uuid5_identities() -> None:
+    request = MilvusAnnSearchRequestV1(
+        collection_name="cv_product_fused_test",
+        workspace_id="catalog-workspace",
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        eligible_embedding_record_ids=["018f5f4d-7c11-5d11-8a11-111111111111"],
+        query_vector=[0.1, 0.2, 0.3, 0.4],
+        limit=1,
+    )
+
+    assert request.eligible_embedding_record_ids == ["018f5f4d-7c11-5d11-8a11-111111111111"]
 
 
 @pytest.mark.parametrize(
@@ -134,6 +184,42 @@ def test_embedding_input_keeps_temporary_credentials_secret_and_requires_utc_exp
         )
 
 
+def test_embedding_request_separates_image_and_product_fused_text_contracts() -> None:
+    image = EmbeddingImageInputV1(
+        asset_version_id=new_uuid7(),
+        content_sha256="a" * 64,
+        byte_size=128,
+        url=SecretStr("https://controlled.invalid/exact-image"),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    common = {
+        "provider": "alibaba-model-studio",
+        "model_id": "qwen3-vl-embedding",
+        "pinned_revision": "embedding-eval-2026-07-31",
+        "model_configuration_version": "embedding-config-v1",
+        "preprocessing_version": "product-fused-text-v1",
+        "expected_dimension": 256,
+        "input_hash": "b" * 64,
+        "images": [image],
+    }
+
+    fused = EmbeddingProviderRequestV1(
+        **common,
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        controlled_text='{"title":"口红"}',
+    )
+
+    assert fused.controlled_text == '{"title":"口红"}'
+    with pytest.raises(ValidationError, match="controlled text"):
+        EmbeddingProviderRequestV1(**common, vector_kind=VectorKind.PRODUCT_FUSED)
+    with pytest.raises(ValidationError, match="controlled text"):
+        EmbeddingProviderRequestV1(
+            **common,
+            vector_kind=VectorKind.IMAGE,
+            controlled_text="must not be accepted",
+        )
+
+
 def test_embedding_provider_failure_is_strict_safe_and_provider_neutral() -> None:
     error = EmbeddingProviderErrorV1(
         code="EMBEDDING_THROTTLED",
@@ -183,6 +269,18 @@ def test_asset_index_request_is_a_strict_typed_index_command() -> None:
     assert contract.handling is EventHandling.COMMAND
     with pytest.raises(ValidationError):
         contract.validate_payload(payload_data | {"untyped_escape": "forbidden"})
+
+    fused = contract.validate_payload(
+        payload_data
+        | {
+            "vector_kind": "PRODUCT_FUSED",
+            "product_brief_version_id": new_uuid7(),
+            "controlled_text_sha256": "d" * 64,
+        }
+    )
+    assert fused.vector_kind == "PRODUCT_FUSED"
+    with pytest.raises(ValidationError, match="ProductBrief"):
+        contract.validate_payload(payload_data | {"vector_kind": "PRODUCT_FUSED"})
 
 
 def test_index_terminal_events_carry_generation_fences_without_external_payloads() -> None:

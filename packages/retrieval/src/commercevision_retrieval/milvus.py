@@ -15,6 +15,8 @@ from types import ModuleType
 from typing import Any
 
 from commercevision_contracts import (
+    MilvusAnnSearchHitV1,
+    MilvusAnnSearchRequestV1,
     MilvusCollectionCreateRequestV1,
     MilvusUpsertRequestV1,
     MilvusVectorIdentityV1,
@@ -190,6 +192,71 @@ class MilvusVectorIndexAdapter:
         )
         if not isinstance(result, dict) or result.get("upsert_count") != 1:
             raise TimeoutError("Milvus upsert outcome is unknown")
+
+    def search(
+        self,
+        request: MilvusAnnSearchRequestV1,
+    ) -> tuple[MilvusAnnSearchHitV1, ...]:
+        deadline = _Deadline.start(self._timeout_seconds)
+        eligible = set(request.eligible_embedding_record_ids)
+        expression = (
+            f"workspace_id == {json.dumps(request.workspace_id)} and "
+            f"vector_kind == {json.dumps(request.vector_kind.value)} and "
+            "embedding_record_id in "
+            f"{json.dumps(request.eligible_embedding_record_ids, separators=(',', ':'))}"
+        )
+        results = self._call(
+            "ANN search",
+            "search",
+            deadline=deadline,
+            collection_name=request.collection_name,
+            data=[request.query_vector],
+            anns_field="vector",
+            filter=expression,
+            limit=request.limit,
+            output_fields=[
+                "embedding_record_id",
+                "asset_version_id",
+                "input_hash",
+                "embedding_spec_sha256",
+                "write_generation",
+            ],
+            search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+            consistency_level="Strong",
+        )
+        if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], list):
+            raise ValueError("Milvus ANN search returned an invalid result")
+        if len(results[0]) > request.limit:
+            raise ValueError("Milvus ANN search exceeded the requested limit")
+        hits: list[MilvusAnnSearchHitV1] = []
+        seen: set[str] = set()
+        for raw_hit in results[0]:
+            if not isinstance(raw_hit, dict) or not isinstance(raw_hit.get("entity"), dict):
+                raise ValueError("Milvus ANN search returned an invalid result")
+            entity = raw_hit["entity"]
+            try:
+                hit = MilvusAnnSearchHitV1(
+                    embedding_record_id=entity.get("embedding_record_id"),
+                    asset_version_id=entity.get("asset_version_id"),
+                    input_hash=entity.get("input_hash"),
+                    embedding_spec_sha256=entity.get("embedding_spec_sha256"),
+                    write_generation=entity.get("write_generation"),
+                    score=raw_hit.get("distance"),
+                )
+                self._require_generation_key(
+                    embedding_record_id=hit.embedding_record_id,
+                    primary_key=raw_hit.get("id"),
+                    write_generation=hit.write_generation,
+                )
+            except (TypeError, ValueError):
+                raise ValueError("Milvus ANN search returned an invalid result") from None
+            if hit.embedding_record_id not in eligible or hit.embedding_record_id in seen:
+                raise ValueError("Milvus ANN search escaped its eligible identity fence")
+            seen.add(hit.embedding_record_id)
+            hits.append(hit)
+        if any(left.score < right.score for left, right in zip(hits, hits[1:], strict=False)):
+            raise ValueError("Milvus ANN search returned unsorted scores")
+        return tuple(hits)
 
     def prove(self, identity: MilvusVectorIdentityV1) -> MilvusVectorProofV1:
         return self._prove(identity, _Deadline.start(self._timeout_seconds))

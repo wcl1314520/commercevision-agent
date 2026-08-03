@@ -157,6 +157,74 @@ def test_alibaba_embedding_provider_uses_the_official_image_http_shape() -> None
     assert "must-not-leak" not in repr(result)
 
 
+def test_alibaba_embedding_provider_uses_the_official_product_fusion_shape() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "output": {
+                    "embeddings": [{"index": 0, "embedding": [0.0625] * 256, "type": "fusion"}]
+                },
+                "usage": {"input_tokens": 8, "image_tokens": 12, "total_tokens": 20},
+                "request_id": "provider-fused-request-1",
+            },
+        )
+
+    provider = AlibabaEmbeddingProvider(
+        api_key="api-key-must-not-leak",
+        endpoint="https://dashscope.aliyuncs.com/api/v1",
+        endpoint_region="cn-beijing",
+        model_id="qwen3-vl-embedding",
+        pinned_revision="embedding-eval-2026-07-31",
+        model_configuration_version="embedding-config-v1",
+        preprocessing_version="image-preprocess-v1",
+        additional_preprocessing_versions=frozenset({"product-fused-v1"}),
+        connect_timeout_seconds=0.05,
+        read_timeout_seconds=0.05,
+        end_to_end_timeout_seconds=1,
+        maximum_concurrency=1,
+        maximum_response_bytes=64 * 1024,
+        allowed_image_origins=frozenset({"https://controlled.invalid"}),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        clock=lambda: NOW,
+    )
+    controlled_text = '{"title":"鎏金口红"}'
+    request = _request(
+        provider="alibaba-model-studio",
+        dimension=256,
+        required_headers=False,
+    ).model_copy(
+        update={
+            "preprocessing_version": "product-fused-v1",
+            "vector_kind": VectorKind.PRODUCT_FUSED,
+            "controlled_text": controlled_text,
+        }
+    )
+    try:
+        result = provider.embed(request)
+    finally:
+        provider.close()
+
+    result.validate_for(request)
+    assert json.loads(captured[0].content) == {
+        "model": "qwen3-vl-embedding",
+        "input": {
+            "contents": [
+                {"text": controlled_text},
+                {"image": "https://controlled.invalid/read?token=must-not-leak"},
+            ]
+        },
+        "parameters": {
+            "dimension": 256,
+            "enable_fusion": True,
+            "output_type": "dense",
+        },
+    }
+
+
 def test_deterministic_embedding_provider_exposes_normalized_fixture_failures() -> None:
     provider = DeterministicEmbeddingProvider(
         provider="deterministic",
@@ -191,6 +259,30 @@ def test_deterministic_embedding_provider_rejects_a_preprocessing_identity_misma
         provider.embed(mismatched)
 
     assert captured.value.error.code == "EMBEDDING_REQUEST_IDENTITY_MISMATCH"
+
+
+def test_embedding_provider_accepts_the_configured_product_fused_preprocessing_identity() -> None:
+    provider = DeterministicEmbeddingProvider(
+        provider="deterministic",
+        model_id="qwen3-vl-embedding",
+        pinned_revision="embedding-eval-2026-07-31",
+        model_configuration_version="embedding-config-v1",
+        preprocessing_version="image-preprocess-v1",
+        additional_preprocessing_versions=frozenset({"product-fused-v1"}),
+        clock=lambda: NOW,
+    )
+    request = _request().model_copy(
+        update={
+            "preprocessing_version": "product-fused-v1",
+            "vector_kind": VectorKind.PRODUCT_FUSED,
+            "controlled_text": '{"title":"鎏金口红 summer"}',
+        }
+    )
+
+    result = provider.embed(request)
+
+    result.validate_for(request)
+    assert len(result.vectors) == 1
 
 
 @pytest.mark.parametrize(

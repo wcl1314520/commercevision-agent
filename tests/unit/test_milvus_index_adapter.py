@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from commercevision_contracts import (
+    MilvusAnnSearchRequestV1,
     MilvusCollectionCreateRequestV1,
     MilvusCollectionFieldV1,
     MilvusUpsertRequestV1,
@@ -503,6 +504,92 @@ def test_upsert_proves_the_exact_record_input_spec_and_generation() -> None:
     assert type(client.last_query["timeout"]) is int
     assert client.last_query["retry_times"] == 0
     assert client.last_query["retry_on_rate_limit"] is False
+
+
+def test_ann_search_is_bounded_to_mysql_eligible_product_fused_records() -> None:
+    eligible_id = new_uuid7()
+    excluded_id = new_uuid7()
+    asset_version_id = new_uuid7()
+
+    class Client(_VectorClient):
+        last_search: dict[str, Any] | None = None
+
+        def search(self, **kwargs: Any) -> list[list[dict[str, Any]]]:
+            self.last_search = kwargs
+            return [
+                [
+                    {
+                        "id": f"{eligible_id}:g2",
+                        "distance": 0.97,
+                        "entity": {
+                            "embedding_record_id": eligible_id,
+                            "asset_version_id": asset_version_id,
+                            "input_hash": "a" * 64,
+                            "embedding_spec_sha256": "b" * 64,
+                            "write_generation": 2,
+                        },
+                    }
+                ]
+            ]
+
+    client = Client()
+    request = MilvusAnnSearchRequestV1(
+        collection_name=_collection_request().collection_name,
+        workspace_id="catalog-workspace",
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        eligible_embedding_record_ids=[eligible_id, excluded_id],
+        query_vector=[0.1, 0.2, 0.3, 0.4],
+        limit=2,
+    )
+
+    hits = MilvusVectorIndexAdapter(client=client, timeout_seconds=2).search(request)
+
+    assert len(hits) == 1
+    assert hits[0].embedding_record_id == eligible_id
+    assert hits[0].asset_version_id == asset_version_id
+    assert hits[0].score == 0.97
+    assert client.last_search is not None
+    assert 'workspace_id == "catalog-workspace"' in client.last_search["filter"]
+    assert 'vector_kind == "PRODUCT_FUSED"' in client.last_search["filter"]
+    assert eligible_id in client.last_search["filter"]
+    assert excluded_id in client.last_search["filter"]
+    assert client.last_search["limit"] == 2
+    assert client.last_search["consistency_level"] == "Strong"
+
+
+def test_ann_search_rejects_more_results_than_the_requested_limit() -> None:
+    eligible_ids = [new_uuid7(), new_uuid7()]
+
+    class Client(_VectorClient):
+        def search(self, **_kwargs: Any) -> list[list[dict[str, Any]]]:
+            return [
+                [
+                    {
+                        "id": f"{record_id}:g1",
+                        "distance": 0.9 - position / 10,
+                        "entity": {
+                            "embedding_record_id": record_id,
+                            "asset_version_id": new_uuid7(),
+                            "input_hash": "a" * 64,
+                            "embedding_spec_sha256": "b" * 64,
+                            "write_generation": 1,
+                        },
+                    }
+                    for position, record_id in enumerate(eligible_ids)
+                ]
+            ]
+
+    request = MilvusAnnSearchRequestV1(
+        collection_name=_collection_request().collection_name,
+        workspace_id="catalog-workspace",
+        vector_kind=VectorKind.PRODUCT_FUSED,
+        eligible_embedding_record_ids=eligible_ids,
+        query_vector=[0.1, 0.2, 0.3, 0.4],
+        limit=1,
+    )
+
+    with pytest.raises(ValueError, match="requested limit"):
+        MilvusVectorIndexAdapter(client=Client(), timeout_seconds=2).search(request)
 
 
 def test_prove_reports_conflict_when_logical_record_does_not_match_exact_pk() -> None:

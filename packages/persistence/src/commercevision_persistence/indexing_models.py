@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     false,
 )
@@ -80,8 +81,14 @@ class EmbeddingRecordModel(Base):
     __tablename__ = "embedding_records"
     __table_args__ = (
         UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_embedding_records_workspace_id",
+        ),
+        UniqueConstraint(
             "asset_version_id",
             "embedding_spec_hash",
+            "input_hash",
             name="uq_embedding_records_asset_spec",
         ),
         UniqueConstraint(
@@ -108,6 +115,12 @@ class EmbeddingRecordModel(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["workspace_id", "product_brief_version_id"],
+            ["product_brief_versions.workspace_id", "product_brief_versions.id"],
+            name="fk_embedding_records_product_brief_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["workspace_id", "operation_id"],
             ["durable_operations.workspace_id", "durable_operations.id"],
             name="fk_embedding_records_operation",
@@ -126,6 +139,13 @@ class EmbeddingRecordModel(Base):
         CheckConstraint(
             "input_hash REGEXP '^[0-9a-f]{64}$' AND embedding_spec_hash REGEXP '^[0-9a-f]{64}$'",
             name="ck_embedding_records_hashes",
+        ),
+        CheckConstraint(
+            "(vector_kind = 'IMAGE' AND product_brief_version_id IS NULL "
+            "AND controlled_text_sha256 IS NULL) OR "
+            "(vector_kind = 'PRODUCT_FUSED' AND product_brief_version_id IS NOT NULL "
+            "AND controlled_text_sha256 REGEXP '^[0-9a-f]{64}$')",
+            name="ck_embedding_records_controlled_text",
         ),
         Index(
             "ix_embedding_records_workspace_state",
@@ -173,6 +193,8 @@ class EmbeddingRecordModel(Base):
     dimension: Mapped[int] = mapped_column(Integer, nullable=False)
     input_hash: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
     embedding_spec_hash: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    product_brief_version_id: Mapped[str | None] = mapped_column(String(36))
+    controlled_text_sha256: Mapped[str | None] = mapped_column(exact_string_sql_type(64))
     milvus_primary_key: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     write_generation: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -181,6 +203,131 @@ class EmbeddingRecordModel(Base):
     indexed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     stale_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     stale_reason: Mapped[str | None] = mapped_column(String(64))
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class ProductSearchDocumentModel(Base):
+    __tablename__ = "product_search_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "asset_version_id",
+            "input_hash",
+            name="uq_product_search_documents_asset_input",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_product_search_documents_workspace_id",
+        ),
+        UniqueConstraint(
+            "embedding_record_id",
+            name="uq_product_search_documents_embedding_record",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_id"],
+            ["products.workspace_id", "products.id"],
+            name="fk_product_search_documents_product",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_brief_id"],
+            ["product_briefs.workspace_id", "product_briefs.id"],
+            name="fk_product_search_documents_brief",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "product_brief_version_id", "product_brief_id"],
+            [
+                "product_brief_versions.workspace_id",
+                "product_brief_versions.id",
+                "product_brief_versions.product_brief_id",
+            ],
+            name="fk_product_search_documents_brief_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "asset_version_id", "asset_id"],
+            ["asset_versions.workspace_id", "asset_versions.id", "asset_versions.asset_id"],
+            name="fk_product_search_documents_asset_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "rights_record_id", "asset_id", "rights_record_version"],
+            [
+                "rights_records.workspace_id",
+                "rights_records.id",
+                "rights_records.asset_id",
+                "rights_records.version_number",
+            ],
+            name="fk_product_search_documents_rights",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "embedding_record_id"],
+            ["embedding_records.workspace_id", "embedding_records.id"],
+            name="fk_product_search_documents_embedding",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "state IN ('PENDING', 'INDEXED', 'STALE', 'DELETE_PENDING', 'DELETED')",
+            name="ck_product_search_documents_state",
+        ),
+        CheckConstraint(
+            "rights_record_version > 0 AND version > 0",
+            name="ck_product_search_documents_positive_versions",
+        ),
+        CheckConstraint(
+            "input_hash REGEXP '^[0-9a-f]{64}$' AND controlled_text_sha256 REGEXP '^[0-9a-f]{64}$'",
+            name="ck_product_search_documents_hashes",
+        ),
+        CheckConstraint(
+            "(retention_class = 'TASK' AND retention_deadline IS NOT NULL) OR "
+            "(retention_class = 'FOUNDATION' AND retention_deadline IS NULL)",
+            name="ck_product_search_documents_retention",
+        ),
+        Index(
+            "ix_product_search_documents_authority",
+            "workspace_id",
+            "state",
+            "rights_record_id",
+            "rights_record_version",
+            "asset_version_id",
+        ),
+        Index(
+            "ft_product_search_cjk",
+            "title",
+            "labels",
+            "ocr_summary",
+            "product_brief_summary",
+            "approved_notes",
+            mysql_prefix="FULLTEXT",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    product_brief_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    product_brief_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    rights_record_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    rights_record_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding_record_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    input_hash: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    controlled_text_sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    preprocessing_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    labels: Mapped[str] = mapped_column(Text, nullable=False)
+    ocr_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    product_brief_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    approved_notes: Mapped[str] = mapped_column(Text, nullable=False)
+    retention_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    retention_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

@@ -181,6 +181,47 @@
   全量门禁另发现测试用 50ms read timeout 与 50ms sleep 竞争；生产状态机正确把已发出的第二请求
   标为 unknown。测试改为等待两个 active lifecycle 的确定性排队事实，连续 `10/10` 通过，随后
   全量 unit + contract 恢复为 `1099 passed, 1 skipped`。
+- Ticket 09 最终单一提交 `73c2194` 已与 `origin/main` 精确一致且工作树为空；GitHub Actions
+  `30786845917` 全绿：Python 13m02s、Web 2m36s、Container 1m23s、Security/SBOM 10s。
+  Ticket 10 正式解锁，按既有《PRODUCT_FUSED indexing and CJK lexical documents》工单继续，
+  不提前实现 Ticket 11 的 rights-first hybrid fusion。
+- Ticket 10 首个 Domain RED 因 `build_controlled_product_text` 缺失而在 collection 阶段失败；
+  GREEN 深模块统一 PRODUCT_FUSED 与 FULLTEXT 的受控文本来源，执行 Unicode NFKC、控制字符
+  清理、空白折叠、casefold、集合去重/排序、大小预算和 canonical SHA-256。白名单只接受确认版
+  ProductBrief 的安全字段与显式 approved labels/notes，raw prompt、敏感 claims、兼容性 claims
+  等未批准字段不进入输出；等价中英混排内容产生相同文本与 hash。
+- Embedding identity 已保持 IMAGE 兼容：IMAGE 仍按 AssetVersion + spec 生成原确定性 ID；只有
+  PRODUCT_FUSED 将 input hash 纳入 ID，因此确认简报受控内容变化会产生新 Record，等价内容不会。
+  Provider request/event 契约现在严格区分 IMAGE 无文本与 PRODUCT_FUSED 单图 + controlled text，
+  typed event 同时绑定 ProductBrief Version 与 controlled-text hash；Deterministic/Alibaba 复用
+  既有 Adapter seam，相关 Domain/Contract/Provider 聚焦门禁 `56 passed`。
+- Ticket 10 migration `f5a1c3e7b902` 新增 fused provenance 与 `product_search_documents`，保存
+  Product/Brief/AssetVersion/Rights/Embedding 精确身份、title/labels/OCR summary/confirmed brief
+  summary/approved notes、retention 与状态；真实 MySQL `SHOW CREATE TABLE` 已证明
+  `FULLTEXT ... WITH PARSER ngram` 且 Alembic schema drift 为零，migration integration
+  `1 passed`。downgrade 在存在
+  PRODUCT_FUSED 历史时拒绝，避免静默删除索引事实。
+- Ticket 10 当前 checkpoint 尚未完成：下一切片必须实现 confirmed ProductBrief 原子 request
+  service、Search Document/Embedding/Operation/Outbox unique-winner、Worker 对 controlled text 的
+  authority load/commit、Rights stale/delete 收敛，以及中文/英文/混合 FULLTEXT 查询计划与真实
+  incremental MySQL+Milvus 测试；在这些门禁和独立终审前不得提交或进入 Ticket 11。
+- 本 checkpoint 的首轮全量 unit/contract 捕获 Provider 为比较 VectorKind 而反向导入 Domain；
+  既有 dependency-boundary test 正确 RED。Adapter 改为只读取 Contracts enum value 后删除反向
+  依赖，全量恢复为 `1104 passed, 1 skipped`；这条低耦合边界保持不变。
+- Ticket 10 原子请求首个真实 MySQL RED 已准确命中缺失的
+  `MySqlProductFusedIndexRequestService`。实现将 Ticket 09 请求模块加深为共享 IMAGE / PRODUCT_FUSED
+  原子边界，IMAGE operation hash 保持原域兼容，PRODUCT_FUSED 使用独立域并绑定确认版与受控文本。
+- 首次 GREEN 运行在测试 seed 的 `product_brief_fields.sensitive` 未转义处收到 MySQL 1064；这是
+  测试装置错误而非业务行为结果。已仅转义该列名，下一次运行继续验证同一公开 seam。
+- 原子请求、authority controlled-text load/commit、Rights DELETE_PENDING→DELETED、确认版变更
+  增量替换与 CJK FULLTEXT 已逐条完成 RED→GREEN。确认版不变保持单一 Record/Document/Operation/
+  Outbox；受控内容变化创建新 Record 并把旧 generation0 事实同步置为 STALE。
+- MySQL literal 查询覆盖中文 `鎏金口红`、英文 `summer lipstick` 与混合 `鎏金 summer`；三者均由
+  ngram FULLTEXT 返回唯一受控文档。首次 EXPLAIN 在空表选择 workspace 唯一索引，生产查询与
+  计划门禁随后显式 `FORCE INDEX (ft_product_search_cjk)`，查询计划已转绿。
+- Worker confirmed ProductBrief observation 已先 RED 证明缺少 fused request composition，随后新增
+  独立 PRODUCT_FUSED collection spec/request service，但继续复用同一个 Durable executor、MySQL
+  authority、Provider、Milvus adapter 和 delete handler；对应 unit seam 已转绿。
 
 ## 2026-07-21
 
@@ -1043,3 +1084,44 @@
   其余 47 个 untracked 文件均属于 Brand Profile 或共享 E2E 基础设施。
 - Ticket 08 已达到本地完成条件并更新为 `complete`；下一步只允许形成单一实现提交、推送并
   等待对应 GitHub Actions 全绿。Ticket 09 继续保持 `pending`。
+
+# 2026-08-03 Ticket 10 PRODUCT_FUSED/CJK 收口
+
+- confirmed ProductBrief 的受控文本、稳定 hash、PRODUCT_FUSED Embedding/Search Document、
+  typed Outbox 与 Durable Operation 已在单一 MySQL 事务中落地；并发请求只保留一个胜者，
+  不变输入幂等，变更后的确认版本生成新记录并使旧记录/文档收敛为 STALE 或精确删除。
+- IMAGE 与 PRODUCT_FUSED 共用同一索引请求、authority、executor、Provider 和 Milvus adapter；
+  Provider 仅额外允许显式配置的融合预处理 identity，没有建立第二套并行框架。
+- rights 撤销覆盖 PENDING 与已写入两种边界：未外写记录原子 STALE，已写入记录进入
+  DELETE_PENDING 并发送 generation-fenced 删除；重授权从 Asset rights event 找回依赖该
+  Asset 的当前 confirmed ProductBrief，复用稳定 record/document 并创建新 operation epoch。
+- MySQL CJK ngram FULLTEXT 已用中文、英文和混合字面 fixture 验证，并用 `FORCE INDEX` +
+  `EXPLAIN` 锁定 `ft_product_search_cjk`；非 INDEXED、撤权或永久失败文档不会参与 lexical 查询。
+- Milvus ANN primitive 仅接收规范 lowercase UUID 的 MySQL-eligible record 集合，强制 Workspace、
+  Vector Kind、eligible IDs、Strong consistency、结果数量/排序/主键 generation 围栏；真实
+  Milvus 中文、英文、混合三组 fixture 均只返回 eligible PRODUCT_FUSED 候选。
+- 新增模块与迁移组合门禁通过：Ticket 10 单元模块 `109 passed`；PRODUCT_FUSED + 两组迁移
+  MySQL `18 passed`；PRODUCT_FUSED 独立 MySQL 套件 `12 passed`（新增 terminal 同步后待下一轮
+  完整重跑确认最终计数）；真实 Milvus ANN `3 passed`。Ticket 11 仍保持 pending。
+- PRODUCT_FUSED + 完整 IMAGE MySQL + 真实 Milvus 的首个组合回归在 7 分钟工具窗口到期后被宿主
+  终止，终止前无失败输出但不计作通过；后续拆为短套件与完整 IMAGE 独立长窗口，避免重复该组合。
+- 质量修复后的纵向复验 `26/27` 通过，唯一失败为旧测试仍期待旁路 `products.title`；实现已按
+  确认态 `common.identity.display_name` 正确输出 title，approved `summer` label 仍存在。同步断言后
+  重跑，未将该过期断言误报为业务回归。
+- 合并前五轴自审关闭 4 个 Required：旁路 Product title、阿里 Qwen3 融合请求/响应 shape、
+  superseded Brief generation 删除被 current-version 检查阻断、稳定 UUIDv5 Embedding ID 被 ANN
+  契约误拒；并补齐 TASK lexical MySQL-time retention fence 与 title 列长边界。
+- 质量修复后最终 Python 证据：完整 unit/contract `1120 passed, 1 skipped`；PRODUCT_FUSED、真实
+  Milvus 与迁移组合 `28 passed`；完整 Ticket 09 IMAGE MySQL 兼容 `36 passed`。唯一 skip 仍为
+  需要显式真实凭证的 Alibaba OSS live contract。
+- 最终身份审查发现确认版 UUID 不应进入稳定 fused input hash，否则规范化后内容完全等价的新版本
+  会撞到同一确定性 Record ID 却因 provenance 不同而失败。稳定 hash 现在绑定 ProductBrief 本体、
+  Asset 内容、受控文本与 Provider 配置；等价新版本在同一事务中只推进 Embedding/Document provenance
+  与 retention，不发送新索引事件。不同 ProductBrief 即使复用同一图片和文本也生成隔离记录。
+- 旧版本事件回放只在其 ProductBrief Version 确属同一 Brief 且 controlled-text/input/operation 身份
+  全部一致时通过；随机或跨 Brief provenance 继续失败关闭。等价版本、旧事件回放、篡改拒绝和
+  跨 Brief hash 隔离均已进入公开测试，PRODUCT_FUSED 独立单元/MySQL 套件为 `20 passed`。
+- 最终静态与发布审查通过：`uv lock --check`、Ruff format/check（`322 files`）、Python 依赖审计
+  （无已知漏洞）、Compose config、OpenAPI 重导出、Web generated API types、`git diff --check`
+  全部通过；Alembic 唯一 head 为 `f5a1c3e7b902` 且 `alembic check` 无 drift。变更文件凭证前缀
+  扫描无命中，安全/正确性/性能/可维护性/简化五轴终审无剩余阻断项。

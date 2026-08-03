@@ -15,6 +15,10 @@ from .indexing_requests import (
     ImageIndexNotApplicable,
     ImageIndexRequestResult,
     MySqlImageIndexRequestService,
+    MySqlIndexRequestService,
+    MySqlProductFusedIndexRequestService,
+    ProductFusedIndexNotApplicable,
+    ProductFusedIndexRequestResult,
 )
 from .indexing_status import SqlAlchemyImageIndexStatusQueries
 from .operations import SqlAlchemyOperationUnitOfWork
@@ -24,6 +28,7 @@ from .product_briefs import (
     SqlAlchemyProductBriefUnitOfWork,
     SqlAlchemyProviderArtifactTargetReadinessQuery,
 )
+from .product_search import MySqlProductLexicalSearch, ProductLexicalHit
 from .unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
@@ -31,8 +36,14 @@ __all__ = [
     "MySQLCheckpointSaver",
     "MySqlIndexingAuthority",
     "MySqlImageIndexRequestService",
+    "MySqlIndexRequestService",
+    "MySqlProductFusedIndexRequestService",
     "ImageIndexRequestResult",
     "ImageIndexNotApplicable",
+    "ProductFusedIndexRequestResult",
+    "ProductFusedIndexNotApplicable",
+    "MySqlProductLexicalSearch",
+    "ProductLexicalHit",
     "SqlAlchemyImageIndexStatusQueries",
     "MySqlExactImageReference",
     "SqlAlchemyAssetUnitOfWork",

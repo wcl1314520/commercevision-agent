@@ -574,3 +574,24 @@
 - Trusted actor、Domain 和事件中的 Actor ID 统一拒绝 Unicode `Cc` 控制字符；malformed Asset
   UUID 事件属于永久路由失败。Worker 关闭保持逐项 best-effort 并聚合错误，Scheduler/API/Worker
   使用同一个 RabbitMQ 密码派生连接，避免单个进程在表面健康的异构凭证下脱离可靠消息链。
+
+## Ticket 10 PRODUCT_FUSED 索引边界
+
+- Ticket 10 的公共测试 seam 已由锁定工单确认：确认态 ProductBrief 原子请求模块、通用 Durable
+  索引执行接口，以及 MySQL CJK 词法查询接口；不在本 Ticket 实现 Ticket 11 的 Rights-first
+  hybrid fusion。
+- 当前 checkpoint 已完成受控文本、PRODUCT_FUSED identity/Provider/Event 契约与
+  `product_search_documents` ngram migration。剩余纵切必须复用 Ticket 09 的 Collection、
+  Durable Operation、Outbox 和 authority 收敛，不创建平行执行框架。
+- `ProductBrief` 是领域术语；`PRODUCT_FUSED` 与 Search Document 是索引实现身份，不写入
+  `CONTEXT.md` 领域词汇表。确认版本是文本来源的批准边界，但 raw OCR/raw prompt/未确认模型输出
+  仍必须默认排除。
+- Ticket 09 的 `MySqlImageIndexRequestService` 已封装 Collection + Embedding Record + Durable
+  Operation + typed Outbox 的原子提交和并发 winner reload；Ticket 10 应加深该模块或复用其内部
+  原语，不能复制一套浅层索引生命周期。
+- Application `ImageIndexingExecutor` 的外部执行流程本身与 vector kind 无关，当前只有 Target、
+  Provider request 和 Milvus row 三处硬编码 IMAGE。最小深模块方向是把 target 提升为通用索引
+  target，并保留 IMAGE 公共名称兼容别名；PRODUCT_FUSED 只增加受控文本/provenance 数据。
+- PRODUCT_FUSED 的稳定输入身份必须绑定 ProductBrief 本体而非确认版本：版本号是可推进的 provenance，
+  不是受控内容。等价新版本只原子更新 Embedding/Search Document 的版本溯源与 retention；受控文本
+  变化产生新 input hash 和 Record，不同 ProductBrief 即使内容相同也必须隔离。

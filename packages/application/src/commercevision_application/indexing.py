@@ -1,4 +1,4 @@
-"""IMAGE indexing orchestration over durable-operation and typed external seams."""
+"""Vector indexing orchestration over durable-operation and typed external seams."""
 
 from __future__ import annotations
 
@@ -66,6 +66,10 @@ class ImageIndexingTarget:
     actual_model: str | None
     indexed_at: datetime
     retention_class: RetentionClass
+    vector_kind: VectorKind = VectorKind.IMAGE
+    product_brief_version_id: str | None = None
+    controlled_text_sha256: str | None = None
+    controlled_text: str | None = None
     replay_source_dead_letter_id: str | None = None
     replay_attempt: int = 0
 
@@ -163,7 +167,7 @@ class ImageIndexStatusApplicationService:
 
 
 class ImageIndexingExecutor:
-    """One transaction-free external execution behind DurableOperationWorker."""
+    """One transaction-free vector execution behind DurableOperationWorker."""
 
     def __init__(
         self,
@@ -498,10 +502,11 @@ class ImageIndexingExecutor:
             pinned_revision=target.collection_spec.pinned_revision,
             model_configuration_version=target.model_configuration_version,
             preprocessing_version=target.preprocessing_version,
-            vector_kind=VectorKind.IMAGE,
+            vector_kind=target.vector_kind,
             expected_dimension=target.collection_spec.dimension,
             input_hash=target.input_hash,
             images=[self._references.temporary_input(target)],
+            controlled_text=target.controlled_text,
         )
 
     @staticmethod
@@ -523,7 +528,7 @@ class ImageIndexingExecutor:
                 category=target.category,
                 brand=target.brand,
                 asset_role=target.asset_role,
-                vector_kind=VectorKind.IMAGE,
+                vector_kind=target.vector_kind,
                 model_configuration_version=target.model_configuration_version,
                 input_hash=target.input_hash,
                 embedding_spec_sha256=target.embedding_spec_sha256,
@@ -550,9 +555,9 @@ class ImageIndexingExecutor:
     @staticmethod
     def _validate_request(request: OperationExecutionRequest) -> None:
         if request.kind is not OperationKind.ASSET_INDEXING:
-            raise ValueError("IMAGE indexing executor requires ASSET_INDEXING")
+            raise ValueError("vector indexing executor requires ASSET_INDEXING")
         if request.target_type != "embedding_record":
-            raise ValueError("IMAGE indexing target must be an embedding_record")
+            raise ValueError("vector indexing target must be an embedding_record")
 
     @staticmethod
     def _external_failure(*, retryable: bool) -> OperationExecutionFailure:
@@ -572,3 +577,7 @@ class ImageIndexingExecutor:
                 retryable=retryable,
             )
         )
+
+
+IndexingTarget = ImageIndexingTarget
+VectorIndexingExecutor = ImageIndexingExecutor

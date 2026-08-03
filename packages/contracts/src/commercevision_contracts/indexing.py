@@ -6,6 +6,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Literal
 from unicodedata import category as unicode_category
+from uuid import UUID
 
 from commercevision_domain import CollectionSpec, VectorKind
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -17,6 +18,16 @@ def _validate_float32_vector(values: list[float]) -> list[float]:
     if any(not math.isfinite(value) or abs(value) > FLOAT32_MAX for value in values):
         raise ValueError("embedding vector values must fit finite IEEE-754 float32")
     return values
+
+
+def _validate_canonical_uuid(value: str) -> str:
+    try:
+        parsed = UUID(value)
+    except ValueError:
+        raise ValueError("identity must be a canonical lowercase UUID") from None
+    if str(parsed) != value:
+        raise ValueError("identity must be a canonical lowercase UUID")
+    return value
 
 
 class IndexingContractV1(BaseModel):
@@ -133,6 +144,29 @@ class EmbeddingProviderRequestV1(IndexingContractV1):
     expected_dimension: int = Field(ge=1, le=32_768)
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     images: list[EmbeddingImageInputV1] = Field(min_length=1, max_length=16)
+    controlled_text: str | None = Field(default=None, min_length=1, max_length=32 * 1024)
+
+    @field_validator("controlled_text")
+    @classmethod
+    def require_canonical_controlled_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        has_control_character = any(unicode_category(character) == "Cc" for character in value)
+        if value != value.strip() or has_control_character:
+            raise ValueError("controlled text must be trimmed and contain no control characters")
+        return value
+
+    @model_validator(mode="after")
+    def validate_vector_kind_input(self) -> EmbeddingProviderRequestV1:
+        if self.vector_kind is VectorKind.IMAGE:
+            if self.controlled_text is not None:
+                raise ValueError("IMAGE embedding cannot contain controlled text")
+        elif self.vector_kind is VectorKind.PRODUCT_FUSED:
+            if self.controlled_text is None:
+                raise ValueError("PRODUCT_FUSED embedding requires controlled text")
+            if len(self.images) != 1:
+                raise ValueError("PRODUCT_FUSED embedding requires exactly one image")
+        return self
 
 
 class EmbeddingVectorV1(IndexingContractV1):
@@ -189,6 +223,47 @@ class MilvusVectorRowV1(IndexingContractV1):
 class MilvusUpsertRequestV1(IndexingContractV1):
     collection_name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,254}$")
     row: MilvusVectorRowV1
+
+
+class MilvusAnnSearchRequestV1(IndexingContractV1):
+    collection_name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,254}$")
+    workspace_id: str = Field(min_length=1, max_length=128)
+    vector_kind: VectorKind
+    eligible_embedding_record_ids: list[str] = Field(min_length=1, max_length=1_000)
+    query_vector: list[float] = Field(min_length=1, max_length=32_768)
+    limit: int = Field(ge=1, le=100)
+
+    @field_validator("query_vector")
+    @classmethod
+    def require_float32_query_vector(cls, values: list[float]) -> list[float]:
+        return _validate_float32_vector(values)
+
+    @field_validator("eligible_embedding_record_ids")
+    @classmethod
+    def require_canonical_eligible_records(cls, values: list[str]) -> list[str]:
+        return [_validate_canonical_uuid(value) for value in values]
+
+    @model_validator(mode="after")
+    def require_unique_eligible_records(self) -> MilvusAnnSearchRequestV1:
+        if len(set(self.eligible_embedding_record_ids)) != len(self.eligible_embedding_record_ids):
+            raise ValueError("eligible embedding record identities must be unique")
+        if self.limit > len(self.eligible_embedding_record_ids):
+            raise ValueError("ANN limit cannot exceed the MySQL-eligible identity count")
+        return self
+
+
+class MilvusAnnSearchHitV1(IndexingContractV1):
+    embedding_record_id: str = Field(min_length=1, max_length=36)
+    asset_version_id: str = Field(min_length=1, max_length=36)
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    write_generation: int = Field(ge=1)
+    score: float = Field(ge=-1, le=1)
+
+    @field_validator("embedding_record_id", "asset_version_id")
+    @classmethod
+    def require_canonical_identities(cls, value: str) -> str:
+        return _validate_canonical_uuid(value)
 
 
 class MilvusVectorIdentityV1(IndexingContractV1):
