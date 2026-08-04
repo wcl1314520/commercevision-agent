@@ -1591,3 +1591,6 @@
   维护性以 domain/application/ports/persistence/HTTP 分层且无 Planner Provider 依赖闭合。
 - Ticket 02 首次远程 CI `30896399867` 的 Gitleaks `generic-api-key` 精确命中路由测试假
   `Idempotency-Key`（非凭证）；不加 allowlist、不关闭规则，只把测试 header 改为低熵占位符并保持转发断言。
+- 安全修复后的 CI `30896799515` 中 Prompt Registry 真实 MySQL 四项全部通过；唯一 Python 失败是既有
+  workspace collation 全表白名单未登记两张新表（总汇总 `1870 passed, 1 failed, 3 skipped`）。修复仅扩展
+  该迁移契约集合，继续要求两个新表的 `workspace_id` 为 `utf8mb4_0900_bin`，不改生产 schema。

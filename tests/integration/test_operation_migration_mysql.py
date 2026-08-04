@@ -44,6 +44,8 @@ WORKSPACE_ID_TABLES = {
     "product_brief_source_assets",
     "product_brief_versions",
     "product_briefs",
+    "prompt_production_pointers",
+    "prompt_revisions",
     "provider_artifact_deletion_progress",
     "retrieval_results",
     "retrieval_runs",
