@@ -3,12 +3,10 @@ name = "commercevision-evaluation"
 version = "0.1.0"
 description = "Evaluator, dataset, and replay boundary"
 requires-python = ">=3.13,<3.14"
-dependencies = [
-  "commercevision-contracts",
-]
+dependencies = []
 
-[tool.uv.sources]
-commercevision-contracts = { workspace = true }
+[project.scripts]
+commercevision-retrieval-eval = "commercevision_evaluation.cli:main"
 
 [build-system]
 requires = ["hatchling"]

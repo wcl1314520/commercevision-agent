@@ -648,12 +648,6 @@ source = { editable = "packages/domain" }
 name = "commercevision-evaluation"
 version = "0.1.0"
 source = { editable = "packages/evaluation" }
-dependencies = [
-    { name = "commercevision-contracts" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "commercevision-contracts", editable = "packages/contracts" }]
 
 [[package]]
 name = "commercevision-mcp-server"

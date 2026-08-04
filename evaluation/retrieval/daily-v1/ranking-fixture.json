@@ -1,0 +1,72 @@
+{
+  "schema_version": "commercevision.retrieval-ranking-fixture.v1",
+  "exact_flat_metric": "COSINE",
+  "policy": {
+    "version": "retrieval-policy-v1",
+    "rrf_k": 60,
+    "channel_weights": {
+      "IMAGE_DENSE": 2.0,
+      "PRODUCT_FUSED_DENSE": 2.0,
+      "LEXICAL": 1.0,
+      "BRAND_PROFILE": 1.0,
+      "EXPLICIT": 1.0
+    },
+    "maximum_business_adjustment": 0.25
+  },
+  "queries": [
+    {
+      "query_id": "beauty-lipstick-red-01",
+      "channel_rankings": {
+        "IMAGE_DENSE": [
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88701",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88702",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88704",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88703",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88705"
+        ],
+        "LEXICAL": [
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88701",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88703",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88702",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88704",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88705"
+        ]
+      },
+      "business_adjustments": {},
+      "exact_flat_cosine_scores": {
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88701": 1.0,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88702": 0.9,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88703": 0.8,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88704": 0.7,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88705": 0.6
+      }
+    },
+    {
+      "query_id": "automotive-roof-rack-01",
+      "channel_rankings": {
+        "PRODUCT_FUSED_DENSE": [
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88801",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88802",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88804",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88803",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88805"
+        ],
+        "LEXICAL": [
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88801",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88803",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88802",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88804",
+          "0198f4d8-1f7c-7b2d-8da9-214a92a88805"
+        ]
+      },
+      "business_adjustments": {},
+      "exact_flat_cosine_scores": {
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88801": 1.0,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88802": 0.9,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88803": 0.8,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88804": 0.7,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88805": 0.6
+      }
+    }
+  ]
+}

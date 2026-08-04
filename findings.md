@@ -641,3 +641,21 @@
   model ID、pinned revision、dimension 和 vector kind；后者需要新 embedding identity，不能通过管理表单绕过。
 - 旧 Collection 只能在 pointer 已原子切换、候选保持 read-enabled 且配置延迟到达后退役。物理删除目标必须
   来自 rebuild 记录的 source identity，绝不能从当前 active 名称或人工输入推断。
+- Ticket 16 的评测输入与阈值必须是版本化数据，而不是路由或排名代码中的常量；公开测试接缝固定为
+  dataset manifest -> deterministic evaluator -> machine/human report -> release gate。
+- 固定语料需同时覆盖美妆和汽车配件、IMAGE 与 PRODUCT_FUSED，并冻结 query、候选全集、0–3 相关性、
+  Rights snapshot、purpose/provider、split、policy/model/collection identity；hidden release split 不参与日常调参。
+- UnauthorizedRecall@K、未授权返回总数、含未授权结果的查询数是三个独立安全指标，任一非零必须失败；
+  报告不得保留未授权 payload。
+- 2026-08-04 恢复 Ticket 16 时曾误读不存在的 `16-release-acceptance.md`；真实工单是
+  `16-retrieval-evaluation-gate.md`，错误仅为只读路径探测，后续固定使用已枚举的真实文件名。
+- 仓库已经预留空的 `commercevision-evaluation` workspace 包并依赖 contracts；Ticket 16 应深化该包，
+  不建立新的顶层服务或数据库框架。CI 的 Python job 已有单一全量 pytest 门禁，可在其前增加快速固定集命令，
+  让评测失败比长达十余分钟的全量测试更早反馈。
+- 现有 retrieval response 已提供有序 Citation、policy version、latency、vector kind 与 Rights 证据；离线评测
+  输入无需耦合 API/数据库，只需消费冻结的 ranking observation。用标准库实现确定性统计和 CLI，避免新增依赖。
+- Ticket 16 首轮可工作实现把数据模型、manifest 校验、统计和报告集中到 1,013 行单文件，越过代码审查的
+  文件健康信号；必须在提交前按职责拆为窄模块，公开 API 保持不变，不引入额外抽象层或依赖。
+- 仅对预烘焙 observations 计算指标无法捕获 RRF 实现回归，且只有 query_id 不满足“冻结 Query”；daily
+  suite 必须保存受控 query_text，并用公开 `reciprocal_rank_fuse` 对固定 channel rankings 生成/核对结果，
+  CI 在报告门之前运行该快速 parity contract。

@@ -1,0 +1,196 @@
+{
+  "schema_version": "commercevision.retrieval-evaluation.v1",
+  "suite_version": "retrieval-daily-v1",
+  "profile": "daily",
+  "split": "validation",
+  "candidate_universe_version": "synthetic-commerce-catalog-v1",
+  "rights_snapshot_version": "synthetic-rights-2026-08-04",
+  "retrieval_policy_version": "retrieval-policy-v1",
+  "embedding_model_version": "qwen3-vl-embedding-fixture-v1",
+  "collection_version": "evaluation-flat-fixture-v1",
+  "bootstrap": {
+    "samples": 500,
+    "confidence_level": 0.95,
+    "seed": 20260804
+  },
+  "thresholds": {
+    "basis": "point-estimate",
+    "minimum_recall_at": {"5": 1.0, "10": 1.0, "20": 1.0},
+    "minimum_precision_at": {"5": 0.6, "10": 0.3, "20": 0.15},
+    "minimum_mrr": 1.0,
+    "minimum_ndcg_at": {"5": 1.0, "10": 1.0, "20": 1.0},
+    "minimum_ann_recall_at": {"5": 1.0, "10": 1.0, "20": 1.0},
+    "maximum_p95_latency_ms": 150.0,
+    "maximum_unauthorized_recall_at": {"5": 0.0, "10": 0.0, "20": 0.0},
+    "maximum_unauthorized_return_count": 0,
+    "maximum_queries_with_unauthorized_results": 0
+  },
+  "assets": [
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88701",
+      "category": "beauty",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88901",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88702",
+      "category": "beauty",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88902",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88703",
+      "category": "beauty",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88903",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88704",
+      "category": "beauty",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88904",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88705",
+      "category": "beauty",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88905",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88706",
+      "category": "beauty",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88906",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88801",
+      "category": "automotive-accessory",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a01",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88802",
+      "category": "automotive-accessory",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a02",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88803",
+      "category": "automotive-accessory",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a03",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88804",
+      "category": "automotive-accessory",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a04",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88805",
+      "category": "automotive-accessory",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a05",
+      "rights_record_version": 1
+    },
+    {
+      "asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88806",
+      "category": "automotive-accessory",
+      "source_documentation": "docs/evaluation/retrieval-dataset-sources.md",
+      "license": "CC0-1.0",
+      "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a06",
+      "rights_record_version": 1
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "beauty-lipstick-red-01",
+      "query_text": "red lipstick product packshot on a neutral background",
+      "category": "beauty",
+      "vector_kind": "IMAGE",
+      "purpose": "creative-reference",
+      "provider": "alibaba-model-studio",
+      "relevance_grades": {
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88701": 3,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88702": 2,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88703": 1
+      },
+      "rights_snapshot": [
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88701", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88901", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88702", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88902", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88703", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88903", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88704", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88904", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88705", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88905", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88706", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88906", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88801", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a01", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88802", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a02", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88803", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a03", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88804", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a04", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88805", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a05", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88806", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a06", "rights_record_version": 1, "authorized": false}
+      ],
+      "exact_flat_asset_version_ids": [
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88701",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88702",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88703",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88704",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88705"
+      ]
+    },
+    {
+      "query_id": "automotive-roof-rack-01",
+      "query_text": "black aluminum roof rack product reference",
+      "category": "automotive-accessory",
+      "vector_kind": "PRODUCT_FUSED",
+      "purpose": "creative-reference",
+      "provider": "alibaba-model-studio",
+      "relevance_grades": {
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88801": 3,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88802": 2,
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88803": 1
+      },
+      "rights_snapshot": [
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88701", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88901", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88702", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88902", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88703", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88903", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88704", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88904", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88705", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88905", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88706", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88906", "rights_record_version": 1, "authorized": false},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88801", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a01", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88802", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a02", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88803", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a03", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88804", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a04", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88805", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a05", "rights_record_version": 1, "authorized": true},
+        {"asset_version_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88806", "rights_record_id": "0198f4d8-1f7c-7b2d-8da9-214a92a88a06", "rights_record_version": 1, "authorized": true}
+      ],
+      "exact_flat_asset_version_ids": [
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88801",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88802",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88803",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88804",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88805"
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-08-04 |
 | 适用版本 | Evaluation v1 |
 
 ## 原则
@@ -184,3 +184,47 @@ Replay 产生新 Run，不覆盖旧 Trace。
 - 无新增无限循环和无效工具调用。
 - Trace 和版本信息完整。
 
+## Phase 2 固定检索评测门
+
+版本化 manifest 冻结 suite、split、候选全集、0–3 relevance、完整 Rights snapshot、purpose、provider、
+Retrieval Policy、Embedding Model、Collection、bootstrap 配置和阈值。阈值是数据，不能写入排名或路由代码。
+
+固定报告包含 Recall@5/10/20、Precision@5/10/20、MRR、graded-gain nDCG@5/10/20、P50/P95、
+ANN 相对 exact FLAT 的 recall，以及 category/vector-kind breakdown。bootstrap 使用 manifest 中的固定
+seed、样本数和置信水平，因此相同 manifest 与 observations 产生相同 95% 区间。
+
+`UnauthorizedRecall@K`、unauthorized return count 和 queries with unauthorized results 是三个独立指标，
+任何一个非零都失败。manifest 不能放宽三项阈值；报告只保存聚合计数，不保存 Asset Version ID、Rights
+payload、Query 文本、对象位置、临时引用或未授权内容。
+
+### Daily CI
+
+```bash
+uv run commercevision-retrieval-eval \
+  --manifest evaluation/retrieval/daily-v1/manifest.json \
+  --observations evaluation/retrieval/daily-v1/observations.json \
+  --profile daily \
+  --json-output .artifacts/evaluation/retrieval-daily-v1.json \
+  --markdown-output .artifacts/evaluation/retrieval-daily-v1.md
+```
+
+Daily 允许 `development` 或 `validation` split，使用版本化 `point-estimate` 阈值，作为快速、确定性的
+回归门禁。CI 先用公开 `reciprocal_rank_fuse` 核对冻结 channel rankings 与 observations，再计算报告，
+因此排名实现变化会使 parity contract 失败；GitHub Actions 留存 JSON 与 Markdown 两种 artifact。
+
+### Hidden release
+
+隐藏发布集不得进入公开仓库，也不得用于日常调参。发布管理员将其只读挂载到被 `.gitignore` 拒绝的
+`evaluation/retrieval/hidden-release/` 后运行：
+
+```bash
+uv run commercevision-retrieval-eval \
+  --manifest evaluation/retrieval/hidden-release/manifest.json \
+  --observations evaluation/retrieval/hidden-release/observations.json \
+  --profile release \
+  --json-output .artifacts/evaluation/retrieval-evaluation-release.json \
+  --markdown-output .artifacts/evaluation/retrieval-evaluation-release.md
+```
+
+Release 只接受 `hidden-release` split 和 `confidence-bound` 门禁：相关性与 ANN 指标使用 bootstrap 下界，
+P95 使用上界；未授权指标始终按真实非零值立即失败。两种报告与镜像、SBOM、迁移和发布审批证据一同留存。

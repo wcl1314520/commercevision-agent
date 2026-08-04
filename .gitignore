@@ -21,6 +21,10 @@ node_modules/
 *.tsbuildinfo
 **/playwright-report/
 **/test-results/
+.artifacts/
+
+# Evaluation data provisioned only for release verification
+evaluation/retrieval/hidden-release/
 
 # Operating system metadata
 .DS_Store

@@ -1,0 +1,45 @@
+{
+  "schema_version": "commercevision.retrieval-observations.v1",
+  "suite_version": "retrieval-daily-v1",
+  "retrieval_policy_version": "retrieval-policy-v1",
+  "embedding_model_version": "qwen3-vl-embedding-fixture-v1",
+  "collection_version": "evaluation-flat-fixture-v1",
+  "queries": [
+    {
+      "query_id": "beauty-lipstick-red-01",
+      "latency_ms": 90.0,
+      "retrieved_asset_version_ids": [
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88701",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88702",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88703",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88704",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88705"
+      ],
+      "ann_asset_version_ids": [
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88701",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88702",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88703",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88704",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88705"
+      ]
+    },
+    {
+      "query_id": "automotive-roof-rack-01",
+      "latency_ms": 130.0,
+      "retrieved_asset_version_ids": [
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88801",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88802",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88803",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88804",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88805"
+      ],
+      "ann_asset_version_ids": [
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88801",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88802",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88803",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88804",
+        "0198f4d8-1f7c-7b2d-8da9-214a92a88805"
+      ]
+    }
+  ]
+}

@@ -117,6 +117,23 @@ jobs:
         run: uv run pytest tests/integration/test_mysql_runtime_privileges.py -q
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      - name: Verify daily retrieval ranking fixture
+        run: uv run pytest tests/contract/test_retrieval_evaluation_release_gate.py -q
+      - name: Run daily retrieval evaluation gate
+        run: >-
+          uv run commercevision-retrieval-eval
+          --manifest evaluation/retrieval/daily-v1/manifest.json
+          --observations evaluation/retrieval/daily-v1/observations.json
+          --profile daily
+          --json-output .artifacts/evaluation/retrieval-daily-v1.json
+          --markdown-output .artifacts/evaluation/retrieval-daily-v1.md
+      - name: Retain daily retrieval evaluation reports
+        if: ${{ always() && hashFiles('.artifacts/evaluation/*') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-evaluation-daily
+          path: .artifacts/evaluation/
+          if-no-files-found: error
       - run: uv run pytest
       - run: uv run python scripts/audit_python.py
       - run: uv run python scripts/export_openapi.py

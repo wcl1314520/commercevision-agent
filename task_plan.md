@@ -135,12 +135,13 @@
   全绿验证，Ticket 14 已正式解锁。
 - Ticket 14 实现提交 `967585b`、安全依赖修复 `110d74b` 与 E2E 时序稳定修复 `4a05367`
   已由 GitHub Actions `30859198341` 全绿验证，Ticket 15 正式解锁。
-- Ticket 15 已进入 TDD：收敛共享脱敏 telemetry 深模块、Phase 2 生命周期接线、四类进程的
-  最小必需 readiness、Collector/Compose 配置及故障 Runbook；完成审查和发布门禁前不启动 Ticket 16。
-- Ticket 15 本地实现与发布门禁已完成：共享 OTLP runtime、全生命周期 spans/metrics、无条件
-  trace/provider request ID 哈希、API/Worker/Scheduler/MCP readiness、Prometheus exporter 与十类
-  故障 Runbook 均已闭合；当前只允许形成单一提交、推送并等待精确 GitHub Actions 全绿，
-  Ticket 16 保持未启动。
+- Ticket 15 单一提交 `93f8c1a` 已由精确 GitHub Actions `30868293101` 全绿验证，Ticket 16
+  正式解锁。
+- Ticket 16 已进入 TDD：以版本化数据集与阈值 manifest 为输入，建立确定性检索评测、统计报告、
+  未授权零容忍门禁和 CI 小型回归；完成本票审查与发布门禁前不启动 Ticket 17。
+- Ticket 16 本地实现与发布门禁已完成：双品类许可/Rights 数据、RRF/FLAT parity、完整指标与
+  bootstrap CI、hidden release 隔离、无 payload 报告、CLI/CI artifact 均已闭合；当前只允许形成
+  单一提交、推送并等待精确 GitHub Actions 全绿，Ticket 17 保持未启动。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

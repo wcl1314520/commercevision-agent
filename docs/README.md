@@ -29,6 +29,7 @@
 - [工具、MCP 与模型路由](03-ai/tools-mcp-and-routing.md)
 - [Prompt、Context 与 Guardrails](03-ai/prompt-context-and-guardrails.md)
 - [评测、反思与回放](03-ai/evaluation-and-replay.md)
+- [检索评测数据来源与权利](evaluation/retrieval-dataset-sources.md)
 
 ## 04 工程
 

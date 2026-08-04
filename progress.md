@@ -1309,3 +1309,98 @@
   全绿；API/Worker/Scheduler/MCP/OTel Collector 五个生产镜像构建成功。安全、正确性、性能、可维护性、
   Standards/Spec 与简化终审无剩余阻断项。Ticket 15 只待单一提交、推送和精确 SHA 的远程 CI 全绿，
   Ticket 16 未启动。
+
+# 2026-08-04 Ticket 15 发布与 Ticket 16 启动
+
+- Ticket 15 单一提交 `93f8c1a08789c5082dfafa28f7a59ab038848b1f` 对应 GitHub Actions
+  `30868293101` 全绿：Python、Web、Container builds、Gitleaks 与 SBOM 全部成功，Ticket 16 正式解锁。
+- 已读取 Ticket 16、`CONTEXT.md`、`PLAN.md` 与 Phase 2 规格中的检索评测要求；不重开规划，继续按
+  dataset manifest、deterministic evaluator、report 与 CI/release gate 四个公开接缝纵向 TDD。
+- 一次只读探测误用了不存在的 `16-release-acceptance.md`；枚举后确认真实工单为
+  `16-retrieval-evaluation-gate.md`，未产生代码或数据变更。
+- 初始勘探确认 `packages/evaluation` 是既有空边界，CI 已有 Python 全量门禁，检索契约已保留评测所需的
+  排名、Rights 与版本证据；本票将深化现有包并使用标准库 CLI，不引入新服务、数据库表或统计依赖。
+- TDD RED 1：`tests/unit/test_retrieval_evaluation.py` 在收集期因 `evaluate_retrieval` 与
+  `load_retrieval_evaluation` 尚不存在而失败；这是首个 manifest -> evaluator 公共接缝的预期红灯。
+- TDD GREEN 1：版本化 suite 加载与单查询 Recall/Precision/MRR/nDCG、ANN-vs-FLAT recall、P50/P95
+  和点估计门禁测试 `1 passed`。同轮 Ruff 仅发现测试导入排序，可由确定性格式化修复。
+- 第二个测试的首个组合补丁因 Ruff 已把导入格式化为单行而整体拒绝，确认测试文件未发生半写入；
+  后续按当前单行导入和文件尾部分拆应用。
+- TDD RED 2：安全门禁测试因公开 `retrieval_report_json` 尚不存在而在收集期失败，预期锁定机器报告
+  必须可序列化且不得泄露任何授权或未授权 Asset Version ID。
+- TDD GREEN 2：未授权结果使独立安全计数与 release gate 失败，聚合 JSON 报告对全部 Asset Version ID
+  零泄露；评测单元套件 `2 passed`，局部 Ruff 全绿。
+- TDD RED 3：固定双品类 suite 测试以 `FileNotFoundError` 失败，准确证明 daily manifest/observations
+  尚未落地；下一绿灯同时要求 category/vector kind breakdown 与固定 seed bootstrap 95% CI。
+- TDD GREEN 3：已提交 metadata-only、CC0 双品类 daily fixture 和完整 Rights snapshot；分品类、分向量类型、
+  deterministic bootstrap 测试 `3 passed`。同轮 Ruff 只报告两个待格式化文件与一行 101 字符机械问题。
+- TDD RED 4：对七类 manifest/observation 篡改的公开 loader 测试未抛出异常，证明输入边界尚未失败关闭；
+  首个未拒绝项是错误 schema version，测试保留用于驱动集中校验。
+- TDD GREEN 4：集中 loader 校验已覆盖严格 schema/字段、daily/release split、K=5/10/20、不可放宽的
+  未授权阈值、许可来源、完整 Rights snapshot、0–3 grade、FLAT 授权全集和 observation universe；
+  单元套件 `4 passed`，格式与 Ruff 全绿。
+- TDD RED 5：hidden release suite 的 Recall@5 点估计为 0.5、bootstrap 下界为 0.0、阈值为 0.4，
+  当前 gate 仍错误通过；测试锁定 confidence-bound 模式必须使用相关性下界与延迟上界。
+- TDD GREEN 5：release profile 使用相关性/ANN bootstrap 下界和 P95 上界，点估计达标但置信下界不足时
+  正确失败；安全指标仍以真实非零计数零容忍。单元套件 `5 passed`，仅测试文件需机械格式化。
+- TDD RED 6：报告/CLI 测试因公开 `write_retrieval_report` 尚不存在而在收集期失败，锁定 JSON 与
+  Markdown 双产物、候选 payload 零泄露、不同输出路径和 gate 对应进程退出码。
+- TDD GREEN 6：标准库 CLI 已原子写入 machine-readable JSON 与 human-readable Markdown，并以
+  0/1/2 区分通过、质量失败和输入拒绝；报告包含版本身份、总体/分类/向量 breakdown 与 CI，且无候选
+  payload。评测单元套件 `7 passed`，仅两文件待 Ruff 机械格式化。
+- TDD RED 7：数据许可证与 Rights contract 已通过，CI contract 因 workflow 尚无
+  `commercevision-retrieval-eval` 命令而失败；报告 artifact 留存同样尚未接线。
+- TDD GREEN 7：CI 已在完整 pytest 前运行 daily retrieval gate，并以 `always()` 留存 JSON/Markdown
+  artifact；contract `2 passed`。本地首次直接调用新 entry point 因旧 `.venv` 尚未执行 workspace
+  全量同步而 `program not found`，锁文件检查正常；改用 CI 同等 `uv sync --locked --all-packages` 复验。
+- CI 同等 workspace 同步完成后，真实 `commercevision-retrieval-eval` 入口返回 PASS，并原子生成
+  5,831-byte JSON 与 2,855-byte Markdown 报告；未使用模块路径或测试专用绕行。
+- TDD RED 8：hidden release 隔离/运行文档 contract 因 `.gitignore` 尚未拒绝隐藏数据目录而失败；
+  release 命令、confidence-bound 与 UnauthorizedRecall@K 运营契约也待写入正式文档。
+- TDD GREEN 8：隐藏发布目录已由 Git 排除，daily/release split 与 point-estimate/confidence-bound 运行方式、
+  三项未授权零容忍和聚合报告留存已写入正式 AI/CI 文档；contract `3 passed`。
+- TDD RED 9：machine report 缺少 `manifest_sha256`，测试以 `KeyError` 失败；同一测试锁定 canonical
+  observations digest、实际 bootstrap 与 thresholds 快照必须进入留存报告。
+- TDD GREEN 9：报告已保存 canonical manifest/observations SHA-256、bootstrap 与 thresholds 快照，
+  同语义 JSON 不受空白/键顺序影响；unit+contract 聚焦套件 `11 passed`，局部 Ruff 全绿。
+- 五轴终审首轮发现 Required 结构问题：`retrieval.py` 达 1,013 行并混合模型、输入校验、统计与报告；
+  在不改公开行为和测试的前提下拆成高内聚模块后再继续安全/性能审查。
+- 拆分边界已确认：纯 dataclass 进入 `models.py`，不可信 JSON 与 suite 组装进入 `manifest.py`，
+  原子 JSON/Markdown 输出进入 `reporting.py`，`retrieval.py` 仅保留指标、bootstrap 与 gate 算法；
+  `cli.py` 只负责编排和退出码。
+- 结构重构后原 11 项行为测试全部通过；文件规模收敛为 manifest 512、retrieval 306、reporting 143、
+  models 125、cli 47 行，公开 API/CLI 与输出保持不变。
+- TDD RED 10 / 正确性审查：单个未授权候选被召回时，当前 UnauthorizedRecall@5/10/20 为
+  `0.2/0.1/0.05`，证明错误使用 K 作分母；规范 recall 应以冻结 Rights snapshot 的未授权全集作分母，
+  本例三项均应为 1.0。
+- TDD GREEN 10：EvaluationQuery 现在显式保存冻结未授权集合，UnauthorizedRecall@K 以该全集为分母；
+  单候选回归为 1.0，全部 unit+contract `11 passed`，Ruff 全绿。
+- TDD RED 11 / 性能边界审查：loader 接受 10,001 次 bootstrap 和无任何资产的 Query category，
+  失败关闭测试未抛异常；两项都必须在进入统计阶段前拒绝。
+- TDD GREEN 11：bootstrap 上限收紧为 10,000，Query category 必须在候选全集中有资产；全部聚焦
+  unit+contract `11 passed`，格式与 Ruff 全绿。
+- 简化审查移除 evaluation 包未使用的 contracts 依赖；`uv lock` 与 `uv lock --check` 均解析 173 包，
+  对 evaluation 包扫描确认不再存在 contracts 引用。
+- TDD RED 12 / Spec 审查：daily dataset contract 同时以缺失 `query_text`、缺失 `ranking-fixture.json` 和
+  CI 未运行快速 parity contract 三处失败，证明预烘焙 observations 尚不能作为真实排名回归门。
+- TDD GREEN 12：manifest 已冻结受控 Query，ranking fixture 通过公开 RRF primitive 复算并精确匹配
+  observations；CI 在指标门前运行 parity contract。unit+contract `12 passed`，仅 contract 文件待机械格式化。
+- TDD RED 13：FLAT reference contract 因 ranking fixture 缺少 `exact_flat_cosine_scores` 而失败，证明
+  manifest 中的 exact ranking 尚无可核对的固定语料搜索证据。
+- TDD GREEN 13：ranking fixture 保存 COSINE exact FLAT scores，contract 以分数/Asset ID 确定性排序并
+  精确匹配 manifest reference；全部聚焦 `12 passed`。
+- TDD RED 14 / 性能审查：1,001 项 ranking 虽因重复 ID 被拒绝，但没有在集合分配前命中预期硬上限；
+  测试要求先以稳定 `ranking limit` 失败关闭。
+- TDD GREEN 14：JSON 文档、Asset、Query、ranking、bootstrap samples 与总 bootstrap work 均已有加载前
+  硬上限，重复 JSON key 同样拒绝；聚焦 `12 passed`，Ruff 仅提示测试文件机械格式化。
+- TDD RED 15 / 发布安全审查：`profile=release` + `split=hidden-release` 仍接受 point-estimate thresholds，
+  测试未抛异常；release 必须在 loader 边界强制 confidence-bound。
+- TDD GREEN 15：release profile 在 loader 边界强制 confidence-bound；聚焦 unit+contract `13 passed`。
+- Ticket 16 本地收口门禁：3 个 JSON 均可解析，真实 `commercevision-retrieval-eval` 返回 PASS，
+  Ruff format/check 覆盖 390 文件，全量 unit+contract `1255 passed, 1 skipped`，skip 仅为显式 opt-in
+  的 Alibaba OSS live contract；`uv lock --check` 解析 173 包。
+- 五轴终审已完成并修复单文件职责过载、UnauthorizedRecall 分母、无界计算预算、release 点估计绕过、
+  Query 未冻结和静态 observations 不感知排名回归等 Required 问题；当前无剩余 Critical/Required，
+  Ticket 17 未启动。
+- Python 与 pnpm 依赖审计均无已知漏洞；最终 evaluation contract `4 passed`。CI artifact 仅在报告文件
+  已实际生成时以 `always()` 语义上传，避免更早的 parity 失败被无文件 artifact 错误掩盖。

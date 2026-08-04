@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-22 |
+| 最后更新 | 2026-08-04 |
 | 适用版本 | Delivery v1 |
 
 ## 分支与变更
@@ -130,3 +130,12 @@ Prompt 和模型不随意跟代码一起上线：
 - Eval 报告。
 - 已知问题。
 - 发布和回滚结果。
+
+### Retrieval Evaluation Report
+
+- PR/main CI 运行 `retrieval-daily-v1`，并以 `retrieval-evaluation-daily` artifact 留存 JSON 与 Markdown。
+- 正式发布从隔离存储挂载 hidden release manifest/observations，使用 `--profile release` 与
+  `confidence-bound` 阈值运行，产物命名为 `retrieval-evaluation-release`。
+- 报告必须记录 suite、candidate universe、Rights snapshot、Retrieval Policy、Embedding Model 和
+  Collection version；三个未授权指标必须全部为零。
+- 发布审批保留聚合报告，不复制隐藏 Query、候选 ID、Rights payload 或任何未授权内容。
