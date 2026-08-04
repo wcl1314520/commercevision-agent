@@ -6,7 +6,7 @@ storage, providers, indexing, retrieval, deletion, DLQ, and rebuild.
 
 **Blocked by:** 04 — Direct Upload Sessions and quarantine; 07 — Vision ProductBrief and human confirmation; 09 — Collection Registry and IMAGE incremental indexing; 11 — Rights-first hybrid retrieval and Retrieval Explorer; 13 — Retention, deletion, and consistency reconciliation; 14 — Milvus rebuild and Collection upgrade.
 
-**Status:** implemented-awaiting-ci
+**Status:** complete
 
 - [x] Spans cover upload, finalize, validation stages, rights decisions, Vision, ProductBrief, embedding, Milvus, lexical search, fusion, rerank, final rights, temporary references, deletion, reconciliation, and rebuild batches.
 - [x] Metrics cover quarantine age, validation outcomes, rights denials/expiry, provider latency/errors/rate limits, operation leases/retries/DLQ, confirmation rate, index lag, stale vectors, retrieval latency/degradation, deletion backlog, and rebuild progress.

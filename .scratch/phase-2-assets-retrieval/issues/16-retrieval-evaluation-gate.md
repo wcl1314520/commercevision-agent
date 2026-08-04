@@ -6,7 +6,7 @@ safety. Evaluation configuration is versioned data rather than hard-coded rankin
 
 **Blocked by:** 11 — Rights-first hybrid retrieval and Retrieval Explorer; 14 — Milvus rebuild and Collection upgrade.
 
-**Status:** implemented-awaiting-ci
+**Status:** complete
 
 - [x] Dataset manifests freeze query, category, candidate universe, relevance grades, rights snapshot, purpose, provider, split, and policy version.
 - [x] Demo and evaluation assets have explicit Rights Records and source documentation.

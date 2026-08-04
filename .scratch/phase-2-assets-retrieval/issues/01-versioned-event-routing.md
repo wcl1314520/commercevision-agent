@@ -8,7 +8,7 @@ successes.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human
+**Status:** complete
 
 - [x] Versioned event handlers are registered through one public routing interface with duplicate-registration protection.
 - [x] Existing Workflow run and resume events retain their Phase 1 behavior.

@@ -1455,3 +1455,9 @@
   gate 拒绝 Linux wheel：`milvus-lite==2.4.12` 缺失 metadata，pandas 聚合 BSD License 正文引用 GPL
   被全文规则误报。上游 PyPI/源码均确认该 Milvus Lite 版本为 Apache-2.0；门禁改为 SPDX → Classifier
   → 原始字段优先级，并只对精确 2.4.12 使用已记录 override。Windows 与 Linux Worker 实际审计均 PASS。
+- License metadata 加固提交 `79bae7398ebf17b76379ce5dd60094457beed656` 的 GitHub Actions
+  `30881019362` 全绿：Python checks 完成完整 pytest、发布关键/全域 Mypy、Python License、Phase 2
+  acceptance、检索评测、依赖审计与 OpenAPI；Web checks 完成 lint、typecheck、单元、E2E、Node License、
+  build 与依赖审计；Container builds 和 Security and SBOM 同步通过。
+- Ticket 01–17 状态台账已与已交付代码、验收勾选项及历史 CI 证据对齐；Phase 11 与 Phase 12 均完成，
+  Phase 2 达到既定退出标准并正式闭合。

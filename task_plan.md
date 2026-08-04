@@ -89,7 +89,7 @@
 - 每个 Ticket 已写入 `.scratch/phase-2-assets-retrieval/issues/`
 
 ### Phase 11：Phase 2 独立上下文实现
-**Status:** in_progress
+**Status:** complete
 - 每个 Ticket 使用独立子 Agent 上下文和 TDD
 - 逐 Ticket 审查、测试和提交
 - 不跨 Ticket 复用隐式上下文
@@ -147,15 +147,17 @@
 - Ticket 17 以既有规格锁定的 Playwright、真实基础设施恢复、迁移链、Compose/安全供应链、
   检索评测与 metadata 作为公开验收接缝；完成本票审查与发布门禁前不宣告 Phase 2 完成。
 - Ticket 17 本地实现、五轴审查、受影响 Python/Web/E2E、Linux/Windows 类型门禁、License、
-  release audit、全服务镜像重建与 Compose health 已完成；当前仅等待最终提交的 GitHub Actions。
+  release audit、全服务镜像重建与 Compose health 已完成；实现提交 `82853057` 与 License metadata
+  加固提交 `79bae739` 已由 GitHub Actions `30881019362` 四路全绿验证。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
-**Status:** in_progress
+**Status:** complete
 - 运行完整静态、单元、集成、迁移、容器和安全门禁
 - 验证未授权素材召回率为 0
 - 验证增量索引和 Milvus 可重建
 - 验证固定检索集指标与 ProductBrief 人工确认
 - 更新路线图、Runbook、OpenAPI、评测与 GitHub CI 证据
+- Ticket 01–17 的验收状态与勾选项已和实际交付及历史 CI 证据对齐；Phase 2 正式完成。
 
 ## 成功标准
 
