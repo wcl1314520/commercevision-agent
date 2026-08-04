@@ -32,6 +32,7 @@ from .product_briefs import (
     SqlAlchemyProviderArtifactTargetReadinessQuery,
 )
 from .product_search import MySqlProductLexicalSearch, ProductLexicalHit
+from .prompt_registry import SqlAlchemyPromptRegistryUnitOfWork
 from .retrieval import MySqlRetrievalAuthority
 from .retrieval_runs import MySqlRetrievalPreviewService, MySqlRetrievalRunStore
 from .retrieval_sources import (
@@ -74,6 +75,7 @@ __all__ = [
     "SqlAlchemyOperatorUnitOfWork",
     "SqlAlchemyProductBriefUnitOfWork",
     "SqlAlchemyProductBriefViewQueries",
+    "SqlAlchemyPromptRegistryUnitOfWork",
     "SqlAlchemyProviderArtifactTargetReadinessQuery",
     "SqlAlchemyUnitOfWork",
     "create_database",

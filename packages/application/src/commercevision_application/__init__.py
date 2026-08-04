@@ -120,6 +120,7 @@ from .product_briefs import (
     ProductBriefApplicationService,
     ProductBriefPolicy,
 )
+from .prompt_registry import PromptRegistryApplicationService
 from .reliability import InboxCoordinator, OutboxDispatcher, RecoveryService
 from .retrieval import (
     DenseEmbeddingCandidate,
@@ -240,6 +241,7 @@ __all__ = [
     "ProductBriefObserver",
     "ProductBriefPolicy",
     "ProductBriefViewApplicationService",
+    "PromptRegistryApplicationService",
     "ProviderArtifactOwner",
     "ProviderArtifactReconciliationBatch",
     "ProviderArtifactReconciliationCursor",

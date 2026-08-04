@@ -1540,3 +1540,52 @@
   `1112 passed`，仅有既有 Starlette/httpx 弃用警告；工单 8 项验收全部完成，无 Critical/Required。
 - 只读设计复核曾沿用不存在的扁平 docs 路径；命令未写入，随后先用 `rg --files docs` 枚举真实分层路径，
   确认没有另一套 citation-reason contract，锁定 Phase 3 spec 为本票权威来源。
+- Ticket 01 提交 `84113f68e0c2a63bec292022685d6b0571fd6c07` 已推送；首次推送因仓库局部配置的
+  `127.0.0.1:10809` 代理不可用而失败，使用单次 `git -c http.proxy= -c https.proxy=` 直连成功，
+  未修改用户全局或仓库代理配置。
+- 精确 GitHub Actions `30889497221` 全绿：Container builds、Python checks（含完整 pytest、Mypy、
+  License、Phase 2 acceptance、Retrieval Eval、OpenAPI）、Web checks 与 Security/SBOM 均成功。
+- Ticket 02 只读探索确认 Prompt Registry 应复用现有短事务 UoW、Idempotency、append-only Audit/Outbox、
+  管理员身份与严格 Contract；已有 Prompt Asset validator 只负责上传文档安全，不能代替版本生命周期、
+  production resolution pointer 或并发发布事实。
+- Ticket 02 TDD RED/GREEN 1：`PromptRevision` 公开导入先 collection 失败；新增无框架 frozen revision、
+  substitution-only 变量匹配、applicability 归一化、已知 input/output schema 与独立冻结 content hash，
+  首个 tracer `1 passed`。
+- Ticket 02 TDD RED/GREEN 2：生命周期命令缺失以 `AttributeError` 复现；DRAFT→REVIEW→STAGING→
+  PRODUCTION→DEPRECATED 现在返回新 immutable snapshot，版本、actor/time、顺序和合法跳转均失败关闭。
+- Ticket 02 TDD RED/GREEN 3：`api_key`、`provider_secret`、`access_token` 三类变量均被接受；共享 domain
+  seam 现拒绝 secret-bearing variables，正文凭证赋值语义和 private-key marker 也以 2 个 RED 后关闭。
+- Prompt schema、超长正文、非换行控制字符、未声明 placeholder 与模板控制块 6 组回归直接命中已实现
+  泛化校验；首次超长参数被 pytest 展开为 Windows 超长 node id 导致 setup error，增加固定短 ids 后
+  领域套件 `13 passed`，未误报为生产失败。
+- Ticket 02 production pointer RED 先因公开类型不存在 collection 失败；新增独立版本化 pointer，只能
+  选择同一 Prompt identity 的 PRODUCTION revision，并精确固化 revision ID/semantic revision/hash，
+  领域套件 `14 passed`。
+- Ticket 02 Application resolve RED 先因 `PromptRegistryApplicationService` 不存在 collection 失败；
+  新增窄 UoW Port、严格响应 Contract 与 exact applicability query，缺失/不适用统一 NotFound，应用
+  `2 passed`，新增三模块 strict Mypy 全绿且未调用 Planner Provider。
+- Ticket 02 TDD 写路径 RED/GREEN：create→review→stage→publish 的公开命令先缺失，现以 DB time、CAS、
+  immutable response、Audit 与 Outbox 单事务闭合；同键同载荷精确重放不重复写事实，同键异载荷返回
+  `IdempotencyConflictError`，30 天幂等保留且响应重放校验 workspace/resource identity。
+- Ticket 02 回滚/弃用 RED/GREEN：独立 `PromptProductionPointer` 以 expected pointer version 原子重指向历史
+  PRODUCTION revision，不改写其 content/hash；活动指针目标在应用与 MySQL trigger 双层禁止 DEPRECATED，
+  领域+应用聚焦 `19 passed`。
+- Ticket 02 MySQL migration/repository 已加入 tenant-first 唯一键、`DATETIME(6)`、exact composite FK、不可变
+  content/no-delete、pointer exact-production validation、active-no-deprecate triggers 和存在事实时 downgrade guard；
+  repository lifecycle/pointer 更新均为 version CAS，resolver 对 pointer/revision/status/hash/applicability 再校验。
+- Ticket 02 HTTP RED/GREEN：`/api/v1/prompts` 的 create/review/stage/publish/deprecate/select/resolve 七个端点已接入；
+  mutation 强制 trusted principal、workspace admin、actor binding、canonical UUID 与 Idempotency-Key，resolve 强制
+  workspace membership 和完整 node/category/model-family，路由/OpenAPI 聚焦 `5 passed`。
+- Prompt Registry 已接入 `ApiContainer`、OpenAPI 生成物和 Web TypeScript 类型生成器；相关 Python 聚焦
+  `23 passed`，Ruff、目标 strict Mypy、`pnpm web:api-types:check` 与 `pnpm web:typecheck` 全绿。
+- 本机 `127.0.0.1:13316` 无 MySQL 且 Docker Desktop Linux engine pipe 不存在，4 项 Prompt Registry 真实
+  MySQL 测试按 fixture 明确 skip；不把 skip 计为通过，保留 migration/并发 CAS/rollback/deprecation/downgrade
+  测试并以提交后的精确 GitHub Actions MySQL 8.4 run 作为权威验收证据。
+- Ticket 02 发布门禁复验：全仓 Ruff format/check、目标 strict Mypy、全仓 Mypy baseline `432` 条零新增、
+  `git diff --check`、Python vulnerability audit、OpenAPI/Web generated types、Web lint/typecheck、Web unit
+  `196 passed` 与 Next.js production build 均通过；完整 Python unit 二次明确汇总 `1136 passed`。
+- 完整 unit 首轮曾有 2 项未改动 Alibaba Vision Provider 亚秒 deadline 失败；两个测试隔离复跑均可通过，
+  随后完整 unit `1136 passed`。保留首轮调度抖动证据，不修改其生产 deadline 或测试阈值，也不冒充首轮通过。
+- Ticket 02 五轴自审未发现 Required：规格验收仅剩真实 MySQL CI 证据；正确性以 immutable revision + CAS pointer；
+  安全性以 workspace/admin/actor/secret/no-content-event；可靠性以 idempotency/CAS/trigger/downgrade guard；
+  维护性以 domain/application/ports/persistence/HTTP 分层且无 Planner Provider 依赖闭合。

@@ -184,6 +184,9 @@
 - Ticket 01 RED/GREEN 5 已完成：共享 JSON seam 拒绝任意嵌套参数文本中的控制字符
 - Ticket 01 已完成：39 项公开领域 contract、全量 unit `1112 passed`、全仓 Ruff 与目标 strict Mypy 全绿；五轴 Required 已闭合
 - Ticket 02 进入 TDD：先锁定 immutable Prompt Revision 的领域/应用公开 Interface，再接 MySQL 与管理 HTTP
+- Ticket 02 领域与只读解析切片完成；当前推进版本化写命令、MySQL CAS/pointer、Audit/Outbox 和管理 HTTP
+- Ticket 02 领域、幂等生命周期写命令、精确 production pointer/rollback、MySQL migration/repository、
+  Audit/Outbox、管理/解析 HTTP、OpenAPI 与 Web 生成类型已落地；当前执行五轴审查、全量门禁和真实 MySQL CI 验证
 
 ## 成功标准
 

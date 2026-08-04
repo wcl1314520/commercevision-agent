@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import cast
 
 from commercevision_application import (
     AssetDeletionPolicy,
@@ -20,6 +21,7 @@ from commercevision_application import (
     ProductBriefApplicationService,
     ProductBriefPolicy,
     ProductBriefViewApplicationService,
+    PromptRegistryApplicationService,
     RetrievalApplicationService,
     ValidationDataTransferPolicy,
     VisionDataTransferPolicy,
@@ -28,6 +30,7 @@ from commercevision_application import (
 from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolicy
 from commercevision_application.asset_integrity import UploadIntegrityVerifier
 from commercevision_application.asset_validation_dispatch import AssetValidationPolicy
+from commercevision_application.prompt_registry_ports import PromptRegistryUnitOfWorkPort
 from commercevision_contracts import Settings
 from commercevision_object_storage import (
     ObjectStorageReadiness,
@@ -48,6 +51,7 @@ from commercevision_persistence import (
     SqlAlchemyOperatorUnitOfWork,
     SqlAlchemyProductBriefUnitOfWork,
     SqlAlchemyProductBriefViewQueries,
+    SqlAlchemyPromptRegistryUnitOfWork,
     SqlAlchemyUnitOfWork,
     create_database,
     is_unit_of_work_active,
@@ -129,6 +133,7 @@ class ApiContainer:
     rights: AssetRightsApplicationService
     asset_retention: AssetRetentionApplicationService
     brand_profiles: BrandProfileApplicationService
+    prompt_registry: PromptRegistryApplicationService
     catalog: CatalogApplicationService
     operations: OperationApplicationService
     product_briefs: ProductBriefApplicationService
@@ -165,6 +170,12 @@ class ApiContainer:
 
         def brand_profile_uow_factory() -> SqlAlchemyBrandProfileUnitOfWork:
             return SqlAlchemyBrandProfileUnitOfWork(database.session_factory)
+
+        def prompt_registry_uow_factory() -> PromptRegistryUnitOfWorkPort:
+            return cast(
+                PromptRegistryUnitOfWorkPort,
+                SqlAlchemyPromptRegistryUnitOfWork(database.session_factory),
+            )
 
         def operation_uow_factory() -> SqlAlchemyOperationUnitOfWork:
             return SqlAlchemyOperationUnitOfWork(database.session_factory)
@@ -266,6 +277,9 @@ class ApiContainer:
             brand_profiles=BrandProfileApplicationService(
                 uow_factory=brand_profile_uow_factory,
                 cursor_codec=brand_profile_cursor_codec,
+            ),
+            prompt_registry=PromptRegistryApplicationService(
+                uow_factory=prompt_registry_uow_factory,
             ),
             catalog=CatalogApplicationService(uow_factory=catalog_uow_factory),
             operations=OperationApplicationService(

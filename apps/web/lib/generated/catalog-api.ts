@@ -866,6 +866,78 @@ export type VectorKind = "IMAGE" | "PRODUCT_FUSED";
 
 export type WorkflowStatus = "DRAFT" | "INGESTING" | "UNDERSTANDING" | "AWAITING_PRODUCT_CONFIRMATION" | "RETRIEVING" | "PLANNING" | "AWAITING_PLAN_APPROVAL" | "GENERATING" | "EVALUATING" | "REPAIRING" | "AWAITING_RESULT_APPROVAL" | "EXPORTING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
+export interface PromptProductionPointerResponseV1 {
+  workspace_id: string;
+  prompt_id: string;
+  node: string;
+  revision_id: string;
+  semantic_revision: string;
+  content_sha256: string;
+  version: number;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface PromptProductionSelectionRequestV1 {
+  revision_id: string;
+  expected_pointer_version: number;
+}
+
+export interface PromptRevisionCreateRequestV1 {
+  prompt_id: string;
+  semantic_revision: string;
+  node: string;
+  category_applicability: [string, ...Array<string>];
+  model_family_applicability: [string, ...Array<string>];
+  input_schema_version: string;
+  output_schema_version: string;
+  policy_version: string;
+  content: string;
+  variables: Array<PromptTemplateVariableV1>;
+  change_summary: string;
+}
+
+export interface PromptRevisionResponseV1 {
+  id: string;
+  workspace_id: string;
+  prompt_id: string;
+  semantic_revision: string;
+  node: string;
+  category_applicability: [string, ...Array<string>];
+  model_family_applicability: [string, ...Array<string>];
+  input_schema_version: string;
+  output_schema_version: string;
+  policy_version: string;
+  content: string;
+  variables: Array<PromptTemplateVariableV1>;
+  content_sha256: string;
+  status: PromptRevisionStatus;
+  version: number;
+  created_by: string;
+  change_summary: string;
+  created_at: string;
+  updated_at: string;
+  submitted_by?: string | null;
+  submitted_at?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  published_by?: string | null;
+  published_at?: string | null;
+  deprecated_by?: string | null;
+  deprecated_at?: string | null;
+}
+
+export type PromptRevisionStatus = "DRAFT" | "REVIEW" | "STAGING" | "PRODUCTION" | "DEPRECATED";
+
+export interface PromptRevisionTransitionRequestV1 {
+  expected_version: number;
+}
+
+export interface PromptTemplateVariableV1 {
+  name: string;
+  required: boolean;
+}
+
 export const PRODUCT_BRIEF_FIELD_VALUE_KIND_BY_PATH = {
   "automotive.certification_marks": "STATEMENT_LIST",
   "automotive.compatibility_evidence": "STATEMENT_LIST",

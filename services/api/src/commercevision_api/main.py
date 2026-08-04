@@ -26,6 +26,7 @@ from .container import ApiContainer, ApiTrustKeyRing
 from .errors import install_error_handlers
 from .operation_routes import router as operation_router
 from .product_brief_routes import router as product_brief_router
+from .prompt_registry_routes import router as prompt_registry_router
 from .readiness import probe_dependencies
 from .retrieval_routes import router as retrieval_router
 from .workflow_routes import router as workflow_router
@@ -158,6 +159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(collection_rebuild_router)
     api.include_router(operation_router)
     api.include_router(product_brief_router)
+    api.include_router(prompt_registry_router)
     api.include_router(retrieval_router)
     api.include_router(workflow_router)
     return api

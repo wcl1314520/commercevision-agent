@@ -105,6 +105,12 @@ from .product_briefs import (
     validate_product_brief_evidence_reference,
     validate_product_brief_field_value,
 )
+from .prompt_registry import (
+    PromptProductionPointer,
+    PromptRevision,
+    PromptRevisionStatus,
+    PromptTemplateVariable,
+)
 from .retention import (
     TASK_RETENTION_MAX_HOURS,
     canonical_task_retention_deadline,
@@ -213,6 +219,10 @@ __all__ = [
     "OperationState",
     "ObjectMismatchError",
     "Product",
+    "PromptProductionPointer",
+    "PromptRevision",
+    "PromptRevisionStatus",
+    "PromptTemplateVariable",
     "ProductBrief",
     "ProductBriefCategory",
     "ProductBriefEvidence",

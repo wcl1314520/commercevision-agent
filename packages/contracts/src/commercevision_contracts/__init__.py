@@ -121,6 +121,14 @@ from .product_briefs import (
     ProductBriefVersionResponseV1,
     ProductBriefVersionSummaryResponseV1,
 )
+from .prompt_registry import (
+    PromptProductionPointerResponseV1,
+    PromptProductionSelectionRequestV1,
+    PromptRevisionCreateRequestV1,
+    PromptRevisionResponseV1,
+    PromptRevisionTransitionRequestV1,
+    PromptTemplateVariableV1,
+)
 from .retrieval import (
     RetrievalCitationV1,
     RetrievalDegradationV1,
@@ -252,6 +260,12 @@ __all__ = [
     "ProductBriefVersionResponseV1",
     "ProductBriefVersionSummaryResponseV1",
     "ProductBriefWorkflowContextResponseV1",
+    "PromptRevisionResponseV1",
+    "PromptRevisionCreateRequestV1",
+    "PromptRevisionTransitionRequestV1",
+    "PromptTemplateVariableV1",
+    "PromptProductionPointerResponseV1",
+    "PromptProductionSelectionRequestV1",
     "ProductListResponseV1",
     "ProductResponseV1",
     "ProductSummaryResponseV1",

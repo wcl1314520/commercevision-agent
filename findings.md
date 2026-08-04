@@ -713,6 +713,11 @@
   Creative Plan Version 应匹配该模式，不引入新运行时依赖或只有单实现的抽象。
 - 首个 tracer bullet 只证明一个调用方可创建可追溯、不可变的 Creative Plan Version；MySQL、审批、
   Planner Provider、HTTP 和 Web 分属后续纵切，避免首票水平铺开未验证结构。
+- Prompt Revision 与上传的 `PROMPT_TEMPLATE` Asset 是不同职责：Asset validator 证明一个 JSON 文件可安全
+  接收，Prompt Registry 证明哪一不可变 semantic revision 经 REVIEW/STAGING/PRODUCTION 生命周期并被
+  新 Workflow 精确解析；两者复用 substitution-only 变量规则，但不共享持久化 aggregate。
+- Production status 与“当前默认解析”不是同一事实。允许多个已发布 revision 保留不可变发布证据，独立
+  production pointer 原子选择一个 exact revision/hash；回滚切换 pointer，不重写历史 Prompt 内容。
 - Phase 3 已锁定为 14 票依赖图：01 Creative Plan Contract；02 Prompt Registry；03 Planning Context；
   04 MySQL；05 HTTP；06 exact approval fence；07 Fixture Planner；08 LangGraph HITL；09 Tool Policy；
   10 SSE；11 Web；12 Eval/Security；13 Observability；14 Release Acceptance。
@@ -720,3 +725,8 @@
   结构化计划、审批、恢复、Tool Policy 和 Agent Eval，避免为 Phase 4 预建单实现 Provider seam。
 - Domain 根包通过显式 import 与 `__all__` 暴露公共 Interface；Ticket 01 继续采用一个高内聚
   `creative_plans.py` 模块，等真实职责增长再按行为拆包，不为首个 tracer bullet 预建目录层级。
+- Prompt Registry mutation 的幂等 scope 必须同时绑定 operation、workspace hash 与 prompt/revision identity；
+  trace_id 是单次传输事实，不进入 request hash，否则网络重试换 trace 会错误冲突。重放响应还必须反校验
+  workspace、resource type 与 resource id，不能盲信通用幂等表中的 JSON。
+- Prompt 发布与 production selection 是两个事实：发布将 revision 置为 PRODUCTION 并可推进默认 pointer；显式
+  rollback 只 CAS 更新 pointer。保留多个 PRODUCTION revision 才能在不篡改历史的前提下快速回退。
