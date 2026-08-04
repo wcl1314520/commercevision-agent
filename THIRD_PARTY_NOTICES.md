@@ -27,3 +27,8 @@ CommerceVision Agent 原创代码采用 Apache License 2.0。第三方依赖仍�
 Valkey 作为 Redis 协议兼容的本地缓存实现，采用 BSD-3-Clause License。生产部署仍可按架构文档接入企业批准的 Redis 兼容托管服务。
 
 Python、Node.js 和容器依赖的精确版本由 `uv.lock`、`pnpm-lock.yaml`、Dockerfile 与生成的 SPDX SBOM 记录。发布前必须审查 SBOM 和所有许可证例外。
+
+`milvus-lite==2.4.12` 的 Linux wheel 未提供标准化 License metadata；上游
+[PyPI 发布页](https://pypi.org/project/milvus-lite/2.4.12/)和
+[源码仓库](https://github.com/milvus-io/milvus-lite)均声明 Apache-2.0。License gate 仅对该精确名称与
+版本使用 `Apache-2.0` override；版本变化时必须重新核验，不得沿用例外。

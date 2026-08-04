@@ -26,6 +26,12 @@ def test_python_license_policy_allows_workspace_and_permissive_dependencies() ->
             _Distribution("httpx", License_Expression="BSD-3-Clause"),
             _Distribution("certifi", License="MPL-2.0"),
             _Distribution("native-runtime", License_Expression="LGPLv3+"),
+            _Distribution("milvus-lite", Version="2.4.12"),
+            _Distribution(
+                "pandas",
+                Classifier="License :: OSI Approved :: BSD License",
+                License=("BSD 3-Clause License. " + "GNU GPL appears in bundled notices. " * 30),
+            ),
         ]
     )
 
@@ -38,11 +44,13 @@ def test_python_license_policy_rejects_unknown_and_blocked_external_dependencies
             _Distribution("mystery"),
             _Distribution("network-service", License_Expression="GPLv3+"),
             _Distribution("legacy-service", License="GNU General Public License v2"),
+            _Distribution("milvus-lite", Version="9.9.9"),
         ]
     )
 
     assert findings == (
         "legacy-service: blocked license GNU General Public License v2",
+        "milvus-lite: missing license metadata",
         "mystery: missing license metadata",
         "network-service: blocked license GPLv3+",
     )

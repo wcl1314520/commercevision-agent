@@ -1451,3 +1451,7 @@
   `platform = "linux"` contract 后重新生成基线，Windows 与 Linux 均以 432 条和相同 digest PASS。
 - 一次只读检索误包含不存在的 `packages\\agent` 路径并返回非零；实际包为 `packages/agent-core`，
   诊断未修改文件，后续均使用已枚举真实路径。
+- 首次远程 run `30880637762` 的 Web、Container、Security/SBOM 与 Linux Mypy 均绿，Python License
+  gate 拒绝 Linux wheel：`milvus-lite==2.4.12` 缺失 metadata，pandas 聚合 BSD License 正文引用 GPL
+  被全文规则误报。上游 PyPI/源码均确认该 Milvus Lite 版本为 Apache-2.0；门禁改为 SPDX → Classifier
+  → 原始字段优先级，并只对精确 2.4.12 使用已记录 override。Windows 与 Linux Worker 实际审计均 PASS。

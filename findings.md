@@ -681,3 +681,5 @@
   同时用前置字符边界避免把 LGPL 误判成 GPL。
 - 注册聚合测试不应偶然依赖真实 Milvus readiness；专用 Milvus 矩阵负责外部适配器行为，runtime 注册测试
   注入 ready vector fake，保留生产 `assert_ready` 的失败关闭语义并消除跨职责耦合。
+- Python `License` 字段可能是多项目聚合正文，搜索全文会把引用 GPL 的 BSD/Apache 包误判；审核顺序必须
+  是 SPDX Expression → Trove Classifier → 原始 License，且例外只能绑定经上游核验的精确包名与版本。

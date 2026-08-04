@@ -46,6 +46,9 @@ pnpm licenses list --prod --json | node scripts/audit-node-licenses.mjs
 
 CI 另外验证 OpenAPI drift、MCP/Provider contracts、daily retrieval evaluation、Python/Node dependency audit、
 Compose config/全服务镜像构建、Gitleaks 和 SPDX SBOM，并上传 `phase2-release-acceptance` 聚合 artifact。
+Python License gate 优先使用 SPDX `License-Expression`，其次使用 Trove License Classifier，避免在聚合
+许可正文的引用段落中误判；任何 metadata 例外必须按包名和锁定版本记录在
+[Third-Party Notices](../../THIRD_PARTY_NOTICES.md)。
 
 ## 恢复与迁移矩阵
 
