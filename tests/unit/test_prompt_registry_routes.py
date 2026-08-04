@@ -158,7 +158,7 @@ def test_prompt_create_requires_admin_and_forwards_idempotency() -> None:
             headers={
                 "X-Workspace-Id": "planning-domain",
                 "X-Actor-Id": "prompt-admin",
-                "Idempotency-Key": "prompt-create-1.0.0",
+                "Idempotency-Key": "test-test-test",
             },
             json=_create_payload(),
         )
@@ -168,7 +168,7 @@ def test_prompt_create_requires_admin_and_forwards_idempotency() -> None:
     name, call = prompts.calls[0]
     assert name == "create_revision"
     assert call["actor_id"] == "prompt-admin"
-    assert call["idempotency_key"] == "prompt-create-1.0.0"
+    assert call["idempotency_key"] == "test-test-test"
     assert call["trace_id"] == "trace-prompt-route"
 
 
@@ -210,7 +210,7 @@ def test_prompt_mutation_rejects_noncanonical_revision_id_before_service() -> No
             headers={
                 "X-Workspace-Id": "planning-domain",
                 "X-Actor-Id": "prompt-admin",
-                "Idempotency-Key": "prompt-publish-1.0.0",
+                "Idempotency-Key": "test-test-test",
             },
             json={"expected_version": 3},
         )
@@ -227,7 +227,7 @@ def test_prompt_production_selection_forwards_expected_pointer_version() -> None
             headers={
                 "X-Workspace-Id": "planning-domain",
                 "X-Actor-Id": "prompt-admin",
-                "Idempotency-Key": "prompt-rollback-1.0.0",
+                "Idempotency-Key": "test-test-test",
             },
             json={"revision_id": REVISION_ID, "expected_pointer_version": 1},
         )

@@ -1589,3 +1589,5 @@
 - Ticket 02 五轴自审未发现 Required：规格验收仅剩真实 MySQL CI 证据；正确性以 immutable revision + CAS pointer；
   安全性以 workspace/admin/actor/secret/no-content-event；可靠性以 idempotency/CAS/trigger/downgrade guard；
   维护性以 domain/application/ports/persistence/HTTP 分层且无 Planner Provider 依赖闭合。
+- Ticket 02 首次远程 CI `30896399867` 的 Gitleaks `generic-api-key` 精确命中路由测试假
+  `Idempotency-Key`（非凭证）；不加 allowlist、不关闭规则，只把测试 header 改为低熵占位符并保持转发断言。
