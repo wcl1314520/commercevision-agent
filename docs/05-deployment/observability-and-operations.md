@@ -3,8 +3,8 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
-| 适用版本 | Operations v1 |
+| 最后更新 | 2026-08-04 |
+| 适用版本 | Operations v1 / Phase 2 |
 
 ## OpenTelemetry
 
@@ -39,6 +39,19 @@ Browser
 - `evaluation_suite_version`
 
 禁止记录 Secret、完整原图、完整 Prompt 和签名 URL。
+
+### Phase 2 lifecycle
+
+API、Outbox/Inbox、Worker、Provider、Milvus、MCP 与 Scheduler 使用同一 `commercevision.phase2.*`
+span 命名空间。链路覆盖 upload/finalize/promotion、validation、Rights、Vision/ProductBrief、
+embedding、Milvus、lexical/fusion/rerank/final Rights、临时引用、删除/reconciliation 与 rebuild。
+
+允许跨边界传播 `trace_id`、`operation_id`、`workspace_id`、`target_id/version`、`event_id`、
+`policy_id` 和 `provider_request_id`；这些 ID 只进入 span/log，不作为 metrics label。
+`trace_id` 与 `provider_request_id` 始终哈希，其他含 URL、空格、`@`、`/` 或不安全字符的 ID
+同样哈希。
+错误只记录 normalized code/category/retryable/class，不记录异常 message。严禁 Secret、签名 URL、
+原图、完整 Prompt、完整 OCR 和原始 provider payload。
 
 ## 日志
 
@@ -91,6 +104,21 @@ Browser
 - 熔断状态。
 - 成本。
 - 未知结果数量。
+
+### Phase 2 operations
+
+- `commercevision.phase2.operation.events`、`commercevision.phase2.operation.lease_age`、
+  `commercevision.phase2.operation.retries`、`commercevision.phase2.operation.dlq`。
+- `commercevision.phase2.provider.calls|duration|errors|rate_limits`。
+- `commercevision.phase2.rights.decisions` 与 `confirmations`。
+- `commercevision.phase2.index.lag|stale_vectors`。
+- `commercevision.phase2.retrieval.duration|candidates|degraded|unauthorized_recall`。
+- `commercevision.phase2.deletion.backlog`。
+- `commercevision.phase2.rebuild.processed|remaining`。
+
+本地 Compose 的服务通过 OTLP/HTTP 发往 Collector。Collector 使用 memory limiter + batch，trace
+输出到 debug exporter，metrics 同时输出到 Prometheus exporter：
+`http://127.0.0.1:19464/metrics`。端口可通过 `CV_OTEL_METRICS_HOST_PORT` 调整，不需要生产 Secret。
 
 ### Asset Validation
 
@@ -165,6 +193,9 @@ Operation/Asset IDs、attempt、stage、verdict、reason、validator identity �
 - Secret 泄露和轮换。
 - 公共 Demo 滥用和预算失控。
 - 数据未按期删除。
+
+上述 Phase 2 故障的统一信号、止损、恢复证明和升级条件见
+[Phase 2 可观测性事故 Runbook](../runbooks/phase2-observability.md)。
 
 Scheduler readiness 同时报告 `outbox_dispatch`、`workflow_recovery`、
 `operation_recovery` 和 `upload_session_expiry` 的最近开始、最近成功、最近错误、耗时、

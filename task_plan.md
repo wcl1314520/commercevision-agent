@@ -133,9 +133,14 @@
   Container builds、Gitleaks 与 SBOM 全部通过，Ticket 13 已正式解锁。
 - Ticket 13 实现提交 `2b58bb1` 与兼容修复 `894670e` 已由 GitHub Actions `30846116127`
   全绿验证，Ticket 14 已正式解锁。
-- Ticket 14 已完成候选 Collection、持久检查点、快照后回放、当前 Rights 复扫、失败安全验证、
-  Retrieval Policy pointer 原子切换、延迟退役与管理员 HTTP/Web；本地发布门禁和多轴终审已完成，
-  当前只允许形成单一提交、推送并等待精确 GitHub Actions 全绿，在此之前不启动 Ticket 15。
+- Ticket 14 实现提交 `967585b`、安全依赖修复 `110d74b` 与 E2E 时序稳定修复 `4a05367`
+  已由 GitHub Actions `30859198341` 全绿验证，Ticket 15 正式解锁。
+- Ticket 15 已进入 TDD：收敛共享脱敏 telemetry 深模块、Phase 2 生命周期接线、四类进程的
+  最小必需 readiness、Collector/Compose 配置及故障 Runbook；完成审查和发布门禁前不启动 Ticket 16。
+- Ticket 15 本地实现与发布门禁已完成：共享 OTLP runtime、全生命周期 spans/metrics、无条件
+  trace/provider request ID 哈希、API/Worker/Scheduler/MCP readiness、Prometheus exporter 与十类
+  故障 Runbook 均已闭合；当前只允许形成单一提交、推送并等待精确 GitHub Actions 全绿，
+  Ticket 16 保持未启动。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
 **Status:** pending

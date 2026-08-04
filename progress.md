@@ -1269,3 +1269,43 @@
   Web 仅有一个既有 ProductBrief E2E 在商品切换后立即读取 sessionStorage，偶发早于 React cleanup effect。
   同一失败用例独立 20 次和本地全套均通过，证明确认为测试时序边界而非 cleanup 丢失；断言改为有界
   `expect.poll` 后再次定点 `20 passed`、完整 E2E `90 passed`、ESLint 通过。最终仍需新 SHA CI 全绿。
+
+# 2026-08-04 Ticket 14 正式发布与 Ticket 15 启动
+
+- Ticket 14 最终 SHA `4a053670865800da3fd6a7853760efa0032674a7` 对应 GitHub Actions
+  `30859198341` 全绿；Python 全量、迁移、权限、Ruff、依赖审计、OpenAPI、Web、90 条 E2E、
+  容器构建、Gitleaks 与 SBOM 全部通过，Ticket 14 正式闭环。
+- Ticket 15 冻结验收已重新读取。现状确认只有 Asset Validation 与 ProductBrief 两个局部观测器，
+  服务尚未配置可导出的 OpenTelemetry SDK pipeline；其余 upload/rights/index/retrieval/deletion/
+  reconciliation/rebuild 生命周期与统一脱敏、低基数属性策略仍需闭合。
+- 本 Ticket 继续执行单工单 TDD：先建立共享 telemetry contract 与 in-memory 观测测试，再接入现有
+  HTTP、Durable Worker/Event、Provider/Milvus、MCP、Scheduler 边界；Collector 不成为控制面 readiness
+  的强依赖，optional reranker 只产生显式 retrieval degradation。
+
+# 2026-08-04 Ticket 15 OpenTelemetry 与运维 Runbook 本地收口
+
+- 新增共享 `Phase2Telemetry` 深模块与进程级 OTLP/HTTP SDK lifecycle，API、Worker prefork child、
+  Scheduler 与 MCP 统一导出 resource-scoped traces/metrics；Collector 使用 memory limiter + batch，
+  本地 Prometheus 暴露于 `127.0.0.1:19464/metrics`，不需要生产 Secret。
+- spans 已接入 HTTP、upload/finalize、validation/promotion、Rights、Vision/ProductBrief、embedding、
+  Milvus collection/upsert/search、lexical/fusion/rerank/final Rights、临时引用、Durable Event/Operation、
+  deletion/reconciliation、rebuild、MCP tool 与 Scheduler scan。Application 只依赖窄 observer protocol，
+  具体 OpenTelemetry Adapter 留在 observability/bootstrap/worker 边界。
+- metrics 覆盖 quarantine/validation/Rights/provider/operation lease-retry-DLQ/confirmation/index lag/stale
+  vector/retrieval degradation 与 candidate funnel/deletion/rebuild。外部 trace ID 与 provider request ID
+  无条件 SHA-256；其他不安全 ID 同样哈希，异常只输出 stable code/category/retryable/class，不记录
+  message、图片、Secret、签名 URL、Prompt、OCR 或 Provider payload。
+- readiness 已按进程真实依赖收窄：API 不再声明未使用的 Redis/RabbitMQ；Scheduler 仅在所有 scanner
+  至少成功一次且当前无 error/timeout 后 ready；Worker 保持 queue/Executor/进程拥有依赖的启动前门禁；
+  MCP 保持 MySQL + 对象存储，Milvus/reranker 失败以显式 retrieval degradation 表达。
+- 新增统一 Phase 2 事故 Runbook，逐项覆盖 stuck quarantine、ClamAV、content safety、provider throttling、
+  index lag、stale vectors、Milvus loss、deletion backlog、DLQ replay、rebuild failure 的 Signal、Containment、
+  Recovery proof 与 Escalate，并由文档 Contract test 固定覆盖。
+- 本地最终证据：Ruff format/check 覆盖 383 文件；unit+contract `1242 passed, 1 skipped`（仅真实 OSS
+  opt-in）；本票真实 API `30 passed`、indexing/scheduler `37 passed`，其余直接影响 integration 在同轮
+  `43 passed` 中除已修复两文件外均通过。Web proxy `23 passed`、unit `194 passed`、E2E `90 passed`，
+  lint/typecheck/API types/build 全绿。
+- Python/pnpm audit 无已知漏洞，OpenAPI 无漂移，Compose config、`uv lock --check`、`git diff --check`
+  全绿；API/Worker/Scheduler/MCP/OTel Collector 五个生产镜像构建成功。安全、正确性、性能、可维护性、
+  Standards/Spec 与简化终审无剩余阻断项。Ticket 15 只待单一提交、推送和精确 SHA 的远程 CI 全绿，
+  Ticket 16 未启动。

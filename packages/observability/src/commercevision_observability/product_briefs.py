@@ -12,6 +12,7 @@ from opentelemetry.metrics import Meter
 from opentelemetry.trace import Status, StatusCode, Tracer
 
 from .logging import get_logger
+from .phase2 import Phase2Telemetry
 
 
 class _StructuredLogger(Protocol):
@@ -39,10 +40,16 @@ class ProductBriefTelemetry:
         logger: _StructuredLogger | None = None,
         tracer: Tracer | None = None,
         meter: Meter | None = None,
+        phase2: Phase2Telemetry | None = None,
     ) -> None:
         self._logger = logger or get_logger("commercevision.product_brief")
         self._tracer = tracer or trace.get_tracer("commercevision.product_brief")
         resolved_meter = meter or metrics.get_meter("commercevision.product_brief")
+        self._phase2 = phase2 or Phase2Telemetry(
+            logger=self._logger,
+            tracer=self._tracer,
+            meter=resolved_meter,
+        )
         self._provider_calls = resolved_meter.create_counter(
             "commercevision.product_brief.provider.calls",
             unit="{call}",
@@ -153,6 +160,12 @@ class ProductBriefTelemetry:
         }
         self._provider_calls.add(1, metric_attributes)
         self._provider_duration.record(latency_ms, metric_attributes)
+        self._phase2.record_provider(
+            provider=provider,
+            operation="vision",
+            outcome=("succeeded" if status == "SUCCEEDED" else status.lower()),
+            latency_ms=latency_ms,
+        )
         if status != "SUCCEEDED":
             error_attributes = {
                 **metric_attributes,
@@ -264,6 +277,7 @@ class ProductBriefTelemetry:
         result: Literal["confirmed", "failed"],
     ) -> None:
         self._confirmations.add(1, {"result": result})
+        self._phase2.record_confirmation(outcome=result)
         span = trace.get_current_span()
         span.set_attribute("commercevision.confirmation.result", result)
         if result == "confirmed":

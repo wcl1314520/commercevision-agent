@@ -72,6 +72,7 @@ from .indexing import (
     build_embedding_provider_request,
     build_milvus_upsert_request,
 )
+from .indexing_observability import IndexingObserver, NullIndexingObserver
 from .indexing_transfer import (
     ImageIndexDataTransferDenied,
     ImageIndexDataTransferPolicy,
@@ -136,6 +137,7 @@ from .retrieval import (
     RetrievalRerankerUnavailable,
     RetrievalSourceUnavailable,
 )
+from .retrieval_observability import NullRetrievalObserver, RetrievalObserver
 from .routing import (
     DuplicateEventRegistrationError,
     EventRoute,
@@ -206,6 +208,7 @@ __all__ = [
     "ImageIndexDataTransferPolicy",
     "IndexCommitDecision",
     "IndexingAuthorityPort",
+    "IndexingObserver",
     "VectorIndexingExecutor",
     "EligibleRetrievalAsset",
     "DenseEmbeddingCandidate",
@@ -221,10 +224,13 @@ __all__ = [
     "RetrievalQueryImageUnavailable",
     "RetrievalRerankerUnavailable",
     "RetrievalSourceUnavailable",
+    "RetrievalObserver",
     "build_event_routing_registry",
     "InboxCoordinator",
     "MalformedEventPayloadError",
     "NullAssetValidationObserver",
+    "NullIndexingObserver",
+    "NullRetrievalObserver",
     "OutboxDispatcher",
     "PresignedContentSafetyRequestFactory",
     "ProductBriefAnalysisExecutor",

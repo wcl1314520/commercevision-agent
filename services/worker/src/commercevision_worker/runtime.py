@@ -6,8 +6,8 @@ import logging
 import socket
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from commercevision_agent_core import (
@@ -80,6 +80,8 @@ from commercevision_contracts.events import (
     AssetValidationFailedPayload,
     AssetValidationRequestedPayload,
     BrandProfilePublishedPayload,
+    CollectionRebuildCompletedPayload,
+    CollectionRebuildProgressedPayload,
     CollectionRebuildRequestedPayload,
     EventQueue,
     EventType,
@@ -92,9 +94,11 @@ from commercevision_contracts.events import (
 from commercevision_contracts.object_storage import ObjectStorage
 from commercevision_domain import (
     ApprovalType,
+    DurableOperation,
     LeaseConflictError,
     NotFoundError,
     OperationKind,
+    OperationState,
     StorageLocationClass,
     canonicalize_uuid,
 )
@@ -102,6 +106,13 @@ from commercevision_domain.messaging import OutboxEvent
 from commercevision_object_storage import (
     build_object_storage,
     close_object_storage,
+)
+from commercevision_observability import (
+    Phase2Span,
+    Phase2Telemetry,
+    TelemetryDimensions,
+    TelemetryError,
+    TelemetryIdentity,
 )
 from commercevision_persistence import (
     Database,
@@ -143,6 +154,45 @@ from .image_indexing import (
 logger = logging.getLogger(__name__)
 
 
+def _record_operation(telemetry: Phase2Telemetry, operation: DurableOperation) -> None:
+    outcome = {
+        OperationState.SUCCEEDED: "succeeded",
+        OperationState.RETRYABLE_FAILED: "retry_scheduled",
+        OperationState.RECONCILING: "reconciling",
+        OperationState.WAITING_HUMAN: "waiting_human",
+        OperationState.CANCELLED: "cancelled",
+    }.get(
+        operation.state,
+        "dead_lettered" if operation.dead_letter_id is not None else "failed",
+    )
+    lease_age = (
+        max(0.0, (datetime.now(UTC) - operation.last_attempt_at).total_seconds())
+        if operation.last_attempt_at is not None
+        else 0.0
+    )
+    telemetry.record_operation(
+        kind=operation.kind.value,
+        outcome=outcome,
+        lease_age_seconds=lease_age,
+        attempt=operation.attempt_count,
+    )
+
+
+def _execute_and_observe_operation(
+    runtime: Any,
+    *,
+    workspace_id: str,
+    operation_id: str,
+) -> None:
+    operation = runtime.operation_worker.execute(
+        workspace_id=workspace_id,
+        operation_id=operation_id,
+    )
+    telemetry = getattr(runtime, "telemetry", None)
+    if telemetry is not None:
+        _record_operation(telemetry, operation)
+
+
 @dataclass(slots=True)
 class WorkerRuntime:
     database: Database
@@ -162,6 +212,7 @@ class WorkerRuntime:
     collection_rebuild_runner: CollectionRebuildRunner | None = None
     brand_profile_invalidation: BrandProfileInvalidationPort | None = None
     lifecycle: DurableNodeLifecycle | None = None
+    telemetry: Phase2Telemetry = field(default_factory=Phase2Telemetry)
 
     @classmethod
     def build(
@@ -561,35 +612,78 @@ class WorkerRuntime:
 
     def process_event(self, event_id: str) -> str:
         claim, event = self.inbox.claim(event_id)
-        if claim.already_processed:
-            return "duplicate"
-        if claim.dead:
-            return "dead-lettered"
-        if claim.retry_not_ready:
-            return "retry-not-ready"
-        if not claim.should_process or claim.lease_token is None:
-            raise LeaseConflictError(f"message {event_id} is being processed")
+        identity = TelemetryIdentity(
+            trace_id=event.envelope.trace_id,
+            workspace_id=event.workspace_id,
+            target_id=event.envelope.aggregate_id,
+            target_version=event.envelope.aggregate_version,
+            event_id=event.envelope.event_id,
+        )
+        dimensions = TelemetryDimensions(component=event.envelope.aggregate_type)
+        with self.telemetry.span(
+            Phase2Span.EVENT_CONSUME,
+            identity=identity,
+            dimensions=dimensions,
+        ):
+            if claim.already_processed:
+                return "duplicate"
+            if claim.dead:
+                self.telemetry.record_operation(
+                    kind="EVENT",
+                    outcome="dead_lettered",
+                    lease_age_seconds=0,
+                    attempt=claim.delivery_attempt,
+                )
+                return "dead-lettered"
+            if claim.retry_not_ready:
+                return "retry-not-ready"
+            if not claim.should_process or claim.lease_token is None:
+                raise LeaseConflictError(f"message {event_id} is being processed")
 
-        try:
-            self.event_router.resolve(event.envelope)(event)
-        except EventRoutingError as exc:
-            self.inbox.mark_permanent_failed(
-                event_id,
-                claim.lease_token,
-                exc,
-                delivery_attempt=claim.delivery_attempt,
-            )
-            return "dead-lettered"
-        except Exception as exc:
-            self.inbox.schedule_retry(
-                event_id,
-                claim.lease_token,
-                exc,
-                delivery_attempt=claim.delivery_attempt,
-            )
-            return "retry-scheduled"
-        self.inbox.mark_processed(event_id, claim.lease_token)
-        return "processed"
+            try:
+                self.event_router.resolve(event.envelope)(event)
+            except EventRoutingError as exc:
+                self.inbox.mark_permanent_failed(
+                    event_id,
+                    claim.lease_token,
+                    exc,
+                    delivery_attempt=claim.delivery_attempt,
+                )
+                self.telemetry.error(
+                    TelemetryError(
+                        code="EVENT_ROUTING_FAILED",
+                        category="event_routing",
+                        retryable=False,
+                        error_class=type(exc).__name__,
+                    ),
+                    identity=identity,
+                )
+                self.telemetry.record_operation(
+                    kind="EVENT",
+                    outcome="dead_lettered",
+                    lease_age_seconds=0,
+                    attempt=claim.delivery_attempt,
+                )
+                return "dead-lettered"
+            except Exception as exc:
+                self.inbox.schedule_retry(
+                    event_id,
+                    claim.lease_token,
+                    exc,
+                    delivery_attempt=claim.delivery_attempt,
+                )
+                self.telemetry.error(
+                    TelemetryError(
+                        code="EVENT_RETRY_SCHEDULED",
+                        category="event_processing",
+                        retryable=True,
+                        error_class=type(exc).__name__,
+                    ),
+                    identity=identity,
+                )
+                return "retry-scheduled"
+            self.inbox.mark_processed(event_id, claim.lease_token)
+            return "processed"
 
     def close(self) -> None:
         failures: list[Exception] = []
@@ -922,7 +1016,8 @@ class WorkerRuntime:
             )
 
     def _handle_operation_recovery(self, event: OutboxEvent) -> None:
-        self.operation_worker.handle_recovery_event(event)
+        operation = self.operation_worker.handle_recovery_event(event)
+        _record_operation(self.telemetry, operation)
 
     @staticmethod
     def _observe_asset_upload_finalized(event: OutboxEvent) -> None:
@@ -959,7 +1054,8 @@ class WorkerRuntime:
                 "Asset validation operation does not match its Outbox aggregate",
                 reason="aggregate_mismatch",
             )
-        self.operation_worker.execute(
+        _execute_and_observe_operation(
+            self,
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
@@ -1007,7 +1103,8 @@ class WorkerRuntime:
                 "Asset deletion operation does not match its Outbox aggregate",
                 reason="aggregate_mismatch",
             )
-        self.operation_worker.execute(
+        _execute_and_observe_operation(
+            self,
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
@@ -1073,7 +1170,8 @@ class WorkerRuntime:
                 "ProductBrief request does not match its Durable Operation target",
                 reason="aggregate_mismatch",
             )
-        self.operation_worker.execute(
+        _execute_and_observe_operation(
+            self,
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
@@ -1120,7 +1218,8 @@ class WorkerRuntime:
                 "vector index request does not match its Embedding or AssetVersion identity",
                 reason="aggregate_mismatch",
             )
-        self.operation_worker.execute(
+        _execute_and_observe_operation(
+            self,
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
@@ -1186,15 +1285,67 @@ class WorkerRuntime:
             )
         if self.collection_rebuild_runner is None:
             raise RuntimeError("collection rebuild execution is not configured")
-        self.collection_rebuild_runner.process(payload)
+        with self.telemetry.span(
+            Phase2Span.REBUILD_BATCH,
+            identity=TelemetryIdentity(
+                trace_id=event.envelope.trace_id,
+                operation_id=payload.operation_id,
+                workspace_id=payload.workspace_id,
+                target_id=payload.rebuild_id,
+                target_version=payload.generation,
+                event_id=event.envelope.event_id,
+            ),
+            dimensions=TelemetryDimensions(phase=payload.command.value),
+        ):
+            self.collection_rebuild_runner.process(payload)
 
-    @staticmethod
-    def _observe_collection_rebuild(event: OutboxEvent) -> None:
+    def _observe_collection_rebuild(self, event: OutboxEvent) -> None:
         if event.envelope.aggregate_type != "collection_rebuild" or event.workspace_id is None:
             raise EventRoutingError(
                 "collection rebuild observation has an invalid aggregate",
                 reason="aggregate_mismatch",
             )
+        contract = (
+            COLLECTION_REBUILD_PROGRESSED_V1
+            if event.envelope.event_type == EventType.COLLECTION_REBUILD_PROGRESSED.value
+            else COLLECTION_REBUILD_COMPLETED_V1
+        )
+        payload = contract.validate_payload(event.envelope.payload)
+        if isinstance(payload, CollectionRebuildProgressedPayload):
+            if (
+                payload.workspace_id != event.workspace_id
+                or payload.rebuild_id != event.envelope.aggregate_id
+                or payload.operation_id != event.envelope.trace_id
+                or payload.generation != event.envelope.aggregate_version
+            ):
+                raise EventRoutingError(
+                    "collection rebuild progress does not match its Outbox aggregate",
+                    reason="aggregate_mismatch",
+                )
+            self.telemetry.record_rebuild(
+                phase=payload.state,
+                processed=payload.processed_count,
+                remaining=None,
+                outcome="progress",
+            )
+            return
+        if not isinstance(payload, CollectionRebuildCompletedPayload):
+            raise TypeError("collection rebuild contract returned an unexpected payload")
+        if (
+            payload.workspace_id != event.workspace_id
+            or payload.rebuild_id != event.envelope.aggregate_id
+            or payload.operation_id != event.envelope.trace_id
+        ):
+            raise EventRoutingError(
+                "collection rebuild completion does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        self.telemetry.record_rebuild(
+            phase="COMPLETED",
+            processed=0,
+            remaining=0,
+            outcome="completed",
+        )
 
     def _observe_product_brief_state(self, event: OutboxEvent) -> None:
         contract = (

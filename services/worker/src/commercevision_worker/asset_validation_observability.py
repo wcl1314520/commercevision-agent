@@ -18,7 +18,7 @@ from commercevision_application.operations import (
     OperationExecutionRequest,
 )
 from commercevision_domain import AssetValidationResult, ValidationStage
-from commercevision_observability import get_logger
+from commercevision_observability import Phase2Telemetry, get_logger
 from opentelemetry import metrics, trace
 from opentelemetry.metrics import Meter
 from opentelemetry.trace import Status, StatusCode, Tracer
@@ -43,12 +43,19 @@ class AssetValidationTelemetry:
         meter: Meter | None = None,
         clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] | None = None,
+        phase2: Phase2Telemetry | None = None,
     ) -> None:
         self._logger = logger or get_logger("commercevision.worker.asset_validation")
         self._tracer = tracer or trace.get_tracer("commercevision.worker.asset_validation")
         resolved_meter = meter or metrics.get_meter("commercevision.worker.asset_validation")
         self._clock = clock or (lambda: datetime.now(UTC))
         self._monotonic = monotonic or time.monotonic
+        self._phase2 = phase2 or Phase2Telemetry(
+            logger=self._logger,
+            tracer=self._tracer,
+            meter=resolved_meter,
+            monotonic=self._monotonic,
+        )
         self._operations = resolved_meter.create_counter(
             "commercevision.asset_validation.operations",
             unit="{operation}",
@@ -241,6 +248,10 @@ class AssetValidationTelemetry:
             quarantine_age_seconds,
             {"asset_kind": target.asset.kind.value},
         )
+        self._phase2.record_quarantine(
+            age_seconds=quarantine_age_seconds,
+            state="bound",
+        )
         self._logger.info(
             "asset_validation_target_bound",
             **self._operation_log_fields(request=request, mode=None),
@@ -266,6 +277,11 @@ class AssetValidationTelemetry:
                 "validator": result.validator_name,
                 "reused": reused,
             },
+        )
+        self._phase2.record_validation(
+            stage=result.stage.value,
+            verdict=result.verdict.value,
+            reused=reused,
         )
         self._logger.info(
             "asset_validation_stage_result",

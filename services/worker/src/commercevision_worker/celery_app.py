@@ -22,7 +22,7 @@ from celery.signals import (
 from commercevision_application import OperationExecutor
 from commercevision_contracts.config import load_settings
 from commercevision_domain import OperationKind
-from commercevision_observability import configure_logging
+from commercevision_observability import TelemetryRuntime, configure_logging, configure_telemetry
 from kombu import Queue
 
 from .executors import (
@@ -75,6 +75,13 @@ _consumer_ready = False
 _master_pid: int | None = None
 _startup_error: str | None = None
 _readiness_supervisor: WorkerReadinessSupervisor | None = None
+_telemetry_runtime: TelemetryRuntime | None = None
+
+
+def _normalized_startup_error(code: str, exc: BaseException) -> str:
+    """Return an operator-safe readiness error without dependency messages."""
+
+    return f"{code}:{type(exc).__name__}"
 
 
 def _missing_executor_message(
@@ -149,10 +156,10 @@ def validate_worker_startup(**_: Any) -> None:
         _dependency_checked_at = None
         _dependency_readiness = None
         _validated_factories = None
-        _startup_error = str(exc)
+        _startup_error = _normalized_startup_error("WORKER_BOOTSTRAP_FAILED", exc)
         # Celery's signal dispatcher catches Exception. SystemExit propagates and
         # aborts WorkController construction before any consumer is created.
-        raise SystemExit(f"worker bootstrap failed: {exc}") from exc
+        raise SystemExit(_startup_error) from exc
     _dependency_checked_at = dependency_checked_at
     _dependency_readiness = dependency_readiness
     _validated_factories = factories
@@ -214,12 +221,17 @@ def _child_executor_readiness(runtime: WorkerRuntime) -> dict[str, object]:
 def initialize_worker_process(**_: Any) -> None:
     """Build local runtime state inside each pool child without remote probes."""
 
-    global _runtime, _startup_error
+    global _runtime, _startup_error, _telemetry_runtime
     runtime: WorkerRuntime | None = None
     try:
         if _validated_factories is None or _dependency_readiness is None:
             raise RuntimeError("Celery master bootstrap did not complete")
         assert _validated_factories is not None
+        _telemetry_runtime = configure_telemetry(
+            service_name=settings.service_name,
+            service_version=settings.version,
+            environment=settings.environment,
+        )
         executors: dict[OperationKind, OperationExecutor] = build_operation_executors(
             settings=settings,
             factories=_validated_factories,
@@ -235,10 +247,14 @@ def initialize_worker_process(**_: Any) -> None:
         if runtime is not None:
             with suppress(Exception):
                 runtime.close()
+        if _telemetry_runtime is not None:
+            with suppress(Exception):
+                _telemetry_runtime.shutdown()
+            _telemetry_runtime = None
         _runtime = None
-        _startup_error = str(exc)
+        _startup_error = _normalized_startup_error("WORKER_PROCESS_BOOTSTRAP_FAILED", exc)
         _child_readiness_path().unlink(missing_ok=True)
-        raise SystemExit(f"worker process bootstrap failed: {exc}") from exc
+        raise SystemExit(_startup_error) from exc
     _runtime = runtime
     _startup_error = None
     try:
@@ -256,9 +272,9 @@ def initialize_worker_process(**_: Any) -> None:
         with suppress(Exception):
             runtime.close()
         _runtime = None
-        _startup_error = str(exc)
+        _startup_error = _normalized_startup_error("WORKER_CHILD_READINESS_PUBLICATION_FAILED", exc)
         _child_readiness_path().unlink(missing_ok=True)
-        raise SystemExit(f"worker child readiness publication failed: {exc}") from exc
+        raise SystemExit(_startup_error) from exc
 
 
 def _get_runtime() -> WorkerRuntime:
@@ -371,9 +387,9 @@ def mark_worker_ready(sender: object | None = None, **_: Any) -> None:
         supervisor.stop()
         _readiness_supervisor = None
         _consumer_ready = False
-        _startup_error = str(exc)
+        _startup_error = _normalized_startup_error("WORKER_READINESS_PUBLICATION_FAILED", exc)
         _remove_readiness_file()
-        raise SystemExit(f"worker readiness publication failed: {exc}") from exc
+        raise SystemExit(_startup_error) from exc
 
 
 @worker_shutdown.connect(weak=False)
@@ -406,11 +422,16 @@ def process_outbox_event(event_id: str) -> str:
 
 @worker_process_shutdown.connect
 def close_runtime(**_: Any) -> None:
-    global _runtime
+    global _runtime, _telemetry_runtime
     runtime = _runtime
     _runtime = None
     try:
         if runtime is not None:
             runtime.close()
     finally:
-        _child_readiness_path().unlink(missing_ok=True)
+        try:
+            if _telemetry_runtime is not None:
+                _telemetry_runtime.shutdown()
+                _telemetry_runtime = None
+        finally:
+            _child_readiness_path().unlink(missing_ok=True)

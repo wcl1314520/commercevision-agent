@@ -7,7 +7,12 @@ from contextlib import asynccontextmanager
 
 from commercevision_contracts import Settings
 from commercevision_contracts.config import load_settings
-from commercevision_observability import configure_logging, get_logger
+from commercevision_observability import (
+    Phase2Telemetry,
+    configure_logging,
+    configure_telemetry,
+    get_logger,
+)
 from fastapi import FastAPI, Response, status
 from uvicorn import run
 
@@ -20,8 +25,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging(runtime_settings.log_level)
+        telemetry_runtime = configure_telemetry(
+            service_name=runtime_settings.service_name,
+            service_version=runtime_settings.version,
+            environment=runtime_settings.environment,
+        )
+        app.state.telemetry = (
+            telemetry_runtime.phase2() if telemetry_runtime is not None else Phase2Telemetry()
+        )
         logger = get_logger("commercevision.scheduler")
-        runtime = SchedulerRuntime(runtime_settings)
+        runtime = SchedulerRuntime(runtime_settings, telemetry=app.state.telemetry)
         app.state.runtime = runtime
         logger.info("service_started", service=runtime_settings.service_name, phase="phase-1")
         scheduler_task = asyncio.create_task(runtime.run())
@@ -31,6 +44,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             scheduler_task.cancel()
             await asyncio.gather(scheduler_task, return_exceptions=True)
             runtime.close()
+            if telemetry_runtime is not None:
+                telemetry_runtime.shutdown()
             logger.info("service_stopped", service=runtime_settings.service_name)
 
     scheduler = FastAPI(
@@ -53,7 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @scheduler.get("/health/ready")
     async def readiness(response: Response) -> dict[str, object]:
         runtime: SchedulerRuntime = scheduler.state.runtime
-        ready = runtime.state.last_error is None
+        ready = runtime.state.ready
         if not ready:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         payload = {

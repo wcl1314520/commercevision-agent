@@ -11,6 +11,12 @@ from commercevision_contracts import (
     RetrievalTemporaryReferenceV1,
 )
 from commercevision_domain import AuthenticationError, NotFoundError, canonicalize_uuid
+from commercevision_observability import (
+    Phase2Span,
+    Phase2Telemetry,
+    TelemetryDimensions,
+    TelemetryIdentity,
+)
 from fastapi import APIRouter, Header, Path, Request
 from pydantic import AfterValidator
 
@@ -138,13 +144,24 @@ def exchange_retrieval_preview(
     )
     if actor_id != principal.actor_id:
         raise AuthenticationError("actor header does not match the trusted principal")
-    reference = request.app.state.container.retrieval_previews.exchange(
-        workspace_id=workspace_id,
-        requester_id=principal.actor_id,
-        run_id=run_id,
-        rank=rank,
-        token=payload.preview_reference_token,
-    )
+    telemetry = getattr(request.app.state, "telemetry", None) or Phase2Telemetry()
+    with telemetry.span(
+        Phase2Span.TEMPORARY_REFERENCE,
+        identity=TelemetryIdentity(
+            trace_id=request.state.trace_id,
+            workspace_id=workspace_id,
+            target_id=run_id,
+            target_version=rank,
+        ),
+        dimensions=TelemetryDimensions(phase="preview_exchange"),
+    ):
+        reference = request.app.state.container.retrieval_previews.exchange(
+            workspace_id=workspace_id,
+            requester_id=principal.actor_id,
+            run_id=run_id,
+            rank=rank,
+            token=payload.preview_reference_token,
+        )
     if reference is None:
         raise NotFoundError("Retrieval preview is unavailable")
     return reference

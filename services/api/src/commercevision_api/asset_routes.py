@@ -1,5 +1,6 @@
 """Versioned direct-upload and quarantined Asset HTTP routes."""
 
+from contextlib import AbstractContextManager
 from typing import Annotated
 
 from commercevision_application import AuthenticatedPrincipal
@@ -26,6 +27,12 @@ from commercevision_contracts import (
     ValidationOperationSummaryV1,
 )
 from commercevision_domain import AuthenticationError
+from commercevision_observability import (
+    Phase2Span,
+    Phase2Telemetry,
+    TelemetryDimensions,
+    TelemetryIdentity,
+)
 from fastapi import APIRouter, Header, Query, Request, status
 
 from .workspace_identity import WorkspaceHeader
@@ -64,6 +71,28 @@ RIGHTS_MUTATION_ERROR_RESPONSES = {
         "description": "Rights version, state, or idempotency conflict",
     },
 }
+
+
+def _phase2_span(
+    request: Request,
+    name: Phase2Span,
+    *,
+    workspace_id: str,
+    target_id: str | None = None,
+    target_version: int | None = None,
+    phase: str | None = None,
+) -> AbstractContextManager[None]:
+    telemetry: Phase2Telemetry = getattr(request.app.state, "telemetry", None) or Phase2Telemetry()
+    return telemetry.span(
+        name,
+        identity=TelemetryIdentity(
+            trace_id=request.state.trace_id,
+            workspace_id=workspace_id,
+            target_id=target_id,
+            target_version=target_version,
+        ),
+        dimensions=TelemetryDimensions(phase=phase),
+    )
 
 
 def _require_workspace_principal(
@@ -117,13 +146,14 @@ def create_upload_session(
         actor_id=actor_id,
         trusted_principal=trusted_principal,
     )
-    return request.app.state.container.assets.create_upload_session(
-        request=payload,
-        workspace_id=workspace_id,
-        actor_id=principal.actor_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-    )
+    with _phase2_span(request, Phase2Span.UPLOAD_CREATE, workspace_id=workspace_id):
+        return request.app.state.container.assets.create_upload_session(
+            request=payload,
+            workspace_id=workspace_id,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+        )
 
 
 @upload_router.get(
@@ -200,14 +230,20 @@ def finalize_upload_session(
         actor_id=actor_id,
         trusted_principal=trusted_principal,
     )
-    return request.app.state.container.assets.finalize_upload_session(
-        upload_session_id=upload_session_id,
-        request=payload,
+    with _phase2_span(
+        request,
+        Phase2Span.UPLOAD_FINALIZE,
         workspace_id=workspace_id,
-        actor_id=principal.actor_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-    )
+        target_id=upload_session_id,
+    ):
+        return request.app.state.container.assets.finalize_upload_session(
+            upload_session_id=upload_session_id,
+            request=payload,
+            workspace_id=workspace_id,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+        )
 
 
 @asset_router.get(
@@ -256,13 +292,21 @@ def delete_foundation_asset(
         workspace_id=workspace_id,
         principal=principal,
     )
-    result = request.app.state.container.asset_retention.request_administrator_deletion(
+    with _phase2_span(
+        request,
+        Phase2Span.DELETION,
         workspace_id=workspace_id,
-        asset_id=asset_id,
-        actor_id=principal.actor_id,
-        expected_version=payload.expected_version,
-        trace_id=request.state.trace_id,
-    )
+        target_id=asset_id,
+        target_version=payload.expected_version,
+        phase="request",
+    ):
+        result = request.app.state.container.asset_retention.request_administrator_deletion(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=principal.actor_id,
+            expected_version=payload.expected_version,
+            trace_id=request.state.trace_id,
+        )
     return AssetDeleteResponseV1(
         asset_id=result.asset_id,
         asset_version_id=result.asset_version_id,
@@ -365,14 +409,21 @@ def register_asset_rights(
         actor_id=actor_id,
         trusted_principal=trusted_principal,
     )
-    return request.app.state.container.rights.register(
+    with _phase2_span(
+        request,
+        Phase2Span.RIGHTS_DECISION,
         workspace_id=workspace_id,
-        asset_id=asset_id,
-        actor_id=principal.actor_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-        request=payload,
-    )
+        target_id=asset_id,
+        phase="register",
+    ):
+        return request.app.state.container.rights.register(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+            request=payload,
+        )
 
 
 @asset_router.post(
@@ -395,14 +446,21 @@ def replace_asset_rights(
         actor_id=actor_id,
         trusted_principal=trusted_principal,
     )
-    return request.app.state.container.rights.replace(
+    with _phase2_span(
+        request,
+        Phase2Span.RIGHTS_DECISION,
         workspace_id=workspace_id,
-        asset_id=asset_id,
-        actor_id=principal.actor_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-        request=payload,
-    )
+        target_id=asset_id,
+        phase="replace",
+    ):
+        return request.app.state.container.rights.replace(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+            request=payload,
+        )
 
 
 @asset_router.post(
@@ -425,14 +483,21 @@ def revoke_asset_rights(
         actor_id=actor_id,
         trusted_principal=trusted_principal,
     )
-    return request.app.state.container.rights.revoke(
+    with _phase2_span(
+        request,
+        Phase2Span.RIGHTS_DECISION,
         workspace_id=workspace_id,
-        asset_id=asset_id,
-        actor_id=principal.actor_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-        request=payload,
-    )
+        target_id=asset_id,
+        phase="revoke",
+    ):
+        return request.app.state.container.rights.revoke(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+            request=payload,
+        )
 
 
 @asset_router.post(
@@ -459,14 +524,21 @@ def administrator_block_asset(
         workspace_id=workspace_id,
         principal=principal,
     )
-    return request.app.state.container.rights.administrator_block(
+    with _phase2_span(
+        request,
+        Phase2Span.RIGHTS_DECISION,
         workspace_id=workspace_id,
-        asset_id=asset_id,
-        actor_id=principal.actor_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-        request=payload,
-    )
+        target_id=asset_id,
+        phase="administrator_block",
+    ):
+        return request.app.state.container.rights.administrator_block(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+            request=payload,
+        )
 
 
 @asset_router.get(
@@ -512,8 +584,15 @@ def check_asset_usability(
         workspace_id=workspace_id,
         trusted_principal=trusted_principal,
     )
-    return request.app.state.container.rights.current_usability(
+    with _phase2_span(
+        request,
+        Phase2Span.RIGHTS_DECISION,
         workspace_id=workspace_id,
-        asset_id=asset_id,
-        request=payload,
-    )
+        target_id=asset_id,
+        phase="usability_check",
+    ):
+        return request.app.state.container.rights.current_usability(
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            request=payload,
+        )

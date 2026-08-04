@@ -16,6 +16,7 @@ from commercevision_application import (
 from commercevision_contracts import Settings
 from commercevision_contracts.object_storage import ObjectStorage
 from commercevision_domain import RetrievalChannel, RetrievalPolicy, VectorKind
+from commercevision_observability import RetrievalTelemetry
 from commercevision_persistence import (
     Database,
     MySqlBrandProfileRetrievalSource,
@@ -138,6 +139,7 @@ def build_retrieval(
         query_vectors = ProviderDenseQueryVectorService(
             embedding=embedding,
             image_references=image_references,
+            observer=(observer := RetrievalTelemetry()),
         )
         sources = (
             DenseRetrievalSource(
@@ -145,12 +147,14 @@ def build_retrieval(
                 catalog=catalog,
                 query_vectors=query_vectors,
                 search=search,
+                observer=observer,
             ),
             DenseRetrievalSource(
                 vector_kind=VectorKind.PRODUCT_FUSED,
                 catalog=catalog,
                 query_vectors=query_vectors,
                 search=search,
+                observer=observer,
             ),
             MySqlLexicalRetrievalSource(MySqlProductLexicalSearch(database.session_factory)),
             MySqlBrandProfileRetrievalSource(database.session_factory),
@@ -167,6 +171,7 @@ def build_retrieval(
                 authority=MySqlRetrievalAuthority(database.session_factory),
                 sources=sources,
                 policy=policy,
+                observer=observer,
             ),
             runs=MySqlRetrievalRunStore(
                 database.session_factory,

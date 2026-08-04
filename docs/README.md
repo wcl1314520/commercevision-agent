@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-30 |
+| 最后更新 | 2026-08-04 |
 | 适用版本 | Project Definition v1 |
 
 ## 00 产品
@@ -48,6 +48,7 @@
 - [Brand Profile 发布与失效收敛 Runbook](runbooks/brand-profile.md)
 - [IMAGE 索引 Runbook](runbooks/image-indexing.md)
 - [Collection 重建与升级 Runbook](runbooks/collection-rebuild.md)
+- [Phase 2 可观测性事故 Runbook](runbooks/phase2-observability.md)
 
 ## 06 路线图
 

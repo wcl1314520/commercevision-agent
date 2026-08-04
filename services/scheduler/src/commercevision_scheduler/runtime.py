@@ -26,6 +26,7 @@ from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolic
 from commercevision_contracts import Settings
 from commercevision_contracts.events import EventQueue
 from commercevision_domain.messaging import OutboxEvent
+from commercevision_observability import Phase2Span, Phase2Telemetry, TelemetryDimensions
 from commercevision_persistence import (
     Database,
     SqlAlchemyAssetUnitOfWork,
@@ -117,6 +118,7 @@ class IndependentScannerOrchestrator:
         timeout_seconds: float = 30.0,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
+        telemetry: Phase2Telemetry | None = None,
     ) -> None:
         names = [scanner.name for scanner in scanners]
         if len(set(names)) != len(names):
@@ -129,6 +131,7 @@ class IndependentScannerOrchestrator:
         self._timeout_seconds = timeout_seconds
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
+        self._telemetry = telemetry or Phase2Telemetry()
         self._next_due = {scanner.name: 0.0 for scanner in scanners}
         self.statuses = {scanner.name: ScannerStatus() for scanner in scanners}
         self._active: dict[str, _ScannerRun] = {}
@@ -160,10 +163,13 @@ class IndependentScannerOrchestrator:
         self._next_due[scanner.name] = tick + scanner.interval_seconds
         run.thread.start()
 
-    @staticmethod
-    def _run_scanner(run: _ScannerRun) -> None:
+    def _run_scanner(self, run: _ScannerRun) -> None:
         try:
-            run.result = run.scanner.run_once()
+            with self._telemetry.span(
+                Phase2Span.SCHEDULER_SCAN,
+                dimensions=TelemetryDimensions(component=run.scanner.name),
+            ):
+                run.result = run.scanner.run_once()
         except Exception as exc:
             run.error = exc
         finally:
@@ -185,7 +191,7 @@ class IndependentScannerOrchestrator:
                 continue
             status.last_duration_ms = elapsed * 1000
             if run.error is not None:
-                status.last_error = f"{type(run.error).__name__}: {run.error}"
+                status.last_error = type(run.error).__name__
             else:
                 count = run.result or 0
                 status.last_success_at = self._wall_clock()
@@ -199,7 +205,7 @@ class IndependentScannerOrchestrator:
         status.timed_out = True
         status.timeout_count += 1
         status.last_duration_ms = self._timeout_seconds * 1000
-        status.last_error = f"TimeoutError: scanner exceeded {self._timeout_seconds:.3f} seconds"
+        status.last_error = "TimeoutError"
 
 
 @dataclass(slots=True)
@@ -218,6 +224,16 @@ class SchedulerState:
     scanners: dict[str, ScannerStatus] | None = None
 
     @property
+    def ready(self) -> bool:
+        statuses = tuple((self.scanners or {}).values())
+        return bool(statuses) and all(
+            scanner.last_success_at is not None
+            and scanner.last_error is None
+            and not scanner.timed_out
+            for scanner in statuses
+        )
+
+    @property
     def last_error(self) -> str | None:
         errors = [
             f"{name}: {status.last_error}"
@@ -228,7 +244,7 @@ class SchedulerState:
 
 
 class SchedulerRuntime:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, telemetry: Phase2Telemetry | None = None) -> None:
         self.settings = settings
         self.database: Database = create_database(settings)
 
@@ -294,6 +310,7 @@ class SchedulerRuntime:
             policy=deletion_policy,
         )
         self.state = SchedulerState()
+        self.telemetry = telemetry or Phase2Telemetry()
         self.orchestrator = IndependentScannerOrchestrator(
             scanners=(
                 ScannerDefinition(
@@ -333,6 +350,7 @@ class SchedulerRuntime:
                 ),
             ),
             timeout_seconds=settings.scheduler_scanner_timeout_seconds,
+            telemetry=self.telemetry,
         )
         self.state.scanners = self.orchestrator.statuses
 
@@ -368,16 +386,19 @@ class SchedulerRuntime:
     def _expire_rights_once(self) -> int:
         expired = self.rights.expire_due_once(limit=self.settings.scheduler_batch_size)
         self.state.expired_rights_total += expired
+        self.telemetry.record_rights(decision="denied", reason="expired", count=expired)
         return expired
 
     def _activate_rights_once(self) -> int:
         activated = self.rights.activate_due_once(limit=self.settings.scheduler_batch_size)
         self.state.activated_rights_total += activated
+        self.telemetry.record_rights(decision="allowed", reason="activated", count=activated)
         return activated
 
     def _expire_assets_once(self) -> int:
         expired = self.asset_retention.expire_due_once(limit=self.settings.scheduler_batch_size)
         self.state.expired_assets_total += expired
+        self.telemetry.record_deletion(backlog=expired, outcome="scheduled")
         return expired
 
     def close(self) -> None:

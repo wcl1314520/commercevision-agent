@@ -919,7 +919,7 @@ def test_celery_worker_fails_fast_before_consumer_when_executor_is_missing(
     monkeypatch.setattr(executor_module, "entry_points", lambda **_kwargs: ())
     monkeypatch.setattr(worker_module, "available_builtin_operation_kinds", lambda _settings: ())
 
-    with pytest.raises(SystemExit, match="ASSET_INDEXING"):
+    with pytest.raises(SystemExit, match="WORKER_BOOTSTRAP_FAILED:RuntimeError"):
         WorkController(
             app=worker_module.celery_app,
             pool="solo",
@@ -966,7 +966,7 @@ def test_celery_master_fails_before_consumer_when_dependency_probe_fails(
     monkeypatch.setattr(worker_module, "probe_worker_dependencies", fail_dependencies)
     monkeypatch.setattr(WorkerRuntime, "build", fail_if_runtime_is_built)
 
-    with pytest.raises(SystemExit, match=message):
+    with pytest.raises(SystemExit, match="WORKER_BOOTSTRAP_FAILED:RuntimeError") as failure:
         WorkController(
             app=worker_module.celery_app,
             pool="solo",
@@ -974,6 +974,7 @@ def test_celery_master_fails_before_consumer_when_dependency_probe_fails(
             hostname=f"bootstrap-{dependency}-failure-test@localhost",
         )
 
+    assert message not in str(failure.value)
     assert runtime_built is False
     assert worker_module.worker_bootstrap_readiness()["ready"] is False
     assert not Path(settings.worker_readiness_path).exists()
@@ -1245,9 +1246,10 @@ def test_pool_child_bootstrap_failure_does_not_remove_master_readiness(
         raise RuntimeError("local child runtime failed")
 
     monkeypatch.setattr(WorkerRuntime, "build", fail_runtime)
-    with pytest.raises(SystemExit, match="local child runtime failed"):
+    with pytest.raises(SystemExit, match="WORKER_PROCESS_BOOTSTRAP_FAILED:RuntimeError") as failure:
         worker_module.initialize_worker_process()
 
+    assert "local child runtime failed" not in str(failure.value)
     assert readiness_path.is_file()
     assert worker_module._child_readiness_path().exists() is False
     worker_module.remove_worker_readiness()

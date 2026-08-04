@@ -73,6 +73,30 @@ def _compose_services() -> dict[str, object]:
     return compose["services"]
 
 
+def test_compose_routes_all_phase2_processes_to_local_otlp_without_secrets() -> None:
+    services = _compose_services()
+    for name in ("api", "worker", "scheduler", "mcp-server"):
+        environment = services[name]["environment"]
+        assert environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://otel-collector:4318"
+        assert "OTEL_EXPORTER_OTLP_HEADERS" not in environment
+
+    collector = yaml.safe_load(
+        (_REPOSITORY_ROOT / "infra/otel/otel-collector-config.yaml").read_text(encoding="utf-8")
+    )
+    assert collector["processors"]["memory_limiter"]["limit_mib"] == 256
+    assert collector["exporters"]["prometheus"]["endpoint"] == "0.0.0.0:9464"
+    assert collector["service"]["pipelines"]["metrics"]["exporters"] == [
+        "debug",
+        "prometheus",
+    ]
+    assert any("CV_OTEL_METRICS_HOST_PORT" in port for port in services["otel-collector"]["ports"])
+    for pipeline in ("traces", "metrics"):
+        assert collector["service"]["pipelines"][pipeline]["processors"] == [
+            "memory_limiter",
+            "batch",
+        ]
+
+
 def _clamav_test_override_services() -> dict[str, object]:
     compose = yaml.safe_load(
         (_REPOSITORY_ROOT / "infra/compose/docker-compose.clamav-test.yml").read_text(
@@ -344,7 +368,7 @@ def test_compose_scheduler_uses_the_shared_authenticated_rabbitmq_boundary() -> 
     assert services["rabbitmq"]["environment"]["RABBITMQ_DEFAULT_PASS"] == (
         "${CV_RABBITMQ_PASSWORD:-commercevision}"
     )
-    for service_name in ("api", "worker", "scheduler"):
+    for service_name in ("worker", "scheduler"):
         assert services[service_name]["environment"]["CV_RABBITMQ_URL"] == rabbitmq_url
 
     scheduler = services["scheduler"]
@@ -355,6 +379,14 @@ def test_compose_scheduler_uses_the_shared_authenticated_rabbitmq_boundary() -> 
 
     example_environment = (_REPOSITORY_ROOT / ".env.example").read_text(encoding="utf-8")
     assert "CV_RABBITMQ_PASSWORD=commercevision" in example_environment
+
+
+def test_compose_api_readiness_has_only_control_plane_runtime_dependencies() -> None:
+    service = _compose_services()["api"]
+    assert "CV_REDIS_URL" not in service["environment"]
+    assert "CV_RABBITMQ_URL" not in service["environment"]
+    assert "redis" not in service["depends_on"]
+    assert "rabbitmq" not in service["depends_on"]
 
 
 def test_compose_mcp_has_authenticated_dependencies_and_readiness() -> None:

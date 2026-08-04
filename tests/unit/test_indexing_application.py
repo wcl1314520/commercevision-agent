@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -244,13 +245,64 @@ def _executor(
     authority: _Authority,
     vectors: _Vectors,
     embedding: _Embedding | None = None,
+    observer=None,
 ) -> ImageIndexingExecutor:
     return ImageIndexingExecutor(
         authority=authority,
         references=_References(),
         embedding=embedding or _Embedding(),
         vectors=vectors,
+        observer=observer,
     )
+
+
+class _IndexObserver:
+    def __init__(self) -> None:
+        self.steps: list[str] = []
+        self.provider_results: list[dict[str, object]] = []
+        self.completions: list[dict[str, object]] = []
+
+    @contextmanager
+    def span(self, *, step, request, target=None):
+        assert request.kind is OperationKind.ASSET_INDEXING
+        self.steps.append(step)
+        yield
+
+    def provider_result(self, **values):
+        self.provider_results.append(values)
+
+    def completed(self, **values):
+        self.completions.append(values)
+
+
+def test_image_index_observer_covers_provider_milvus_and_commit_boundaries() -> None:
+    request = _request()
+    authority = _Authority(_target(request))
+    observer = _IndexObserver()
+
+    result = _executor(authority, _Vectors(), observer=observer).execute(request)
+
+    assert result.operation_id == request.operation_id
+    assert observer.steps == [
+        "collection",
+        "rights",
+        "temporary_reference",
+        "embedding",
+        "milvus_upsert",
+        "commit",
+    ]
+    assert observer.provider_results == [
+        {
+            "request": request,
+            "target": authority.target,
+            "outcome": "succeeded",
+            "latency_ms": 1,
+            "provider_request_id": "provider-request-1",
+        }
+    ]
+    assert observer.completions == [
+        {"request": request, "target": authority.target, "outcome": "indexed"}
+    ]
 
 
 def test_milvus_upsert_boundary_timeout_enters_reconciliation_without_resubmission() -> None:

@@ -144,9 +144,7 @@ def test_production_scheduler_scanners_isolate_real_transactions_and_rollback(
         with SqlAlchemyUnitOfWork(runtime.database.session_factory) as uow:
             rollback_markers = uow.outbox.list_for_aggregate("scheduler-rollback-marker")
         assert rollback_markers == []
-        assert runtime.orchestrator.statuses["workflow_recovery"].last_error == (
-            "RuntimeError: workflow recovery transaction failed"
-        )
+        assert runtime.orchestrator.statuses["workflow_recovery"].last_error == "RuntimeError"
         assert runtime.orchestrator.statuses["operation_recovery"].last_error is None
         assert runtime.orchestrator.statuses["operation_recovery"].last_count == 1
     finally:

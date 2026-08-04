@@ -20,7 +20,7 @@ def test_scheduler_readiness_exposes_independent_scanner_status() -> None:
     with TestClient(create_app()) as client:
         response = client.get("/health/ready")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     assert set(response.json()["scanners"]) == {
         "outbox_dispatch",
         "workflow_recovery",
@@ -33,6 +33,9 @@ def test_scheduler_readiness_exposes_independent_scanner_status() -> None:
     assert response.json()["expired_uploads_total"] == 0
     assert response.json()["expired_rights_total"] == 0
     assert response.json()["activated_rights_total"] == 0
+    assert all(
+        scanner["last_success_at"] is None for scanner in response.json()["scanners"].values()
+    )
     assert set(response.json()["scanners"]["operation_recovery"]) == {
         "last_started_at",
         "last_success_at",

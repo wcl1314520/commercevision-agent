@@ -1,5 +1,6 @@
 """Administrator routes for safe Milvus Collection rebuilds."""
 
+from contextlib import AbstractContextManager
 from typing import Annotated
 
 from commercevision_contracts import (
@@ -9,6 +10,12 @@ from commercevision_contracts import (
     ErrorResponse,
 )
 from commercevision_domain import AuthenticationError, canonicalize_uuid
+from commercevision_observability import (
+    Phase2Span,
+    Phase2Telemetry,
+    TelemetryDimensions,
+    TelemetryIdentity,
+)
 from fastapi import APIRouter, Header, Path, Request, status
 from pydantic import AfterValidator
 
@@ -51,6 +58,27 @@ ERRORS = {
 }
 
 
+def _rebuild_span(
+    request: Request,
+    *,
+    workspace_id: str,
+    phase: str,
+    rebuild_id: str | None = None,
+    version: int | None = None,
+) -> AbstractContextManager[None]:
+    telemetry = getattr(request.app.state, "telemetry", None) or Phase2Telemetry()
+    return telemetry.span(
+        Phase2Span.REBUILD_BATCH,
+        identity=TelemetryIdentity(
+            trace_id=request.state.trace_id,
+            workspace_id=workspace_id,
+            target_id=rebuild_id,
+            target_version=version,
+        ),
+        dimensions=TelemetryDimensions(phase=phase),
+    )
+
+
 def _require_admin(
     request: Request,
     *,
@@ -88,12 +116,13 @@ def request_rebuild(
         trusted_principal=trusted_principal,
         actor_id=actor_id,
     )
-    return request.app.state.container.collection_rebuilds.request(
-        workspace_id=workspace_id,
-        idempotency_key=idempotency_key,
-        trace_id=request.state.trace_id,
-        request=payload,
-    )
+    with _rebuild_span(request, workspace_id=workspace_id, phase="request"):
+        return request.app.state.container.collection_rebuilds.request(
+            workspace_id=workspace_id,
+            idempotency_key=idempotency_key,
+            trace_id=request.state.trace_id,
+            request=payload,
+        )
 
 
 @router.get("/{rebuild_id}", response_model=CollectionRebuildResponseV1, responses=ERRORS)
@@ -134,12 +163,19 @@ def validate_rebuild(
         trusted_principal=trusted_principal,
         actor_id=actor_id,
     )
-    return request.app.state.container.collection_rebuilds.request_validation(
+    with _rebuild_span(
+        request,
         workspace_id=workspace_id,
+        phase="validate",
         rebuild_id=rebuild_id,
-        expected_version=payload.expected_version,
-        trace_id=request.state.trace_id,
-    )
+        version=payload.expected_version,
+    ):
+        return request.app.state.container.collection_rebuilds.request_validation(
+            workspace_id=workspace_id,
+            rebuild_id=rebuild_id,
+            expected_version=payload.expected_version,
+            trace_id=request.state.trace_id,
+        )
 
 
 @router.post(
@@ -161,9 +197,16 @@ def activate_rebuild(
         trusted_principal=trusted_principal,
         actor_id=actor_id,
     )
-    return request.app.state.container.collection_rebuilds.activate(
+    with _rebuild_span(
+        request,
         workspace_id=workspace_id,
+        phase="activate",
         rebuild_id=rebuild_id,
-        expected_version=payload.expected_version,
-        trace_id=request.state.trace_id,
-    )
+        version=payload.expected_version,
+    ):
+        return request.app.state.container.collection_rebuilds.activate(
+            workspace_id=workspace_id,
+            rebuild_id=rebuild_id,
+            expected_version=payload.expected_version,
+            trace_id=request.state.trace_id,
+        )

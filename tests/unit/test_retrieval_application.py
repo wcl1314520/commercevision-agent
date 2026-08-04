@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
@@ -265,3 +266,69 @@ def test_reranker_failure_is_an_explicit_degradation_and_preserves_fusion_order(
     assert response.complete_hybrid is False
     assert [degradation.code for degradation in response.degradations] == ["RERANKER_UNAVAILABLE"]
     assert [citation.asset_version_id for citation in response.citations] == [VERSION_B]
+
+
+class _Observer:
+    def __init__(self) -> None:
+        self.steps: list[tuple[str, str | None]] = []
+        self.degradations: list[tuple[str, str]] = []
+        self.result: dict[str, object] | None = None
+        self.providers: list[dict[str, object]] = []
+
+    @contextmanager
+    def span(self, *, step, workspace_id, policy_id, component=None):
+        assert workspace_id == "workspace-retrieval"
+        assert policy_id == "retrieval-policy-v1"
+        self.steps.append((step, component))
+        yield
+
+    def degraded(self, *, component, code):
+        self.degradations.append((component, code))
+
+    def provider_result(self, **result):
+        self.providers.append(result)
+
+    def completed(self, **result):
+        self.result = result
+
+
+def test_retrieval_observer_covers_rights_recall_fusion_rerank_and_degradation() -> None:
+    observer = _Observer()
+    lexical = _Source(
+        RetrievalChannel.LEXICAL,
+        (
+            RetrievalRecallHit(asset_version_id=VERSION_B, raw_score=3.0),
+            RetrievalRecallHit(asset_version_id=VERSION_A, raw_score=2.0),
+        ),
+    )
+    service = RetrievalApplicationService(
+        authority=_Authority(),
+        sources=(_UnavailableDenseSource(), lexical),
+        policy=_policy(),
+        reranker=_UnavailableReranker(),
+        observer=observer,
+    )
+
+    response = service.execute(_query())
+
+    assert observer.steps == [
+        ("request", None),
+        ("initial_rights", None),
+        ("source_recall", "PRODUCT_FUSED_DENSE"),
+        ("lexical_search", "LEXICAL"),
+        ("fusion", None),
+        ("rerank", None),
+        ("final_rights", None),
+    ]
+    assert observer.degradations == [
+        ("PRODUCT_FUSED_DENSE", "MILVUS_UNAVAILABLE"),
+        ("RERANKER", "RERANKER_UNAVAILABLE"),
+    ]
+    assert observer.result == {
+        "outcome": "degraded",
+        "latency_ms": response.latency_ms,
+        "eligible_candidates": 3,
+        "fused_candidates": 2,
+        "authorized_candidates": 1,
+        "unauthorized_results": 1,
+    }

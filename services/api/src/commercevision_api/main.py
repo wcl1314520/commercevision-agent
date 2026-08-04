@@ -6,7 +6,15 @@ import uvicorn
 from commercevision_contracts import HealthResponse, ServiceMetadata, Settings
 from commercevision_contracts.config import load_settings
 from commercevision_domain import StorageLocationClass, new_uuid7
-from commercevision_observability import configure_logging, get_logger
+from commercevision_observability import (
+    Phase2Span,
+    Phase2Telemetry,
+    TelemetryDimensions,
+    TelemetryIdentity,
+    configure_logging,
+    configure_telemetry,
+    get_logger,
+)
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -30,6 +38,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         configure_logging(runtime_settings.log_level)
+        telemetry_runtime = configure_telemetry(
+            service_name=runtime_settings.service_name,
+            service_version=runtime_settings.version,
+            environment=runtime_settings.environment,
+        )
+        api.state.telemetry = (
+            telemetry_runtime.phase2() if telemetry_runtime is not None else Phase2Telemetry()
+        )
         logger = get_logger("commercevision.api")
         container = ApiContainer.build(
             runtime_settings,
@@ -46,6 +62,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             container.close()
+            if telemetry_runtime is not None:
+                telemetry_runtime.shutdown()
             logger.info("service_stopped", service=runtime_settings.service_name)
 
     api = FastAPI(
@@ -73,7 +91,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         trace_id = request.headers.get("X-Trace-Id") or request_id
         request.state.request_id = request_id
         request.state.trace_id = trace_id
-        response = await call_next(request)
+        telemetry: Phase2Telemetry | None = getattr(api.state, "telemetry", None)
+        telemetry = telemetry or Phase2Telemetry()
+        with telemetry.span(
+            Phase2Span.HTTP_REQUEST,
+            identity=TelemetryIdentity(
+                trace_id=trace_id,
+                workspace_id=request.headers.get("X-Workspace-Id"),
+            ),
+            dimensions=TelemetryDimensions(component=request.method.lower()),
+        ):
+            response = await call_next(request)
         response.headers["X-Request-Id"] = request_id
         response.headers["X-Trace-Id"] = trace_id
         return response

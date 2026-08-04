@@ -16,7 +16,7 @@ from commercevision_contracts.events import (
     AssetRightsChangedPayload,
     ProductBriefConfirmedPayload,
 )
-from commercevision_domain import OperationKind
+from commercevision_domain import OperationKind, OperationState
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 from commercevision_persistence import ImageIndexNotApplicable
 from commercevision_worker import image_indexing as image_indexing_module
@@ -391,13 +391,22 @@ def test_asset_index_router_validates_operation_embedding_and_asset_identities(
             return True
 
     calls: list[tuple[str, str]] = []
+
+    def execute(*, workspace_id: str, operation_id: str) -> SimpleNamespace:
+        calls.append((workspace_id, operation_id))
+        return SimpleNamespace(
+            state=OperationState.SUCCEEDED,
+            dead_letter_id=None,
+            last_attempt_at=datetime(2026, 7, 31, tzinfo=UTC),
+            kind=OperationKind.ASSET_INDEXING,
+            attempt_count=1,
+        )
+
     monkeypatch.setattr(runtime_module, "SqlAlchemyOperationUnitOfWork", Uow)
     runtime = _runtime(
         database=SimpleNamespace(session_factory=object()),
         image_index_authority=Authority(),
-        operation_worker=SimpleNamespace(
-            execute=lambda *, workspace_id, operation_id: calls.append((workspace_id, operation_id))
-        ),
+        operation_worker=SimpleNamespace(execute=execute),
     )
     event = _event(ASSET_INDEX_REQUESTED_V1, payload, aggregate_id=RECORD_ID)
     event = replace(

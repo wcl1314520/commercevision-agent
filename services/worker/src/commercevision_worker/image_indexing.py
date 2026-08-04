@@ -9,6 +9,7 @@ from commercevision_application import ImageIndexDataTransferPolicy, ImageIndexi
 from commercevision_contracts import Settings
 from commercevision_contracts.object_storage import ObjectStorage
 from commercevision_domain import CollectionSpec, VectorKind
+from commercevision_observability import IndexingTelemetry
 from commercevision_persistence import (
     Database,
     MySqlExactImageReference,
@@ -204,6 +205,7 @@ def build_image_indexing(
             if settings.embedding_adapter == "alibaba"
             else None
         ),
+        observer=IndexingTelemetry(),
     )
     closeables = (embedding, vectors) if callable(getattr(embedding, "close", None)) else (vectors,)
     return BuiltImageIndexing(

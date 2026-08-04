@@ -29,7 +29,15 @@ from commercevision_domain import (
     NotFoundError,
     StorageUnavailableError,
 )
-from commercevision_observability import configure_logging, get_logger
+from commercevision_observability import (
+    Phase2Span,
+    Phase2Telemetry,
+    TelemetryDimensions,
+    TelemetryIdentity,
+    configure_logging,
+    configure_telemetry,
+    get_logger,
+)
 from commercevision_tool_runtime import ToolExecutionError, ToolPolicyError, ToolRegistryError
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -73,7 +81,12 @@ def create_server(
     *,
     container_factory: Callable[[Settings], McpContainer] = McpContainer.build,
 ) -> tuple[FastMCP, dict[str, Any]]:
-    holder: dict[str, Any] = {"container": None, "gateway": None, "http_app": None}
+    holder: dict[str, Any] = {
+        "container": None,
+        "gateway": None,
+        "http_app": None,
+        "telemetry": Phase2Telemetry(),
+    }
     keys: dict[str, str] = {}
     if settings.trusted_principal_current_key_id and settings.trusted_principal_current_hmac_secret:
         keys[settings.trusted_principal_current_key_id] = (
@@ -110,7 +123,13 @@ def create_server(
             raise ToolError('{"code":"SERVICE_UNAVAILABLE","retryable":true}')
         try:
             identity = identity_from_request(ctx.request_context.request, identity_resolver)
-            return gateway.execute(name, arguments, identity=identity)
+            telemetry: Phase2Telemetry = holder["telemetry"]
+            with telemetry.span(
+                Phase2Span.MCP_TOOL,
+                identity=TelemetryIdentity(workspace_id=identity.workspace_id),
+                dimensions=TelemetryDimensions(component=name.replace(".", "_")),
+            ):
+                return gateway.execute(name, arguments, identity=identity)
         except Exception as exc:
             raise _public_error(exc) from exc
 
@@ -284,6 +303,14 @@ def create_server(
 
     @asynccontextmanager
     async def application_lifespan(starlette_app):
+        telemetry_runtime = configure_telemetry(
+            service_name=settings.service_name,
+            service_version=settings.version,
+            environment=settings.environment,
+        )
+        holder["telemetry"] = (
+            telemetry_runtime.phase2() if telemetry_runtime is not None else Phase2Telemetry()
+        )
         container = container_factory(settings)
         holder["container"] = container
         try:
@@ -299,6 +326,8 @@ def create_server(
             holder["gateway"] = None
             holder["container"] = None
             container.close()
+            if telemetry_runtime is not None:
+                telemetry_runtime.shutdown()
 
     http_app.router.lifespan_context = application_lifespan
     holder["http_app"] = http_app

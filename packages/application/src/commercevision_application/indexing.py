@@ -29,6 +29,7 @@ from commercevision_domain import (
     generation_milvus_primary_key,
 )
 
+from .indexing_observability import IndexingObserver, NullIndexingObserver
 from .indexing_transfer import ImageIndexDataTransferDenied, ImageIndexDataTransferPolicy
 from .operations import (
     OperationExecutionFailure,
@@ -229,6 +230,7 @@ class ImageIndexingExecutor:
         transfer_policy: ImageIndexDataTransferPolicy | None = None,
         external_endpoint_region: str | None = None,
         external_endpoint_host: str | None = None,
+        observer: IndexingObserver | None = None,
     ) -> None:
         self._authority = authority
         self._references = references
@@ -237,6 +239,7 @@ class ImageIndexingExecutor:
         self._transfer_policy = transfer_policy
         self._external_endpoint_region = external_endpoint_region
         self._external_endpoint_host = external_endpoint_host
+        self._observer = observer or NullIndexingObserver()
 
     def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
         self._validate_request(request)
@@ -252,7 +255,8 @@ class ImageIndexingExecutor:
         if failure is not None:
             raise failure
 
-        collection_failure = self._prepare_collection_safely(target)
+        with self._observer.span(step="collection", request=request, target=target):
+            collection_failure = self._prepare_collection_safely(target)
         if collection_failure is not None:
             raise OperationExecutionFailure(collection_failure)
 
@@ -267,15 +271,23 @@ class ImageIndexingExecutor:
         if failure is not None:
             raise failure
 
-        transfer_failure = self._authorize_transfer(target)
+        with self._observer.span(step="rights", request=request, target=target):
+            transfer_failure = self._authorize_transfer(target)
         if transfer_failure is not None:
             self._authority.record_failure(target, retryable=False)
             raise OperationExecutionFailure(transfer_failure)
 
         result, provider_failure, retry_after_seconds, outcome_unknown = (
-            self._request_embedding_safely(target)
+            self._request_embedding_safely(request, target)
         )
         if provider_failure is not None:
+            self._observer.provider_result(
+                request=request,
+                target=target,
+                outcome=("throttled" if provider_failure.category == "THROTTLED" else "failed"),
+                latency_ms=0,
+                provider_request_id=provider_failure.provider_request_id,
+            )
             if outcome_unknown:
                 raise UnknownOperationOutcome(provider_failure)
             self._authority.record_failure(target, retryable=provider_failure.retryable)
@@ -298,7 +310,16 @@ class ImageIndexingExecutor:
             self._authority.record_failure(target, retryable=failure.error.retryable)
             raise failure
 
-        vector_failure, vector_outcome_unknown = self._write_vector_safely(target, result)
+        self._observer.provider_result(
+            request=request,
+            target=target,
+            outcome="succeeded",
+            latency_ms=result.latency_ms,
+            provider_request_id=result.provider_request_id,
+        )
+
+        with self._observer.span(step="milvus_upsert", request=request, target=target):
+            vector_failure, vector_outcome_unknown = self._write_vector_safely(target, result)
         if vector_failure is not None:
             if vector_outcome_unknown:
                 raise UnknownOperationOutcome(vector_failure)
@@ -306,7 +327,8 @@ class ImageIndexingExecutor:
             raise OperationExecutionFailure(vector_failure)
 
         try:
-            decision = self._authority.commit_after_upsert(target)
+            with self._observer.span(step="commit", request=request, target=target):
+                decision = self._authority.commit_after_upsert(target)
         except (TimeoutError, ConnectionError):
             failure = NormalizedOperationError(
                 code="INDEX_COMMIT_OUTCOME_UNKNOWN",
@@ -326,6 +348,11 @@ class ImageIndexingExecutor:
                 raise UnknownOperationOutcome(failure)
             self._authority.record_failure(target, retryable=failure.retryable)
             raise OperationExecutionFailure(failure)
+        self._observer.completed(
+            request=request,
+            target=target,
+            outcome="indexed" if decision.indexed else "stale",
+        )
         return OperationExecutionResult(
             operation_id=request.operation_id,
             output_ref=(
@@ -387,6 +414,7 @@ class ImageIndexingExecutor:
 
     def _request_embedding_safely(
         self,
+        request: OperationExecutionRequest,
         target: ImageIndexingTarget,
     ) -> tuple[
         EmbeddingProviderResultV1 | None,
@@ -396,8 +424,14 @@ class ImageIndexingExecutor:
     ]:
         """Contain provider/reference exception graphs before returning to orchestration."""
         try:
-            provider_request = self._provider_request(target)
-            result = self._embedding.embed(provider_request)
+            with self._observer.span(
+                step="temporary_reference",
+                request=request,
+                target=target,
+            ):
+                provider_request = self._provider_request(target)
+            with self._observer.span(step="embedding", request=request, target=target):
+                result = self._embedding.embed(provider_request)
             result.validate_for(provider_request)
             return result, None, None, False
         except EmbeddingProviderFailure as exc:
@@ -440,6 +474,13 @@ class ImageIndexingExecutor:
         self,
         request: OperationExecutionRequest,
     ) -> OperationReconciliationResult:
+        with self._observer.span(step="reconcile", request=request):
+            return self._reconcile(request)
+
+    def _reconcile(
+        self,
+        request: OperationExecutionRequest,
+    ) -> OperationReconciliationResult:
         self._validate_request(request)
         target: ImageIndexingTarget | None = None
         try:
@@ -457,7 +498,8 @@ class ImageIndexingExecutor:
                 )
             target = self._authority.load_for_reconciliation(request)
             identity = self._identity(target)
-            proof = self._vectors.prove(identity)
+            with self._observer.span(step="milvus_proof", request=request, target=target):
+                proof = self._vectors.prove(identity)
             if not proof.exists:
                 self._authority.record_failure(target, retryable=True)
                 return OperationReconciliationResult(

@@ -8,6 +8,7 @@ dependencies = [
   "commercevision-contracts",
   "commercevision-domain",
   "commercevision-object-storage",
+  "commercevision-observability",
   "commercevision-persistence",
   "commercevision-providers",
   "commercevision-retrieval",
@@ -18,6 +19,7 @@ commercevision-application = { workspace = true }
 commercevision-contracts = { workspace = true }
 commercevision-domain = { workspace = true }
 commercevision-object-storage = { workspace = true }
+commercevision-observability = { workspace = true }
 commercevision-persistence = { workspace = true }
 commercevision-providers = { workspace = true }
 commercevision-retrieval = { workspace = true }

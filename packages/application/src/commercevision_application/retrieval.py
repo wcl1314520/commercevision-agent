@@ -39,6 +39,7 @@ from commercevision_domain import (
 )
 
 from .indexing_transfer import ImageIndexDataTransferDenied
+from .retrieval_observability import NullRetrievalObserver, RetrievalObserver
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,9 +200,11 @@ class ProviderDenseQueryVectorService:
         *,
         embedding: RetrievalEmbeddingProvider,
         image_references: RetrievalQueryImageReference | None = None,
+        observer: RetrievalObserver | None = None,
     ) -> None:
         self._embedding = embedding
         self._image_references = image_references
+        self._observer = observer or NullRetrievalObserver()
 
     def embed_query(
         self,
@@ -213,7 +216,13 @@ class ProviderDenseQueryVectorService:
         if query.query_image_asset_version_id is not None:
             if self._image_references is None:
                 raise ValueError("retrieval query image reference service is not configured")
-            image = self._image_references.temporary_input(query, provider=target.provider)
+            with self._observer.span(
+                step="temporary_reference",
+                workspace_id=query.workspace_id,
+                policy_id=query.retrieval_policy_version,
+                component=target.provider,
+            ):
+                image = self._image_references.temporary_input(query, provider=target.provider)
             if image.asset_version_id != query.query_image_asset_version_id:
                 raise ValueError("retrieval query image reference identity changed")
             images.append(image)
@@ -256,8 +265,33 @@ class ProviderDenseQueryVectorService:
             images=images,
             controlled_text=controlled_text,
         )
-        result = self._embedding.embed(request)
-        result.validate_for(request)
+        with self._observer.span(
+            step="embedding",
+            workspace_id=query.workspace_id,
+            policy_id=query.retrieval_policy_version,
+            component=target.provider,
+        ):
+            try:
+                result = self._embedding.embed(request)
+                result.validate_for(request)
+            except EmbeddingProviderFailure as exc:
+                self._observer.provider_result(
+                    workspace_id=query.workspace_id,
+                    policy_id=query.retrieval_policy_version,
+                    provider=target.provider,
+                    outcome=("throttled" if exc.error.category == "THROTTLED" else "failed"),
+                    latency_ms=0,
+                    provider_request_id=exc.error.provider_request_id,
+                )
+                raise
+            self._observer.provider_result(
+                workspace_id=query.workspace_id,
+                policy_id=query.retrieval_policy_version,
+                provider=target.provider,
+                outcome="succeeded",
+                latency_ms=result.latency_ms,
+                provider_request_id=result.provider_request_id,
+            )
         return tuple(result.vectors[0].values)
 
 
@@ -302,6 +336,7 @@ class DenseRetrievalSource:
         catalog: DenseRetrievalCatalog,
         query_vectors: DenseQueryVectorProvider,
         search: DenseAnnSearch,
+        observer: RetrievalObserver | None = None,
     ) -> None:
         if vector_kind not in {VectorKind.IMAGE, VectorKind.PRODUCT_FUSED}:
             raise ValueError("dense retrieval vector kind is unsupported")
@@ -309,6 +344,7 @@ class DenseRetrievalSource:
         self._catalog = catalog
         self._query_vectors = query_vectors
         self._search = search
+        self._observer = observer or NullRetrievalObserver()
         self.channel = (
             RetrievalChannel.IMAGE_DENSE
             if vector_kind is VectorKind.IMAGE
@@ -347,14 +383,20 @@ class DenseRetrievalSource:
             query_vector = tuple(self._query_vectors.embed_query(query, target=target))
             if len(query_vector) != target.dimension:
                 raise ValueError("query vector dimension does not match the active collection")
-            hits = self._search.search(
-                collection_name=target.collection_name,
+            with self._observer.span(
+                step="milvus_search",
                 workspace_id=query.workspace_id,
-                vector_kind=self._vector_kind,
-                eligible_embedding_record_ids=tuple(candidate_by_embedding),
-                query_vector=query_vector,
-                limit=min(limit, 100, len(candidate_by_embedding)),
-            )
+                policy_id=query.retrieval_policy_version,
+                component=self.channel.value,
+            ):
+                hits = self._search.search(
+                    collection_name=target.collection_name,
+                    workspace_id=query.workspace_id,
+                    vector_kind=self._vector_kind,
+                    eligible_embedding_record_ids=tuple(candidate_by_embedding),
+                    query_vector=query_vector,
+                    limit=min(limit, 100, len(candidate_by_embedding)),
+                )
         except RetrievalQueryImageUnavailable as exc:
             raise RetrievalSourceUnavailable(
                 channel=self.channel,
@@ -468,6 +510,7 @@ class RetrievalApplicationService:
         sources: Sequence[RetrievalSource],
         policy: RetrievalPolicy,
         reranker: RetrievalReranker | None = None,
+        observer: RetrievalObserver | None = None,
     ) -> None:
         source_channels = [source.channel for source in sources]
         if len(set(source_channels)) != len(source_channels):
@@ -476,12 +519,50 @@ class RetrievalApplicationService:
         self._sources = tuple(sources)
         self._policy = policy
         self._reranker = reranker
+        self._observer = observer or NullRetrievalObserver()
 
     def execute(self, query: RetrievalQueryV1) -> RetrievalResponseV1:
         started_ns = time.perf_counter_ns()
+        try:
+            with self._observer.span(
+                step="request",
+                workspace_id=query.workspace_id,
+                policy_id=query.retrieval_policy_version,
+            ):
+                response = self._execute(query)
+        except Exception:
+            self._observer.completed(
+                outcome="failed",
+                latency_ms=self._elapsed_ms(started_ns),
+                eligible_candidates=0,
+                fused_candidates=0,
+                authorized_candidates=0,
+                unauthorized_results=0,
+            )
+            raise
+        self._observer.completed(
+            outcome="succeeded" if response.complete_hybrid else "degraded",
+            latency_ms=response.latency_ms,
+            eligible_candidates=response.eligible_asset_version_count,
+            fused_candidates=response.fused_candidate_count,
+            authorized_candidates=response.final_authorized_candidate_count,
+            unauthorized_results=max(
+                0,
+                response.fused_candidate_count - response.final_authorized_candidate_count,
+            ),
+        )
+        return response
+
+    def _execute(self, query: RetrievalQueryV1) -> RetrievalResponseV1:
+        started_ns = time.perf_counter_ns()
         if query.retrieval_policy_version != self._policy.version:
             raise ValueError("requested Retrieval Policy version is not active")
-        initial = self._authority.eligible_asset_versions(query)
+        with self._observer.span(
+            step="initial_rights",
+            workspace_id=query.workspace_id,
+            policy_id=query.retrieval_policy_version,
+        ):
+            initial = self._authority.eligible_asset_versions(query)
         eligible_by_id = {item.asset_version_id: item for item in initial.items}
         if not eligible_by_id:
             return RetrievalResponseV1(
@@ -502,11 +583,22 @@ class RetrievalApplicationService:
         for source in self._sources:
             attempted_channels.add(source.channel)
             try:
-                batch = source.recall(
-                    query,
-                    eligible_asset_version_ids=eligible_ids,
-                    limit=min(query.candidate_limit, len(eligible_ids)),
+                observation_step = (
+                    "lexical_search"
+                    if source.channel is RetrievalChannel.LEXICAL
+                    else "source_recall"
                 )
+                with self._observer.span(
+                    step=observation_step,
+                    workspace_id=query.workspace_id,
+                    policy_id=query.retrieval_policy_version,
+                    component=source.channel.value,
+                ):
+                    batch = source.recall(
+                        query,
+                        eligible_asset_version_ids=eligible_ids,
+                        limit=min(query.candidate_limit, len(eligible_ids)),
+                    )
             except RetrievalSourceUnavailable as exc:
                 if exc.channel is not source.channel:
                     raise RuntimeError(
@@ -519,6 +611,7 @@ class RetrievalApplicationService:
                         message=exc.safe_message,
                     )
                 )
+                self._observer.degraded(component=source.channel.value, code=exc.code)
                 continue
             except ValueError as exc:
                 raise RuntimeError("retrieval source returned invalid evidence") from exc
@@ -543,7 +636,12 @@ class RetrievalApplicationService:
         }
         if expected_dense - attempted_channels:
             raise RuntimeError("requested dense retrieval channel is not configured")
-        fused = reciprocal_rank_fuse(rankings=rankings, policy=self._policy)
+        with self._observer.span(
+            step="fusion",
+            workspace_id=query.workspace_id,
+            policy_id=query.retrieval_policy_version,
+        ):
+            fused = reciprocal_rank_fuse(rankings=rankings, policy=self._policy)
         fused_by_id = {candidate.asset_version_id: candidate for candidate in fused}
         deduplicated = deduplicate_retrieval_candidates(
             tuple(
@@ -565,28 +663,42 @@ class RetrievalApplicationService:
         candidate_ids = tuple(candidate.asset_version_id for candidate in bounded)
         rerank_positions: dict[str, int] = {}
         if self._reranker is not None and candidate_ids:
-            try:
-                candidate_ids = apply_bounded_rerank(
-                    candidate_ids,
-                    self._reranker.rerank(query, candidate_ids=candidate_ids),
-                )
-                rerank_positions = {
-                    candidate_id: position
-                    for position, candidate_id in enumerate(candidate_ids, start=1)
-                }
-            except (RetrievalRerankerUnavailable, ValueError):
-                degradations.append(
-                    RetrievalDegradationV1(
+            with self._observer.span(
+                step="rerank",
+                workspace_id=query.workspace_id,
+                policy_id=query.retrieval_policy_version,
+            ):
+                try:
+                    candidate_ids = apply_bounded_rerank(
+                        candidate_ids,
+                        self._reranker.rerank(query, candidate_ids=candidate_ids),
+                    )
+                    rerank_positions = {
+                        candidate_id: position
+                        for position, candidate_id in enumerate(candidate_ids, start=1)
+                    }
+                except (RetrievalRerankerUnavailable, ValueError):
+                    degradations.append(
+                        RetrievalDegradationV1(
+                            component="RERANKER",
+                            code="RERANKER_UNAVAILABLE",
+                            message="reranker unavailable; preserving versioned fusion order",
+                        )
+                    )
+                    self._observer.degraded(
                         component="RERANKER",
                         code="RERANKER_UNAVAILABLE",
-                        message="reranker unavailable; preserving versioned fusion order",
                     )
-                )
         try:
-            final = self._authority.revalidate_asset_versions(
-                query,
-                asset_version_ids=candidate_ids,
-            )
+            with self._observer.span(
+                step="final_rights",
+                workspace_id=query.workspace_id,
+                policy_id=query.retrieval_policy_version,
+            ):
+                final = self._authority.revalidate_asset_versions(
+                    query,
+                    asset_version_ids=candidate_ids,
+                )
         except ValueError as exc:
             raise RuntimeError("final retrieval authority rejected its candidate set") from exc
         final_by_id = {item.asset_version_id: item for item in final.items}

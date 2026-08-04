@@ -5,6 +5,7 @@ from threading import Event
 from commercevision_scheduler.runtime import (
     IndependentScannerOrchestrator,
     ScannerDefinition,
+    SchedulerState,
 )
 
 
@@ -42,7 +43,7 @@ def test_scanner_exception_does_not_stop_other_scanners() -> None:
     settle(orchestrator)
 
     assert set(calls) == {"failing", "healthy"}
-    assert orchestrator.statuses["failing"].last_error == "RuntimeError: scanner failed"
+    assert orchestrator.statuses["failing"].last_error == "RuntimeError"
     assert orchestrator.statuses["healthy"].last_success_at == wall_time
     assert orchestrator.statuses["healthy"].last_count == 7
     assert orchestrator.statuses["healthy"].total_count == 7
@@ -111,9 +112,7 @@ def test_hung_scanner_times_out_without_blocking_other_due_scanners() -> None:
     assert elapsed < 0.25
     assert orchestrator.statuses["healthy"].last_count == 4
     assert orchestrator.statuses["healthy"].last_success_at is not None
-    assert orchestrator.statuses["hung"].last_error == (
-        "TimeoutError: scanner exceeded 0.050 seconds"
-    )
+    assert orchestrator.statuses["hung"].last_error == "TimeoutError"
     assert orchestrator.statuses["hung"].timeout_count == 1
     assert orchestrator.statuses["hung"].in_progress is True
     current_tick = 110.0
@@ -128,3 +127,22 @@ def test_hung_scanner_times_out_without_blocking_other_due_scanners() -> None:
     assert healthy_calls == 2
     assert orchestrator.statuses["healthy"].total_count == 8
     release.set()
+
+
+def test_scheduler_readiness_requires_one_success_from_every_required_scanner() -> None:
+    orchestrator = IndependentScannerOrchestrator(
+        scanners=(
+            ScannerDefinition("outbox", 10, lambda: 0),
+            ScannerDefinition("retention", 10, lambda: 0),
+        ),
+        monotonic_clock=lambda: 100.0,
+    )
+    state = SchedulerState(scanners=orchestrator.statuses)
+    assert state.ready is False
+
+    orchestrator.run_due()
+    settle(orchestrator)
+
+    assert state.ready is True
+    orchestrator.statuses["retention"].last_error = "ConnectionError"
+    assert state.ready is False

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -10,6 +11,7 @@ from commercevision_application import (
 )
 from commercevision_application.asset_deletion import AssetDeletionConvergenceResult
 from commercevision_domain import OperationKind, ReconciliationOutcome
+from commercevision_observability import Phase2Span
 from commercevision_worker.asset_deletion import AssetDeletionExecutor
 
 NOW = datetime(2026, 8, 4, 2, 0, tzinfo=UTC)
@@ -27,6 +29,20 @@ class RecordingCoordinator:
         return AssetDeletionConvergenceResult(
             output_ref=f"mysql://assets/{request.target_id}/deletions/{request.target_version}",
         )
+
+
+class RecordingTelemetry:
+    def __init__(self) -> None:
+        self.spans: list[tuple[Phase2Span, str | None]] = []
+        self.deletions: list[tuple[int, str]] = []
+
+    @contextmanager
+    def span(self, name, *, identity=None):
+        self.spans.append((name, identity.operation_id if identity is not None else None))
+        yield
+
+    def record_deletion(self, *, backlog, outcome):
+        self.deletions.append((backlog, outcome))
 
 
 def _request() -> OperationExecutionRequest:
@@ -75,7 +91,8 @@ def test_asset_deletion_executor_normalizes_retryable_dependency_outage() -> Non
 
 def test_asset_deletion_executor_is_idempotent_across_execute_and_reconcile() -> None:
     coordinator = RecordingCoordinator()
-    executor = AssetDeletionExecutor(coordinator=coordinator)
+    telemetry = RecordingTelemetry()
+    executor = AssetDeletionExecutor(coordinator=coordinator, telemetry=telemetry)
 
     completed = executor.execute(_request())
     reconciled = executor.reconcile(_request())
@@ -84,3 +101,8 @@ def test_asset_deletion_executor_is_idempotent_across_execute_and_reconcile() ->
     assert reconciled.outcome == ReconciliationOutcome.CONFIRMED_SUCCESS
     assert reconciled.output_ref == completed.output_ref
     assert coordinator.calls == [_request().operation_id, _request().operation_id]
+    assert telemetry.spans == [
+        (Phase2Span.DELETION, _request().operation_id),
+        (Phase2Span.RECONCILIATION, _request().operation_id),
+    ]
+    assert telemetry.deletions == [(0, "completed"), (0, "confirmed_success")]

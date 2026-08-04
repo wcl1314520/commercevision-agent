@@ -37,6 +37,9 @@ x-upload-cleanup-runtime-environment: &upload-cleanup-runtime-environment
   CV_OPERATION_RECONCILIATION_MAX_SECONDS: ${CV_OPERATION_RECONCILIATION_MAX_SECONDS:-3600}
   CV_OPERATION_RECONCILIATION_MAX_ELAPSED_SECONDS: ${CV_OPERATION_RECONCILIATION_MAX_ELAPSED_SECONDS:-345600}
 
+x-otel-runtime-environment: &otel-runtime-environment
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+
 x-product-brief-policy-environment: &product-brief-policy-environment
   CV_VISION_ADAPTER: ${CV_VISION_ADAPTER:-deterministic}
   CV_DETERMINISTIC_VISION_SCENARIO: ${CV_DETERMINISTIC_VISION_SCENARIO:-success}
@@ -280,6 +283,7 @@ services:
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_GRPC_HOST_PORT:-14317}:4317"
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_HTTP_HOST_PORT:-14318}:4318"
       - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_HEALTH_HOST_PORT:-14319}:13133"
+      - "${CV_BIND_HOST:-127.0.0.1}:${CV_OTEL_METRICS_HOST_PORT:-19464}:9464"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:13133/"]
       interval: 5s
@@ -301,14 +305,12 @@ services:
       - --port
       - "8000"
     environment:
-      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment]
+      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: control-api
       CV_ENVIRONMENT: local
       CV_READINESS_PROBE_EXTERNAL: "true"
       CV_MYSQL_DSN: mysql+aiomysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
-      CV_REDIS_URL: redis://redis:6379/0
-      CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
       CV_UPLOAD_SESSION_EXPIRY_SECONDS: ${CV_UPLOAD_SESSION_EXPIRY_SECONDS:-900}
       CV_UPLOAD_FINALIZE_LEASE_SECONDS: ${CV_UPLOAD_FINALIZE_LEASE_SECONDS:-120}
       CV_UPLOAD_MAX_BYTES: ${CV_UPLOAD_MAX_BYTES:-10485760}
@@ -339,10 +341,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
       object-storage-init:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -374,7 +372,7 @@ services:
       - --loglevel=INFO
       - --concurrency=${CV_WORKER_CONCURRENCY:-2}
     environment:
-      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment]
+      <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: agent-worker
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
@@ -491,7 +489,7 @@ services:
     command:
       - commercevision-scheduler
     environment:
-      <<: *upload-cleanup-runtime-environment
+      <<: [*upload-cleanup-runtime-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: scheduler
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
@@ -532,7 +530,7 @@ services:
     command:
       - commercevision-mcp
     environment:
-      <<: *object-storage-runtime-environment
+      <<: [*object-storage-runtime-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: mcp-server
       CV_ENVIRONMENT: local
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision

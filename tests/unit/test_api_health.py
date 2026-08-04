@@ -187,8 +187,6 @@ def test_readiness_reports_dependency_failure(monkeypatch) -> None:
         del object_storage_probe
         return {
             "mysql": "ok",
-            "redis": "ok",
-            "rabbitmq": "ok",
             "object_store": "failed",
         }
 
@@ -213,8 +211,6 @@ def test_dependency_probe_uses_authenticated_object_storage_readiness(monkeypatc
         storage_probe_calls += 1
 
     monkeypatch.setattr(readiness, "_probe_mysql", healthy_dependency)
-    monkeypatch.setattr(readiness, "_probe_redis", healthy_dependency)
-    monkeypatch.setattr(readiness, "_probe_rabbitmq", healthy_dependency)
 
     checks = asyncio.run(
         readiness.probe_dependencies(
@@ -229,8 +225,6 @@ def test_dependency_probe_uses_authenticated_object_storage_readiness(monkeypatc
 
     assert checks == {
         "mysql": "ok",
-        "redis": "ok",
-        "rabbitmq": "ok",
         "object_store": "ok",
     }
     assert storage_probe_calls == 1
