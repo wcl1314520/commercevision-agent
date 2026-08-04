@@ -36,7 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger = get_logger("commercevision.scheduler")
         runtime = SchedulerRuntime(runtime_settings, telemetry=app.state.telemetry)
         app.state.runtime = runtime
-        logger.info("service_started", service=runtime_settings.service_name, phase="phase-1")
+        logger.info("service_started", service=runtime_settings.service_name, phase="phase-2")
         scheduler_task = asyncio.create_task(runtime.run())
         try:
             yield

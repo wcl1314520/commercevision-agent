@@ -47,6 +47,7 @@ from commercevision_persistence import (
     SqlAlchemyUnitOfWork,
     is_unit_of_work_active,
 )
+from commercevision_worker import image_indexing as image_indexing_module
 from commercevision_worker import runtime as worker_runtime_module
 from commercevision_worker.runtime import WorkerRuntime
 
@@ -580,10 +581,32 @@ def test_worker_runtime_registers_required_operation_executor(
         def close() -> None:
             pass
 
+    class ReadyVectorIndex:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        @staticmethod
+        def assert_ready() -> None:
+            pass
+
+        @staticmethod
+        def close() -> None:
+            pass
+
     monkeypatch.setattr(
         worker_runtime_module,
         "build_object_storage",
         lambda _settings: ReadyStorage(),
+    )
+    monkeypatch.setattr(
+        worker_runtime_module,
+        "MilvusVectorIndexAdapter",
+        ReadyVectorIndex,
+    )
+    monkeypatch.setattr(
+        image_indexing_module,
+        "MilvusVectorIndexAdapter",
+        ReadyVectorIndex,
     )
     settings = integration_settings.model_copy(
         update={"worker_required_operation_kinds": [OperationKind.ASSET_VALIDATION]}

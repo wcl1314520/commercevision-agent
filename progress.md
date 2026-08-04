@@ -1404,3 +1404,50 @@
   Ticket 17 未启动。
 - Python 与 pnpm 依赖审计均无已知漏洞；最终 evaluation contract `4 passed`。CI artifact 仅在报告文件
   已实际生成时以 `always()` 语义上传，避免更早的 parity 失败被无文件 artifact 错误掩盖。
+- Ticket 16 单一提交 `dcf89da70f71590843f1c590b93c141b4981dfd5` 已由 GitHub Actions
+  `30871824165` 的 Python、Web、Container builds、Security and SBOM 四路全绿验证，Ticket 17
+  正式解锁。
+- Ticket 17 已启动；不重新设计 Phase 2，按锁定规格对 Playwright、真实基础设施故障恢复、迁移、
+  Compose/供应链、public-demo 隔离、evaluation 与 metadata 公开接缝做缺口审计和 TDD 纵切。
+- Ticket 17 首次持久化 findings 的补丁假定存在 `## Ticket 16 检索评测边界` 标题，但真实文件将其内容
+  延续在 `Ticket 14 Collection 重建边界` 下，补丁校验失败且未写入；已读取真实尾部并以末段内容作锚点。
+- Ticket 17 TDD RED 1：公开 HTTP metadata 测试已改为要求 `phase-2`，生产端仍返回 `phase-1`，
+  聚焦测试按预期 `1 failed`；随后只修改 metadata phase 常量进入 GREEN。
+- Ticket 17 TDD RED 2：新增 Phase 2 发布审计 public seam 后，测试先因缺少
+  `audit_phase2_release` 在 collection 阶段失败；最小实现落下后暴露 `str | Path` 公共签名未接受
+  仓库内绝对 `Path` 的 6 个失败，已按根目录包含关系修正 manifest 路径边界。
+- Ticket 17 TDD RED 3：aggregate-only 发布报告测试因公开渲染/写入 API 尚不存在而在 collection
+  阶段失败；实现复用既有原子写入边界，不新增 I/O 抽象或依赖。
+- Ticket 17 TDD RED 4：Python License policy contract 因 `scripts.audit_licenses` 不存在而在 collection
+  阶段失败；最小标准库实现读取 distribution metadata，允许根许可证覆盖的内部 workspace 包，并拒绝
+  外部无许可元数据或 GPL/AGPL/SSPL/BUSL/EUPL 阻断族。
+- Ticket 17 TDD RED 5：真实 release manifest/CLI contract 因 `commercevision_evaluation.release_cli`
+  不存在而在 collection 阶段失败；已补窄 CLI 与独立 public-demo 部署 profile，下一步绑定真实证据 manifest。
+- Ticket 17 TDD RED 6：Node License policy 单测因根级 `audit-node-licenses.mjs` 不存在而 collection
+  失败；最小标准库脚本已补齐，对 pnpm JSON 做 16 MiB 输入限制、结构校验、缺失许可和阻断许可检查，
+  LGPL 组合依赖不被误判为 GPL。
+- Ticket 17 类型门禁首轮全域 Mypy 对 245 个源文件返回 `395 errors in 81 files`；为避免跨 81 文件的
+  非本票重构，采用全域扫描 + 锁定版本诊断基线，新增/消失/漂移诊断均失败，Ticket 17 新代码另行要求
+  零诊断。TDD RED 7 先因 baseline checker 不存在失败，现已补严格 JSON normalization/comparison CLI。
+- Ticket 17 TDD RED 8：CI contract 缺少 acceptance、Mypy baseline、Python/Node License 四条命令而
+  `1 failed`；现已在 Python/Web 既有 job 内接线，并把 aggregate-only Phase 2 JSON/Markdown 作为
+  `phase2-release-acceptance` artifact 留存。
+- Ticket 17 组合收集首次因 unit/contract 测试模块同名而 collection 失败；将 unit 文件改为唯一名称后，
+  metadata/acceptance/License/Mypy/health 组合 `31 passed`，避免仅分目录运行时隐藏的 pytest 冲突。
+- Phase 2 release CLI 对真实 manifest 返回 PASS；发布关键 Mypy 10 个源文件零诊断，Python/Node
+  License policy、public-demo Compose config、OpenAPI drift 与 `git diff --check` 均通过。
+- Web 完整门禁通过：proxy `23 passed`、unit `196 passed`、Next production build 成功、Playwright
+  `90 passed`，覆盖上传/校验/Rights/ProductBrief/Brand Profile/检索/刷新/冲突/拒绝/degraded 路径。
+- 本地全量 1,806 项 pytest 两次分别在工具 30/45 分钟窗口被外部终止；第二次详细日志持续推进到 29%，
+  除 runtime 注册测试一次 Milvus readiness deadline 外均通过。该失败按公开 seam 单独稳定复现，生产端
+  正确失败关闭；测试注入 ready vector fake 后聚焦转绿，完整 unit+contract+Operation MySQL 为
+  `1327 passed, 1 skipped`，skip 仅为显式 opt-in 的 Alibaba OSS live contract。
+- Compose 全服务镜像重建与 `up -d --wait` 成功；API/Web/Worker/Scheduler/MCP/OTel/MySQL/MinIO/
+  Milvus/RabbitMQ/Redis/ClamAV/etcd 全健康，migrate/mysql-permissions/object-storage-init 均 Exit 0；
+  部署态 `/api/v1/meta` 返回 `phase-2`。
+- 五轴供应链审查以红灯证明旧规则漏过 `GPLv3+` 与完整 GNU GPL 名称；Python/Node 规则修正后均允许
+  LGPL、阻断两类 GPL 表达，聚焦测试与真实已安装依赖审计全部 PASS。
+- Linux Worker 镜像预检发现 Windows 生成的 Mypy 基线 440 条会在 Linux 变为 432 条并失败；加入
+  `platform = "linux"` contract 后重新生成基线，Windows 与 Linux 均以 432 条和相同 digest PASS。
+- 一次只读检索误包含不存在的 `packages\\agent` 路径并返回非零；实际包为 `packages/agent-core`，
+  诊断未修改文件，后续均使用已枚举真实路径。

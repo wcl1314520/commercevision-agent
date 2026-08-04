@@ -6,6 +6,7 @@ requires-python = ">=3.13,<3.14"
 dependencies = []
 
 [project.scripts]
+commercevision-phase2-acceptance = "commercevision_evaluation.release_cli:main"
 commercevision-retrieval-eval = "commercevision_evaluation.cli:main"
 
 [build-system]

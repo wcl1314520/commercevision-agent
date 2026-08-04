@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-08-04 |
 | 适用版本 | Roadmap v1 |
 
 ## 执行原则
@@ -74,6 +74,8 @@
 
 ## Phase 2：资产、商品理解与多模态记忆
 
+**状态：verified（2026-08-04）**
+
 ### 目标
 
 建立安全可追溯的输入和检索系统。
@@ -96,11 +98,14 @@
 
 ### 退出标准
 
-- 未授权素材召回率为 0。
-- 索引增量更新，不全量重建。
-- 固定检索集达到约定 Recall@K/nDCG。
-- ProductBrief 低置信度可以人工确认。
-- Milvus 丢失后可重建。
+- [x] 未授权素材召回率为 0。
+- [x] 索引支持增量更新，不依赖全量重建。
+- [x] 固定检索集达到约定 Recall@K/nDCG，release profile 使用置信区间门禁。
+- [x] ProductBrief 低置信度可以人工确认，并可跨 Worker 重启恢复。
+- [x] Milvus 丢失或重建中断后可恢复、验证并原子切换。
+
+验收命令、故障矩阵、迁移路径、公共 Demo 隔离和聚合证据见
+[Phase 2 发布验收](../05-deployment/phase2-release-acceptance.md)。
 
 ## Phase 3：Planning 与 Human-in-the-loop
 

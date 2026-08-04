@@ -169,13 +169,13 @@ def test_readiness_skips_external_dependencies_by_default() -> None:
     }
 
 
-def test_metadata_is_versioned() -> None:
+def test_metadata_reports_phase2_after_release_acceptance() -> None:
     app = create_app(Settings(environment="ci"))
     with TestClient(app) as client:
         response = client.get("/api/v1/meta")
 
     assert response.status_code == 200
-    assert response.json()["phase"] == "phase-1"
+    assert response.json()["phase"] == "phase-2"
 
 
 def test_readiness_reports_dependency_failure(monkeypatch) -> None:

@@ -9,12 +9,59 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .models import EvaluationMetrics, RetrievalEvaluationReport
+from .release_acceptance import Phase2ReleaseReport
 
 
 def retrieval_report_json(report: RetrievalEvaluationReport) -> str:
     """Serialize aggregate-only evidence without candidate or asset payloads."""
 
     return json.dumps(asdict(report), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def phase2_release_report_json(report: Phase2ReleaseReport) -> str:
+    """Serialize evidence hashes and gate identities without deployment secrets."""
+
+    return json.dumps(asdict(report), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def phase2_release_report_markdown(report: Phase2ReleaseReport) -> str:
+    """Render a concise human-readable Phase 2 release audit."""
+
+    status = "PASS" if report.passed else "FAIL"
+    lines = [
+        "# Phase 2 release acceptance report",
+        "",
+        f"- Gate: **{status}**",
+        f"- Release: `{report.release_id}`",
+        f"- Phase: `{report.phase}`",
+        f"- Manifest SHA-256: `{report.manifest_sha256}`",
+        f"- Evidence records: `{len(report.evidence)}`",
+        "",
+    ]
+    for heading, values in (
+        ("Requirements", report.requirement_ids),
+        ("Fault injection", report.fault_components),
+        ("Recovery invariants", report.recovery_invariant_ids),
+        ("CI gates", report.ci_gate_ids),
+    ):
+        lines.extend([f"## {heading}", "", *(f"- `{value}`" for value in values), ""])
+    lines.extend(
+        [
+            "## Public demo isolation",
+            "",
+            f"- Workspaces: `{len(report.public_demo_workspace_ids)}`",
+            f"- Dedicated buckets: `{len(report.public_demo_bucket_names)}`",
+            f"- Authorized datasets: `{len(report.public_demo_dataset_ids)}`",
+            "",
+            "## Evidence integrity",
+            "",
+            "| Path | SHA-256 |",
+            "|---|---|",
+        ]
+    )
+    unique_evidence = {(item.path, item.sha256) for item in report.evidence}
+    lines.extend(f"| `{path}` | `{digest}` |" for path, digest in sorted(unique_evidence))
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _metric_table(metrics: EvaluationMetrics) -> list[str]:
@@ -141,3 +188,17 @@ def write_retrieval_report(
         raise ValueError("evaluation report output paths must be distinct")
     _atomic_write(json_output, retrieval_report_json(report))
     _atomic_write(markdown_output, retrieval_report_markdown(report))
+
+
+def write_phase2_release_report(
+    report: Phase2ReleaseReport,
+    *,
+    json_path: str | Path,
+    markdown_path: str | Path,
+) -> None:
+    json_output = Path(json_path).resolve()
+    markdown_output = Path(markdown_path).resolve()
+    if json_output == markdown_output:
+        raise ValueError("release report output paths must be distinct")
+    _atomic_write(json_output, phase2_release_report_json(report))
+    _atomic_write(markdown_output, phase2_release_report_markdown(report))

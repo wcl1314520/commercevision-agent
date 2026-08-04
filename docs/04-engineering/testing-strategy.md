@@ -3,7 +3,7 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-22 |
+| 最后更新 | 2026-08-04 |
 | 适用版本 | Quality v1 |
 
 ## 测试层次
@@ -25,9 +25,9 @@
 Python：
 
 - Ruff。
-- Pyright 或 Mypy。
+- Mypy：Phase 2 发布关键代码零诊断；全域诊断由锁定版本和精确哈希基线约束，任何新增、消失或漂移均失败。
 - Bandit/Semgrep。
-- 依赖漏洞扫描。
+- 依赖漏洞与 License policy 扫描。
 
 TypeScript：
 
@@ -144,7 +144,17 @@ E2E 使用 Provider Mock，发布候选环境额外运行真实模型冒烟。
 
 验证重点是任务状态、重复计费和恢复，不只是服务重新启动。
 
-Phase 1 已将 Worker 停止、人工等待期间审批、RabbitMQ 暂存和 MySQL Checkpoint 恢复纳入在线验收；后续 Phase 4-7 再扩展到长耗时 Provider 调用中断、未知结果对账和基础设施主备切换。
+Phase 2 已将 MinIO、Milvus、RabbitMQ、ClamAV、内容安全、Vision、Embedding、reranker、Worker 和
+Collection rebuild 的故障/恢复证据纳入发布清单，并验证逻辑操作、向量、授权返回、保留期和最终收敛不变量。
+后续 Phase 4-7 再扩展到生图 Provider 未知结果对账和基础设施主备切换。
+
+## Phase 2 发布验收
+
+`commercevision-phase2-acceptance` 对版本化 manifest 做失败关闭审计：只接受仓库内、非符号链接、
+带精确 anchor 的证据，并输出不含私有 workspace、credential scope 或隐藏数据 payload 的聚合 JSON/Markdown。
+CI 先运行发布关键 Mypy 零诊断、全域 Mypy 基线、Python/Node License policy，再执行完整 pytest、
+Playwright、检索评测、容器构建、Secret Scan 和 SBOM。详细命令见
+[Phase 2 发布验收](../05-deployment/phase2-release-acceptance.md)。
 
 ## 安全测试
 

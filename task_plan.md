@@ -2,7 +2,7 @@
 
 ## 本轮目标
 
-在 `D:\个人项目\电商生图agent\mine` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。当前建立远程 Git 与 CI 基线，并按 `grill-with-docs -> to-spec -> to-tickets -> 独立上下文 implement` 完成 Phase 2：资产、商品理解与多模态记忆。
+在 `D:\个人项目\电商生图agent\CommerceVision Agent` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。当前建立远程 Git 与 CI 基线，并按 `grill-with-docs -> to-spec -> to-tickets -> 独立上下文 implement` 完成 Phase 2：资产、商品理解与多模态记忆。
 
 ## 输入
 
@@ -142,9 +142,15 @@
 - Ticket 16 本地实现与发布门禁已完成：双品类许可/Rights 数据、RRF/FLAT parity、完整指标与
   bootstrap CI、hidden release 隔离、无 payload 报告、CLI/CI artifact 均已闭合；当前只允许形成
   单一提交、推送并等待精确 GitHub Actions 全绿，Ticket 17 保持未启动。
+- Ticket 16 单一提交 `dcf89da` 已由精确 GitHub Actions `30871824165` 全绿验证，Ticket 17
+  正式解锁并进入 Phase 2 最终发布验收。
+- Ticket 17 以既有规格锁定的 Playwright、真实基础设施恢复、迁移链、Compose/安全供应链、
+  检索评测与 metadata 作为公开验收接缝；完成本票审查与发布门禁前不宣告 Phase 2 完成。
+- Ticket 17 本地实现、五轴审查、受影响 Python/Web/E2E、Linux/Windows 类型门禁、License、
+  release audit、全服务镜像重建与 Compose health 已完成；当前仅等待最终提交的 GitHub Actions。
 
 ### Phase 12：Phase 2 集成、可靠性与退出验收
-**Status:** pending
+**Status:** in_progress
 - 运行完整静态、单元、集成、迁移、容器和安全门禁
 - 验证未授权素材召回率为 0
 - 验证增量索引和 Milvus 可重建

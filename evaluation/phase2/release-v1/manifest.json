@@ -1,0 +1,502 @@
+{
+  "schema_version": "commercevision.phase2-release-acceptance.v1",
+  "release_id": "phase2-v1",
+  "phase": "phase-2",
+  "private_boundaries": {
+    "workspace_ids": [
+      "private-production"
+    ],
+    "bucket_names": [
+      "quarantine-assets",
+      "task-assets",
+      "foundation-assets",
+      "provider-results"
+    ],
+    "credential_scopes": [
+      "secret://commercevision/private/object-storage",
+      "secret://commercevision/private/providers"
+    ],
+    "dataset_paths": [
+      "evaluation/retrieval/hidden-release/manifest.json"
+    ]
+  },
+  "public_demo": {
+    "workspace_ids": [
+      "catalog-demo"
+    ],
+    "admin_workspace_ids": [],
+    "bucket_names": [
+      "public-demo-quarantine-assets",
+      "public-demo-task-assets",
+      "public-demo-foundation-assets",
+      "public-demo-provider-results"
+    ],
+    "object_prefix": "phase2/retrieval-daily-v1/",
+    "credential_scopes": [
+      "secret://commercevision/public-demo/object-storage",
+      "secret://commercevision/public-demo/providers"
+    ],
+    "quotas": {
+      "requests_per_minute": 60,
+      "concurrent_operations": 4,
+      "provider_calls_per_day": 500,
+      "storage_bytes": 1073741824
+    },
+    "datasets": [
+      {
+        "dataset_id": "retrieval-daily-v1",
+        "version": "v1",
+        "license": "CC0-1.0",
+        "path": "evaluation/retrieval/daily-v1/manifest.json",
+        "public_demo_allowed": true
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "id": "browser-e2e",
+      "evidence": [
+        {
+          "path": "apps/web/e2e/catalog-workbench.spec.ts",
+          "anchor": "test(\"creates a product with an exact request body\""
+        },
+        {
+          "path": "apps/web/e2e/catalog-workbench.spec.ts",
+          "anchor": "test(\"uploads image bytes only to the constrained object-storage request\""
+        },
+        {
+          "path": "apps/web/e2e/catalog-workbench.spec.ts",
+          "anchor": "test(\"renders normalized validation stages and terminal rejection\""
+        },
+        {
+          "path": "apps/web/e2e/catalog-workbench.spec.ts",
+          "anchor": "test(\"manages immutable rights history and current usability\""
+        },
+        {
+          "path": "apps/web/e2e/product-brief-workbench.spec.ts",
+          "anchor": "test(\"reviews evidence, restores a stale draft, revises, confirms, and recovers after refresh\""
+        },
+        {
+          "path": "apps/web/e2e/product-brief-workbench.spec.ts",
+          "anchor": "test(\"shows deny-by-default provider policy rejection\""
+        },
+        {
+          "path": "apps/web/e2e/brand-profile-workbench.spec.ts",
+          "anchor": "test(\"edits, validates, publishes, and audits exact Brand Profile members\""
+        },
+        {
+          "path": "apps/web/e2e/retrieval-explorer.spec.ts",
+          "anchor": "test(\"executes rights-first retrieval and exchanges a short-lived controlled preview\""
+        }
+      ]
+    },
+    {
+      "id": "fault-injection",
+      "evidence": [
+        {
+          "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+          "anchor": "def test_task_validation_retention_cleanup_recovers_after_storage_outage("
+        },
+        {
+          "path": "tests/integration/test_indexing_mysql.py",
+          "anchor": "def test_real_index_matrix_05_milvus_outage_does_not_activate_or_call_provider("
+        },
+        {
+          "path": "tests/integration/test_api_operations.py",
+          "anchor": "def test_transport_replay_resumes_after_marker_commit_without_duplicate_execution("
+        },
+        {
+          "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+          "anchor": "def test_real_worker_malware_failure_matrix_converges_without_provider_use("
+        },
+        {
+          "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+          "anchor": "def test_real_worker_content_safety_decision_and_failure_matrix("
+        },
+        {
+          "path": "tests/integration/test_product_brief_hitl_mysql.py",
+          "anchor": "def test_mysql_worker_persists_product_brief_provider_scenarios("
+        },
+        {
+          "path": "tests/contract/test_embedding_provider_contract.py",
+          "anchor": "def test_alibaba_embedding_adapter_maps_an_http_timeout_without_raw_details()"
+        },
+        {
+          "path": "tests/unit/test_retrieval_application.py",
+          "anchor": "def test_reranker_failure_is_an_explicit_degradation_and_preserves_fusion_order()"
+        },
+        {
+          "path": "tests/integration/test_indexing_mysql.py",
+          "anchor": "def test_real_index_worker_crash_after_upsert_recovers_expired_lease_exactly_once("
+        },
+        {
+          "path": "tests/integration/test_collection_rebuild_mysql_milvus.py",
+          "anchor": "def test_real_candidate_recovers_after_deletion_and_switches_atomically("
+        }
+      ]
+    },
+    {
+      "id": "recovery-convergence",
+      "evidence": [
+        {
+          "path": "tests/integration/test_api_operations.py",
+          "anchor": "def test_claimed_replay_crash_converges_through_lease_recovery("
+        },
+        {
+          "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+          "anchor": "def test_concurrent_validation_duplicates_converge_on_unique_stage_evidence("
+        },
+        {
+          "path": "tests/integration/test_product_fused_indexing_mysql.py",
+          "anchor": "def test_rights_invalidation_converges_fused_vector_and_document_to_deleted("
+        }
+      ]
+    },
+    {
+      "id": "migration-paths",
+      "evidence": [
+        {
+          "path": "tests/integration/test_migration_roundtrip_mysql.py",
+          "anchor": "def test_complete_migration_chain_round_trips_on_mysql("
+        },
+        {
+          "path": "tests/integration/test_reliability_mysql.py",
+          "anchor": "def test_all_runtime_datetime_columns_use_microsecond_precision("
+        }
+      ]
+    },
+    {
+      "id": "compose-health",
+      "evidence": [
+        {
+          "path": "infra/compose/docker-compose.yml",
+          "anchor": "object-storage-init:"
+        },
+        {
+          "path": "infra/compose/docker-compose.yml",
+          "anchor": "condition: service_healthy"
+        },
+        {
+          "path": "tests/contract/test_worker_deployment.py",
+          "anchor": "def test_compose_worker_uses_maintainable_live_readiness_cli()"
+        }
+      ]
+    },
+    {
+      "id": "quality-security-supply-chain",
+      "evidence": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Python checks"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Web checks"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Container builds"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Security and SBOM"
+        }
+      ]
+    },
+    {
+      "id": "public-demo-isolation",
+      "evidence": [
+        {
+          "path": "infra/public-demo/phase2.env.example",
+          "anchor": "CV_WEB_ALLOWED_WORKSPACE_IDS=catalog-demo"
+        },
+        {
+          "path": "infra/public-demo/phase2.env.example",
+          "anchor": "CV_WEB_ADMIN_WORKSPACE_IDS="
+        },
+        {
+          "path": "infra/public-demo/phase2.env.example",
+          "anchor": "CV_OBJECT_STORE_QUARANTINE_BUCKET=public-demo-quarantine-assets"
+        },
+        {
+          "path": "infra/public-demo/phase2.env.example",
+          "anchor": "CV_OBJECT_STORE_OIDC_TOKEN_FILE_PATH=/var/run/secrets/public-demo-oss-oidc-token"
+        },
+        {
+          "path": "infra/public-demo/phase2.env.example",
+          "anchor": "CV_VISION_DATA_TRANSFER_ENABLED=false"
+        }
+      ]
+    },
+    {
+      "id": "metadata-phase",
+      "evidence": [
+        {
+          "path": "services/api/src/commercevision_api/main.py",
+          "anchor": "phase=\"phase-2\""
+        },
+        {
+          "path": "tests/unit/test_api_health.py",
+          "anchor": "def test_metadata_reports_phase2_after_release_acceptance()"
+        }
+      ]
+    },
+    {
+      "id": "documentation-alignment",
+      "evidence": [
+        {
+          "path": "docs/01-architecture/system-architecture.md",
+          "anchor": "Milvus"
+        },
+        {
+          "path": "docs/02-data/mysql-schema.md",
+          "anchor": "asset_versions"
+        },
+        {
+          "path": "docs/05-deployment/phase2-release-acceptance.md",
+          "anchor": "# Phase 2 发布验收"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-safety",
+      "evidence": [
+        {
+          "path": "tests/contract/test_retrieval_evaluation_release_gate.py",
+          "anchor": "def test_daily_retrieval_dataset_has_licensed_sources_and_explicit_rights()"
+        },
+        {
+          "path": "tests/unit/test_retrieval_evaluation.py",
+          "anchor": "def test_any_unauthorized_result_fails_all_safety_gates_without_leaking_asset_ids("
+        },
+        {
+          "path": "tests/unit/test_collection_rebuild_contracts.py",
+          "anchor": "def test_rebuild_response_requires_zero_unauthorized_results_before_ready()"
+        }
+      ]
+    }
+  ],
+  "fault_injection": [
+    {
+      "component": "minio",
+      "evidence": {
+        "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+        "anchor": "def test_task_validation_retention_cleanup_recovers_after_storage_outage("
+      }
+    },
+    {
+      "component": "milvus",
+      "evidence": {
+        "path": "tests/integration/test_indexing_mysql.py",
+        "anchor": "def test_real_index_matrix_05_milvus_outage_does_not_activate_or_call_provider("
+      }
+    },
+    {
+      "component": "rabbitmq",
+      "evidence": {
+        "path": "tests/integration/test_api_operations.py",
+        "anchor": "def test_transport_replay_resumes_after_marker_commit_without_duplicate_execution("
+      }
+    },
+    {
+      "component": "clamav",
+      "evidence": {
+        "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+        "anchor": "def test_real_worker_malware_failure_matrix_converges_without_provider_use("
+      }
+    },
+    {
+      "component": "content-safety",
+      "evidence": {
+        "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+        "anchor": "def test_real_worker_content_safety_decision_and_failure_matrix("
+      }
+    },
+    {
+      "component": "vision",
+      "evidence": {
+        "path": "tests/integration/test_product_brief_hitl_mysql.py",
+        "anchor": "def test_mysql_worker_persists_product_brief_provider_scenarios("
+      }
+    },
+    {
+      "component": "embedding",
+      "evidence": {
+        "path": "tests/contract/test_embedding_provider_contract.py",
+        "anchor": "def test_alibaba_embedding_adapter_maps_an_http_timeout_without_raw_details()"
+      }
+    },
+    {
+      "component": "reranker",
+      "evidence": {
+        "path": "tests/unit/test_retrieval_application.py",
+        "anchor": "def test_reranker_failure_is_an_explicit_degradation_and_preserves_fusion_order()"
+      }
+    },
+    {
+      "component": "worker",
+      "evidence": {
+        "path": "tests/integration/test_indexing_mysql.py",
+        "anchor": "def test_real_index_worker_crash_after_upsert_recovers_expired_lease_exactly_once("
+      }
+    },
+    {
+      "component": "rebuild",
+      "evidence": {
+        "path": "tests/integration/test_collection_rebuild_mysql_milvus.py",
+        "anchor": "def test_real_candidate_recovers_after_deletion_and_switches_atomically("
+      }
+    }
+  ],
+  "recovery_invariants": [
+    {
+      "id": "unique-logical-operation",
+      "evidence": {
+        "path": "tests/integration/test_integrity_classification_mysql.py",
+        "anchor": "def test_operation_uow_classifies_duplicate_logical_identity("
+      }
+    },
+    {
+      "id": "unique-vector",
+      "evidence": {
+        "path": "tests/integration/test_milvus_index_integration.py",
+        "anchor": "def test_real_milvus_repeated_upsert_is_proven_by_exact_generation_pk("
+      }
+    },
+    {
+      "id": "zero-unauthorized-return",
+      "evidence": {
+        "path": "tests/unit/test_retrieval_evaluation.py",
+        "anchor": "def test_any_unauthorized_result_fails_all_safety_gates_without_leaking_asset_ids("
+      }
+    },
+    {
+      "id": "no-retention-extension",
+      "evidence": {
+        "path": "tests/unit/test_rights_domain.py",
+        "anchor": "def test_rights_never_extend_task_retention_at_the_exact_boundary()"
+      }
+    },
+    {
+      "id": "eventual-convergence",
+      "evidence": {
+        "path": "tests/integration/test_upload_sessions_mysql_minio.py",
+        "anchor": "def test_task_validation_retention_cleanup_recovers_after_storage_outage("
+      }
+    },
+    {
+      "id": "incremental-indexing",
+      "evidence": {
+        "path": "tests/integration/test_indexing_mysql.py",
+        "anchor": "def test_real_index_matrix_01_incremental_happy_path("
+      }
+    },
+    {
+      "id": "rebuild-recovery",
+      "evidence": {
+        "path": "tests/integration/test_collection_rebuild_mysql_milvus.py",
+        "anchor": "def test_real_candidate_recovers_after_deletion_and_switches_atomically("
+      }
+    },
+    {
+      "id": "product-brief-restart",
+      "evidence": {
+        "path": "tests/integration/test_operation_acceptance_mysql.py",
+        "anchor": "def test_worker_persists_human_wait_and_restart_can_complete_it("
+      }
+    }
+  ],
+  "ci_gates": [
+    {
+      "id": "python",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "- run: uv run pytest"
+      }
+    },
+    {
+      "id": "web",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "- run: pnpm web:unit-test"
+      }
+    },
+    {
+      "id": "openapi",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "scripts/export_openapi.py"
+      }
+    },
+    {
+      "id": "mcp",
+      "evidence": {
+        "path": "tests/contract/test_mcp_tools.py",
+        "anchor": "def test_mcp_transport_enumerates_closed_schemas_and_executes_every_tool()"
+      }
+    },
+    {
+      "id": "providers",
+      "evidence": {
+        "path": "tests/contract/test_embedding_provider_contract.py",
+        "anchor": "def test_embedding_adapters_share_the_typed_success_contract("
+      }
+    },
+    {
+      "id": "real-infrastructure",
+      "evidence": {
+        "path": "tests/integration/test_collection_rebuild_mysql_milvus.py",
+        "anchor": "def test_real_candidate_recovers_after_deletion_and_switches_atomically("
+      }
+    },
+    {
+      "id": "e2e",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "- run: pnpm web:e2e"
+      }
+    },
+    {
+      "id": "evaluation",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "Run daily retrieval evaluation gate"
+      }
+    },
+    {
+      "id": "security",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "gitleaks/gitleaks-action@v2"
+      }
+    },
+    {
+      "id": "dependencies",
+      "evidence": {
+        "path": "scripts/audit_python.py",
+        "anchor": "pip-audit"
+      }
+    },
+    {
+      "id": "containers",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "docker compose -f infra/compose/docker-compose.yml build"
+      }
+    },
+    {
+      "id": "licenses",
+      "evidence": {
+        "path": "scripts/audit_licenses.py",
+        "anchor": "def main() -> int:"
+      }
+    },
+    {
+      "id": "sbom",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "anchore/sbom-action@v0"
+      }
+    }
+  ]
+}

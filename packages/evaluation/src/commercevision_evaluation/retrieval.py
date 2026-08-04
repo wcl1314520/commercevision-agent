@@ -36,7 +36,9 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 def _ndcg(ranking: tuple[str, ...], grades: dict[str, int], k: int) -> float:
     def dcg(values: list[int]) -> float:
-        return sum((2**grade - 1) / math.log2(rank + 1) for rank, grade in enumerate(values, 1))
+        return float(
+            sum((2**grade - 1) / math.log2(rank + 1) for rank, grade in enumerate(values, 1))
+        )
 
     actual = dcg([grades.get(asset_id, 0) for asset_id in ranking[:k]])
     ideal = dcg(sorted(grades.values(), reverse=True)[:k])

@@ -26,7 +26,8 @@
 ### Python
 
 - Ruff format/check。
-- 类型检查。
+- 发布关键模块 Mypy 零诊断；其余全域 Mypy 诊断使用锁定版本的精确哈希基线，任何漂移均失败。
+- Python License policy 与依赖漏洞检查。
 - 单元测试。
 - Contract 测试。
 - 小型确定性 Agent Eval。
@@ -36,6 +37,7 @@
 - ESLint。
 - TypeScript。
 - Component 测试。
+- Node production dependency License policy 与漏洞检查。
 - Production Build。
 
 ### Infrastructure
@@ -63,6 +65,7 @@
 - Prompt/Schema Bundle。
 - Helm Chart。
 - Evaluation Report。
+- Phase 2 aggregate-only release acceptance JSON/Markdown。
 
 ## 发布流程
 
@@ -139,3 +142,13 @@ Prompt 和模型不随意跟代码一起上线：
 - 报告必须记录 suite、candidate universe、Rights snapshot、Retrieval Policy、Embedding Model 和
   Collection version；三个未授权指标必须全部为零。
 - 发布审批保留聚合报告，不复制隐藏 Query、候选 ID、Rights payload 或任何未授权内容。
+
+### Phase 2 Release Acceptance
+
+- 版本化入口为 `evaluation/phase2/release-v1/manifest.json`，由
+  `commercevision-phase2-acceptance` 校验证据路径、anchor、故障矩阵、恢复不变量和 CI 门禁全集。
+- `phase2-release-acceptance` artifact 只包含聚合 JSON/Markdown、manifest digest 和证据 digest；
+  不包含私有 workspace、credential scope、隐藏数据路径或候选 payload。
+- 公共 Demo 必须使用 `infra/public-demo/phase2.env.example` 对应的独立 workspace、四个 bucket、
+  OIDC credential scope、对象前缀、配额和已授权 daily dataset；不得与私有部署 profile 混用。
+- 完整运行顺序、故障映射和类型基线策略见 [Phase 2 发布验收](phase2-release-acceptance.md)。

@@ -40,9 +40,10 @@
 ## 05 部署与运维
 
 - [部署拓扑](05-deployment/deployment-topology.md)
-- [本地开发与 Phase 0-1 Runbook](05-deployment/local-development.md)
+- [本地开发与 Phase 0-2 Runbook](05-deployment/local-development.md)
 - [可观测性与运行维护](05-deployment/observability-and-operations.md)
 - [CI/CD 与发布](05-deployment/ci-cd-and-release.md)
+- [Phase 2 发布验收](05-deployment/phase2-release-acceptance.md)
 - [Asset Validation Runbook](runbooks/asset-validation.md)
 - [Asset Rights Runbook](runbooks/asset-rights.md)
 - [ProductBrief Vision 与人工确认 Runbook](runbooks/product-brief.md)

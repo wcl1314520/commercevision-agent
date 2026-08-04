@@ -54,7 +54,7 @@ CommerceVision Agent 面向电商美工和视觉运营人员，将商品理解�
 - [实施路线](docs/06-roadmap/implementation-roadmap.md)
 - [上线验收标准](docs/06-roadmap/acceptance-criteria.md)
 
-## Phase 0-1 快速启动
+## Phase 0-2 快速启动
 
 前提：
 
@@ -93,14 +93,14 @@ Bash：
 项目根目录已配置为 Obsidian Vault：
 
 1. 在 Obsidian 中选择“打开本地仓库文件夹”。
-2. 选择 `D:\个人项目\电商生图agent\mine`。
+2. 选择本仓库根目录。
 3. 从 `README.md` 或 `docs/README.md` 进入文档体系。
 
 Vault 使用标准相对 Markdown 链接，GitHub 和 Obsidian 可以读取同一套文档。模板目录已设置为 `docs/templates`，个人窗口布局不会提交到 Git。
 
 ## 当前状态
 
-`Phase 1 / 0.1.0` 已完成并通过本地验收：
+`Phase 2 / 0.2.0` 已完成实现并纳入本地与 CI 发布验收：
 
 - Python workspace、Next.js App 和共享 Contract 边界已建立。
 - FastAPI、Celery Worker、Scheduler、MCP Server 均有独立入口和健康检查。
@@ -113,8 +113,13 @@ Vault 使用标准相对 Markdown 链接，GitHub 和 Obsidian 可以读取同�
 - Ruff、pytest、ESLint、TypeScript、Next build、OpenAPI drift、Secret Scan 和 SBOM 已进入 CI。
 - Python 与 Node 依赖漏洞审计已进入 CI，当前锁文件本地审计无已知漏洞。
 - Python 应用镜像使用非 root 用户，服务 readiness 覆盖所有必要依赖。
+- 商品、直传、校验、权利登记、ProductBrief 人工确认和 Brand Profile 发布已形成可恢复工作台。
+- 多模态索引、Rights-first 混合检索、受控预览、检索解释、增量更新与 Milvus 重建已落地。
+- Phase 2 发布审计统一校验浏览器路径、故障恢复、迁移、公共 Demo 隔离、License、类型和供应链证据。
 
-当前不包含真实模型、生图 Provider、多模态资产检索和完整产品工作台；这些能力按 Phase 2-6 路线继续实现。
+当前不包含 Phase 3 之后的 Creative Plan 审批、生图 Provider、自动视觉评测/修复和 Amazon 导出；这些能力按 Phase 3-6 路线继续实现。
+
+Phase 2 的可重复验收命令、证据清单和已知类型债务见 [Phase 2 发布验收](docs/05-deployment/phase2-release-acceptance.md)。
 
 ## 来源项目
 

@@ -3,8 +3,22 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-07-21 |
+| 最后更新 | 2026-08-04 |
 | 适用版本 | Release 1.0 |
+
+## Phase 2 里程碑验收
+
+本节只证明 Phase 2 退出条件，不代表下方 Release 1.0 全部能力已经完成。
+
+- [x] 商品创建、直传、校验、权利登记、ProductBrief/Brand Profile 和 Rights-first 检索的浏览器路径通过。
+- [x] MinIO、Milvus、RabbitMQ、ClamAV、内容安全、Vision、Embedding、reranker、Worker 和重建故障均有可重复恢复证据。
+- [x] 重复逻辑操作/向量为零、未授权返回为零、保留期不延长，并最终收敛。
+- [x] 空库升级、Phase 1→2、非破坏降级/重升级和 Alembic drift 通过；运行时 UTC 列保持 `DATETIME(6)`。
+- [x] 本地 Compose 初始化所需 bucket，所有长运行服务有健康检查；公共 Demo 配置与私有部署隔离。
+- [x] Python/Web/OpenAPI/MCP/Provider/真实基础设施/E2E/Eval/Security/Dependency/Container/License/SBOM 门禁接入 CI。
+- [x] API metadata 报告 `phase-2`，路线图、测试、发布和 README 文档与实现一致。
+
+可执行证据见 [Phase 2 发布验收](../05-deployment/phase2-release-acceptance.md)。
 
 ## 产品
 

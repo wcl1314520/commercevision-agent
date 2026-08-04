@@ -117,6 +117,30 @@ jobs:
         run: uv run pytest tests/integration/test_mysql_runtime_privileges.py -q
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      - name: Type-check release-critical Python without a baseline
+        run: >-
+          uv run mypy
+          packages/evaluation
+          scripts/audit_licenses.py
+          scripts/check_mypy_baseline.py
+      - name: Reject full-workspace Python type drift
+        run: uv run python scripts/check_mypy_baseline.py
+      - name: Enforce Python dependency license policy
+        run: uv run python scripts/audit_licenses.py
+      - name: Audit Phase 2 release acceptance evidence
+        run: >-
+          uv run commercevision-phase2-acceptance
+          --manifest evaluation/phase2/release-v1/manifest.json
+          --repository-root .
+          --json-output .artifacts/acceptance/phase2-release.json
+          --markdown-output .artifacts/acceptance/phase2-release.md
+      - name: Retain Phase 2 release acceptance evidence
+        if: ${{ always() && hashFiles('.artifacts/acceptance/*') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-release-acceptance
+          path: .artifacts/acceptance/
+          if-no-files-found: error
       - name: Verify daily retrieval ranking fixture
         run: uv run pytest tests/contract/test_retrieval_evaluation_release_gate.py -q
       - name: Run daily retrieval evaluation gate
@@ -156,6 +180,8 @@ jobs:
       - run: pnpm web:typecheck
       - run: pnpm web:proxy-test
       - run: pnpm web:unit-test
+      - name: Enforce Node production dependency license policy
+        run: pnpm licenses list --prod --json | node scripts/audit-node-licenses.mjs
       - run: pnpm web:api-types:check
       - run: pnpm web:build
       - run: pnpm --filter @commercevision/web exec playwright install --with-deps chromium
@@ -168,6 +194,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -f infra/compose/docker-compose.yml config --quiet
+      - name: Validate isolated public-demo Compose profile
+        run: >-
+          docker compose
+          --env-file infra/public-demo/phase2.env.example
+          -f infra/compose/docker-compose.yml
+          config --quiet
       - run: >-
           docker compose -f infra/compose/docker-compose.yml build
           api worker scheduler mcp-server web otel-collector

@@ -659,3 +659,25 @@
 - 仅对预烘焙 observations 计算指标无法捕获 RRF 实现回归，且只有 query_id 不满足“冻结 Query”；daily
   suite 必须保存受控 query_text，并用公开 `reciprocal_rank_fuse` 对固定 channel rankings 生成/核对结果，
   CI 在报告门之前运行该快速 parity contract。
+
+## Ticket 17 最终发布验收恢复
+
+- Ticket 17 不新增 Phase 2 业务模型；公开接缝已由规格锁定为 Playwright、真实基础设施恢复、迁移链、
+  Compose/供应链、evaluation、public-demo 隔离和 metadata endpoint，最终目标是可重复执行的发布证据。
+- 当前 CI 已覆盖完整 Python、Web lint/type/unit/build/E2E、OpenAPI drift、Python/pnpm dependency audit、
+  Compose config、全服务容器构建、Gitleaks 与 SPDX SBOM；Ticket 17 应深化这些既有门禁，不复制第二套 CI。
+- 现有浏览器目录已有 catalog、ProductBrief、Brand Profile、Retrieval Explorer 四个 Playwright spec；
+  仍需逐条对照刷新恢复、版本冲突、策略拒绝和 degraded retrieval 等验收项，不能只凭文件名认定覆盖。
+- 真实 MySQL/Milvus 已有 collection rebuild、retention、retrieval authority 和各阶段 migration tests，
+  但仓库尚无显式 `tests/chaos` 文件；故障矩阵应复用既有 durable operation/public seams，并把可重复运行的
+  acceptance 入口接入 CI，而不是依赖人工声称。
+- Compose 已有 MinIO bucket init、ClamAV、MySQL migration/permissions、Milvus、RabbitMQ 及 API/Worker/
+  Scheduler/MCP/Web healthchecks；public-demo bucket/prefix/credential/quota/dataset 的配置隔离仍需精确审计。
+- Phase 2 release manifest 是只读、版本化证据索引，不执行 manifest 控制的命令；固定 requirement/fault/
+  invariant/gate 全集、仓库内路径/anchor、输入大小、public/private 不相交与配额边界均在加载时失败关闭。
+- Mypy 诊断基线必须固定部署目标平台。未设置 `platform` 时 Windows 为 440 条而 Linux 为 432 条；
+  显式 `platform = "linux"` 后两端均为 432 条且 SHA-256 完全一致，避免本地绿而 Ubuntu CI 漂移。
+- License 名称不能只识别 `GPL-3.0` 形式；常见 `GPLv3+` 和 `GNU General Public License` 同样必须阻断，
+  同时用前置字符边界避免把 LGPL 误判成 GPL。
+- 注册聚合测试不应偶然依赖真实 Milvus readiness；专用 Milvus 矩阵负责外部适配器行为，runtime 注册测试
+  注入 ready vector fake，保留生产 `assert_ready` 的失败关闭语义并消除跨职责耦合。
