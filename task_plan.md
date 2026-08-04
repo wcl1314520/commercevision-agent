@@ -2,7 +2,7 @@
 
 ## 本轮目标
 
-在 `D:\个人项目\电商生图agent\CommerceVision Agent` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。当前建立远程 Git 与 CI 基线，并按 `grill-with-docs -> to-spec -> to-tickets -> 独立上下文 implement` 完成 Phase 2：资产、商品理解与多模态记忆。
+在 `D:\个人项目\电商生图agent\CommerceVision Agent` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。Phase 2 已完成；当前按既有 `领域澄清 -> to-spec -> blockers-first tickets -> TDD implement` 流程推进 Phase 3：Planning 与 Human-in-the-loop。
 
 ## 输入
 
@@ -158,6 +158,32 @@
 - 验证固定检索集指标与 ProductBrief 人工确认
 - 更新路线图、Runbook、OpenAPI、评测与 GitHub CI 证据
 - Ticket 01–17 的验收状态与勾选项已和实际交付及历史 CI 证据对齐；Phase 2 正式完成。
+
+### Phase 13：Phase 3 领域澄清、规格锁定与 blockers-first 工单
+**Status:** complete
+- 复用 ProductBrief、Brand Profile、Retrieval Citation、Durable Operation 与 LangGraph Checkpoint 既有事实，不重建 Phase 2 能力
+- 锁定 Creative Plan、Planning Context、Prompt Revision、Tool Intent 与 Plan Approval 的统一领域语言
+- 确认公开测试接缝：领域命令、HTTP/版本冲突、Durable Worker/Event、LangGraph Interrupt/Resume、SSE 恢复游标、Web 审批和 Agent Eval
+- 生成 `.scratch/phase-3-planning-hitl/spec.md` 和 blockers-first 工单
+- 已生成锁定规格与 14 个 blockers-first 工单；Ticket 01 已进入首个 TDD 纵切
+
+### Phase 14：Phase 3 blockers-first TDD 实现
+**Status:** in_progress
+- 从无外部模型依赖的 Creative Plan 版本与审批不变量纵向切片开始
+- 每个 TDD 循环只增加一个公开行为：RED -> 最小 GREEN；结构重构留到审查阶段
+- 逐 Ticket 完成受影响测试、静态检查、迁移、OpenAPI/Web、审查、提交与精确 GitHub Actions 验证
+- Ticket 01 RED 1 已确认：Creative Plan 公开领域 Interface 尚不存在
+- Ticket 01 GREEN 1 已完成；首轮验证发现并修正机械格式、`Mapping` 导入位置与行宽，Mypy 和 29 项领域回归持续全绿
+- Ticket 01 GREEN 1 全量 unit `1074 passed`，五轴/简化审查无当前切片阻断；下一循环从 untrusted Tool Intent 与有界 JSON RED 开始
+- Ticket 01 RED 2 已确认：六类顶层/嵌套外部 authority 字段当前均可进入 Tool Intent
+- Ticket 01 GREEN 2 已完成：共享 canonicalization seam 失败关闭外部 authority 字段
+- Ticket 01 RED 3 已确认：canonical JSON 尚无解析前深度预算
+- Ticket 01 GREEN 3 已完成：canonical JSON 具备解析前复杂度预算
+- Ticket 01 RED 4 已确认：外部 URI/绝对路径可经普通参数值进入 Tool Intent
+- Ticket 01 GREEN 4 已完成：Tool Intent 全部参数值失败关闭外部 URI 与绝对路径
+- Ticket 01 RED/GREEN 5 已完成：共享 JSON seam 拒绝任意嵌套参数文本中的控制字符
+- Ticket 01 已完成：39 项公开领域 contract、全量 unit `1112 passed`、全仓 Ruff 与目标 strict Mypy 全绿；五轴 Required 已闭合
+- Ticket 02 进入 TDD：先锁定 immutable Prompt Revision 的领域/应用公开 Interface，再接 MySQL 与管理 HTTP
 
 ## 成功标准
 

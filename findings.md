@@ -683,3 +683,40 @@
   注入 ready vector fake，保留生产 `assert_ready` 的失败关闭语义并消除跨职责耦合。
 - Python `License` 字段可能是多项目聚合正文，搜索全文会把引用 GPL 的 BSD/Apache 包误判；审核顺序必须
   是 SPDX Expression → Trove Classifier → 原始 License，且例外只能绑定经上游核验的精确包名与版本。
+- Phase 3 不重新实现 ProductBrief 确认：既有 ProductBrief 是 Planning Context 的已确认商品事实来源；
+  Creative Plan 审批才恢复对应 LangGraph interrupt。
+- Phase 3 的首个深模块应以 Creative Plan 版本与审批命令作为窄 Interface，把不可变版本、陈旧审批冲突、
+  未审批不可执行和审计事实隐藏在实现内；ContextBuilder、Prompt Registry、Planner 与 Web 都只能通过该
+  Interface 协作，不能各自复制状态判断。
+- Phase 3 已确认的公开测试接缝为领域命令、HTTP/版本冲突、Durable Worker/Event、LangGraph
+  Interrupt/Resume、SSE 恢复游标、Web 审批路径和 Agent Eval；不在内部 Repository/Helper 接缝写测试。
+- 既有正式文档已经固定 Creative Plan 的核心不变量：人工审批保存不可变快照，后续编辑生成新版本；
+  Controller 不得直接更新状态字符串；计划必须追溯到 Retrieval Citation 与 Prompt 版本。
+- Tool Gateway 而不是 Planner 拥有执行权限：Planner 只能产生 Tool Intent；Gateway 必须重验当前节点、
+  Workflow、用户、精确审批版本、Schema、预算、Rights 与策略，并创建 Durable Step/Attempt/Outbox。
+- 现有 MySQL 文档已预留 `creative_plans` 与 append-only `approvals` 结构，现有 Fixture Agent State 和
+  LangGraph interrupt 测试也已携带 `creative_plan_ref` / `CREATIVE_PLAN` approval；首票应深化这些既有
+  接缝，不再建立平行 approval 或 checkpoint 模型。
+- Prompt Registry 的生产版本不可原地修改，Workflow 保存精确版本快照；ContextBuilder 只组合系统策略、
+  节点目标、已批准商品/品牌约束、检索证据、必要工具摘要和输出 Schema，并负责预算、去重、引用和脱敏。
+- 当前代码只有通用 append-only `Approval` 与 `workflow_approvals`，没有实际 `creative_plans` 持久表；
+  Fixture Agent 的 `create_plan` 只返回 `fixture://creative-plan/...` 字符串。因此第一纵切不能假设已有计划事实，
+  必须先建立结构化、不可变的 Creative Plan Version，再把审批绑定到该权威版本。
+- 当前 `WorkflowService.approve` 只校验 Workflow 状态与 workflow version，尚未从计划权威存储核验
+  `subject_id/subject_version`；任意调用方可在 `AWAITING_PLAN_APPROVAL` 提交其他 subject。Phase 3 执行门
+  必须在共享应用 Interface 一次修复，不能只在 HTTP 或 LangGraph 调用方加 guard。
+- 已有 Workflow 状态、Approval/Event Contract、LangGraph interrupt/resume 和 Outbox 语义可直接复用；
+  首票无需新建审批状态机、消息系统或通用 Repository 框架。
+- Phase 2 issue tracker 采用一个 feature 目录、一个 `spec.md`、每票独立 Markdown、显式 `Blocked by`
+  与 canonical `ready-for-agent` 状态；Phase 3 将保持同一可恢复格式。
+- 现有 Domain 使用无框架 frozen dataclass、canonical JSON/hash、显式有界集合和受控内部引用；
+  Creative Plan Version 应匹配该模式，不引入新运行时依赖或只有单实现的抽象。
+- 首个 tracer bullet 只证明一个调用方可创建可追溯、不可变的 Creative Plan Version；MySQL、审批、
+  Planner Provider、HTTP 和 Web 分属后续纵切，避免首票水平铺开未验证结构。
+- Phase 3 已锁定为 14 票依赖图：01 Creative Plan Contract；02 Prompt Registry；03 Planning Context；
+  04 MySQL；05 HTTP；06 exact approval fence；07 Fixture Planner；08 LangGraph HITL；09 Tool Policy；
+  10 SSE；11 Web；12 Eval/Security；13 Observability；14 Release Acceptance。
+- 规格明确真实生图与真实 Planning Provider Adapter 不属于 Phase 3；确定性 Fixture Planner 足以证明
+  结构化计划、审批、恢复、Tool Policy 和 Agent Eval，避免为 Phase 4 预建单实现 Provider seam。
+- Domain 根包通过显式 import 与 `__all__` 暴露公共 Interface；Ticket 01 继续采用一个高内聚
+  `creative_plans.py` 模块，等真实职责增长再按行为拆包，不为首个 tracer bullet 预建目录层级。

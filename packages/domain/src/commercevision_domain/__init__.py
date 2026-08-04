@@ -47,6 +47,16 @@ from .brand_profiles import (
     BrandRuleScope,
 )
 from .catalog import SKU, DuplicateExternalIdentifierError, Product
+from .creative_plans import (
+    CreativePlanCitationSelection,
+    CreativePlanDirection,
+    CreativePlanPayload,
+    CreativePlanProvenance,
+    CreativePlanSource,
+    CreativePlanVersion,
+    ImageRole,
+    ToolIntentProposal,
+)
 from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
 from .indexing import (
     CollectionRebuildState,
@@ -179,6 +189,12 @@ __all__ = [
     "CollectionSpec",
     "CollectionRebuildState",
     "ControlledProductText",
+    "CreativePlanCitationSelection",
+    "CreativePlanDirection",
+    "CreativePlanPayload",
+    "CreativePlanProvenance",
+    "CreativePlanSource",
+    "CreativePlanVersion",
     "CollectionState",
     "CurrentUsabilityDecision",
     "DataIntegrityError",
@@ -189,6 +205,7 @@ __all__ = [
     "EmbeddingRecord",
     "InvalidDataError",
     "InvalidTransitionError",
+    "ImageRole",
     "LeaseConflictError",
     "NormalizedOperationError",
     "NotFoundError",
@@ -233,6 +250,7 @@ __all__ = [
     "StorageWriteOutcomeUnknownError",
     "StorageWriteSafeToRetryError",
     "TASK_RETENTION_MAX_HOURS",
+    "ToolIntentProposal",
     "UnsupportedAssetKindError",
     "UploadAbortedError",
     "UploadBusyError",

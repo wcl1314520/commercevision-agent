@@ -1461,3 +1461,82 @@
   build 与依赖审计；Container builds 和 Security and SBOM 同步通过。
 - Ticket 01–17 状态台账已与已交付代码、验收勾选项及历史 CI 证据对齐；Phase 11 与 Phase 12 均完成，
   Phase 2 达到既定退出标准并正式闭合。
+
+# 2026-08-04 Phase 3 启动
+
+- 已按用户指令启动 Phase 3 Planning 与 Human-in-the-loop，不回退或重做 Phase 2。
+- 已恢复 `task_plan.md`、`findings.md`、`progress.md`、根 `CONTEXT.md` 和仓库 `AGENTS.md`；session catchup
+  未报告未同步上下文，工作树仅有用户原有未跟踪截图 `.scratch/retrieval-explorer-mobile.png`。
+- 已固定 TDD 公开测试接缝：领域命令、HTTP/版本冲突、Durable Worker/Event、LangGraph
+  Interrupt/Resume、SSE 恢复游标、Web 审批路径和 Agent Eval。
+- 已读取本地 Markdown issue tracker、canonical triage labels 与单上下文领域文档规则；Phase 3 规格和工单
+  将写入 `.scratch/phase-3-planning-hitl/`，不创建重复 ADR 目录。
+- 已核对 Phase 3 路线图与现有产品/架构/数据/AI/测试文档：Creative Plan 不可变版本、append-only
+  Approval、Tool Gateway 执行授权、Prompt Revision 快照和 ContextBuilder 来源边界均已有正式约束。
+- 代码探索确认 `creative_plans` 仍只存在于设计文档；当前 Fixture Agent 使用字符串引用，通用审批应用层
+  未核验 Creative Plan subject。首个纵切将从结构化 Creative Plan Version 领域 Interface 开始，并为后续
+  MySQL 权威版本与审批 fencing 提供最小稳定接缝。
+- 已复核 Phase 2 spec/ticket 格式和 ProductBrief/Brand Profile 领域实现模式；Phase 3 首个 TDD tracer
+  bullet 限定为无 I/O 的 Creative Plan Version 创建行为，后续按依赖接入 MySQL、审批、Planner 与 UI。
+- 已更新 `CONTEXT.md`，固定 Creative Plan、Planning Context、Prompt Revision、Tool Intent 和 Plan
+  Approval 五个统一领域术语；没有产生需要新 ADR 的不可逆争议决策。
+- 已生成并校验 `.scratch/phase-3-planning-hitl/spec.md` 与 14 个 blockers-first 工单：连续编号、每票
+  `Blocked by`/canonical Status、8–10 项验收标准齐全，`git diff --check` 通过。Phase 13 完成，Ticket 01
+  进入 TDD。
+- Ticket 01 TDD RED 1：新增公开领域测试后 collection 按预期因 `CreativePlanDirection` 等 Interface
+  尚不存在而失败；错误发生在公开包导入，不是测试环境或内部实现耦合。下一步只补满足该 tracer bullet
+  的无框架 frozen domain values 与 canonical hash。
+- canonical payload 已按规格中的精确 JSON 结构独立计算，首个 fixture 的固定 SHA-256 为
+  `2b326360a0129d7133221db078331c2c803fb8c113348dcf783626403313f849`，测试不从实现反算期望值。
+- Ticket 01 TDD GREEN 1：新增单一 `creative_plans.py` 深模块和根包公开导出，使用 frozen dataclass、
+  bounded values、canonical JSON/SHA-256 与完整 provenance；聚焦测试 `1 passed`。本轮未接入 MySQL、
+  HTTP、Planner Provider 或审批逻辑，保持 tracer bullet 垂直且最小。
+- GREEN 后首轮验证：Mypy 零诊断、Creative Plan + ProductBrief + Brand Profile + Workflow 领域回归
+  `29 passed`；Ruff 首次仅报告 2 个文件需格式化、`Mapping` 应来自 `collections.abc` 和 3 处行宽，已用
+  仓库 formatter/安全自动修复处理，复跑 format/check 全绿。
+- Ticket 01 GREEN 1 完整 unit 回归 `1074 passed`，仅保留既有上游 Starlette/httpx 弃用警告；五轴审查
+  对当前 tracer bullet 无 Critical/Required。简化审查保留单一 406 行领域模块、未新增依赖/Provider
+  Adapter/Repository 层；Ticket 01 仍为 `in_progress`，等待以新 RED 驱动失败路径和重建顺序行为。
+- Ticket 01 TDD RED 2：Tool Intent Contract 对顶层/嵌套 `url`、`path`、`sql`、`object_key`、
+  `api_key`、`endpoint` 六类调用方外部 authority 均未拒绝，聚焦测试按预期 `6 failed, 1 passed`；修复必须
+  位于共享 Contract canonicalization seam，不能依赖后续 HTTP/Tool Gateway 调用者记得过滤。
+- Ticket 01 TDD GREEN 2：Tool Intent canonicalization 现在迭代扫描顶层/嵌套参数并拒绝 15 类外部
+  authority 字段，工厂和直接 dataclass 构造共享同一检查；聚焦 `7 passed`。
+- Ticket 01 TDD RED 3：10 层嵌套 Tool Intent arguments 未触发有界 JSON 门，聚焦测试
+  `1 failed, 7 passed`；canonical serialization 之前必须先限制深度/节点/集合/字符串预算，避免用最终
+  64 KiB 大小限制替代解析复杂度限制。
+- Ticket 01 TDD GREEN 3：共享 canonical JSON seam 在序列化前以迭代 walker 强制深度 8、节点 512、
+  单集合 64、单字符串 4096 的预算；聚焦 `8 passed`，不依赖 Python recursion limit 或序列化后大小。
+- Ticket 01 TDD RED 4：Tool Intent 在无敏感字段名的 `reference` 下接受 HTTP/file/S3/OSS URI、Windows
+  和 POSIX 绝对路径，聚焦 `6 failed, 8 passed`；字段名过滤不能替代对外部 authority 值的检查。
+- Ticket 01 TDD GREEN 4：Tool Intent arguments 的全部字符串值现在拒绝 HTTP/file/S3/OSS URI 与 Windows/
+  POSIX 绝对路径；聚焦 `14 passed`，proposal 仍只表达执行意图而不携带调用方 authority。
+- Ticket 01 工单只读恢复时使用了不存在的简写文件名 `01-creative-plan-contract.md`；未产生写入，已通过
+  `rg --files` 定位真实 `01-creative-plan-version-contract.md`，后续只使用已枚举路径。
+- Ticket 01 TDD RED 5：公开 Tool Intent 工厂接受嵌套参数文本中的控制字符，聚焦
+  `1 failed, 14 passed`；JSON 大小/深度预算不能替代文本安全边界。
+- Ticket 01 TDD GREEN 5：共享 JSON walker 现在对任意深度字符串值拒绝 Unicode `Cc` 控制字符；聚焦
+  `15 passed`，Ruff 与目标模块 strict Mypy 同步全绿。
+- Ticket 01 TDD RED/GREEN 6：JSON 对象键未纳入文本 walker，控制字符键以 `1 failed, 15 passed`
+  复现；键和值现共享深度、节点、长度与控制字符预算，并显式拒绝非字符串 JSON key。
+- Ticket 01 TDD RED/GREEN 7：锁定规格要求引用选择理由，公开导入先 collection 失败；新增 frozen
+  `CreativePlanCitationSelection` 后 payload 同时持久 citation ID/reason，独立冻结新 hash 为
+  `04c9fe86d61276edf23b8f219e40e04df6bca0e809e0fb83652c430e2f46347a`。
+- Ticket 01 TDD RED/GREEN 8：相同 directions 的重建行序产生不同 hash，以 `1 failed, 16 passed`
+  复现；payload 现在按 stable direction key 归一化，聚焦 `17 passed`。
+- Ticket 01 TDD RED/GREEN 9：缺少安全 human revision 入口以 `AttributeError` 复现；
+  `revise_by_user` 现在独占 next version、supersedes、identity 与 prior provenance 复制，聚焦 `18 passed`。
+- 非有限 JSON、超限集合/文本、重复 direction/tool/citation 与 Agent/User 负向 metadata 测试直接命中
+  既有泛化校验，新增证据后 `23 passed`，未伪造 RED。
+- Ticket 01 TDD RED/GREEN 10：workspace/actor/approval/lease/header/method/idempotency 八类 execution
+  authority 以 `8 failed, 6 passed` 复现；加入 server-owned field policy 后完整聚焦 `31 passed`。
+- Ticket 01 TDD RED/GREEN 11：空白包裹 URL、FTP、WSS 与 data URI 以 `4 failed, 6 passed` 复现；
+  任意 hierarchical URI scheme、data URI 和绝对路径现统一失败关闭，聚焦 `35 passed`。
+- Ticket 01 TDD RED/GREEN 12：嵌套 citation/tool 重建顺序改变 hash，以单测失败复现；各 direction
+  现在分别按 `citation_id` / `intent_key` 归一化，聚焦 `36 passed`。
+- 五轴审查发现 snake_case 字段门可被 camelCase authority 绕过；RED 13 以 3 个失败复现，统一字段名
+  归一化后 `workspaceId`、`approvalToken`、`objectKey` 失败关闭，最终聚焦 `39 passed`。
+- Ticket 01 最终门禁：全仓 Ruff format/check、目标 strict Mypy、`git diff --check` 全绿，完整 unit
+  `1112 passed`，仅有既有 Starlette/httpx 弃用警告；工单 8 项验收全部完成，无 Critical/Required。
+- 只读设计复核曾沿用不存在的扁平 docs 路径；命令未写入，随后先用 `rg --files docs` 枚举真实分层路径，
+  确认没有另一套 citation-reason contract，锁定 Phase 3 spec 为本票权威来源。
