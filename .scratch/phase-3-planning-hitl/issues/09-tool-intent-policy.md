@@ -5,7 +5,7 @@ so model output cannot expand tools, resources, providers, permissions, or budge
 
 **Blocked by:** 01 — Creative Plan contract; 06 — Exact plan approval fence.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Registered tools have stable names/schema versions, allowed nodes, typed arguments, resource resolvers, cost class, and audit level.
 - [x] Policy derives workspace, actor, Workflow, exact approved plan, Rights, provider constraints, quota, and budget from trusted facts.

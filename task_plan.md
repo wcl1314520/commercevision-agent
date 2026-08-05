@@ -217,7 +217,9 @@
 - Ticket 08 状态提交 `648bb33` 已由精确 GitHub Actions `31002543590` 四路全绿验证；
   Ticket 09 已按 blockers-first 解锁并进入 server-owned Tool Intent policy 的首个 TDD 纵向切片。
 - Ticket 09 server-owned registry、纯授权 decision、exact MySQL application claim 与 Worker pre-resume
-  enforcement 已完成本地纵向实现；当前进入完整门禁与五轴终审，精确 CI 全绿前 Ticket 10 保持锁定。
+  enforcement 已完成纵向实现；实现提交 `a3986b0` 已由精确 GitHub Actions `31008124606` 四路全绿验证：
+  Python `1995 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功，Ticket 09 正式完成。
+  当前只允许状态提交取得精确 CI；全绿后 Ticket 10 按 blockers-first 解锁并进入 TDD。
 
 ## 成功标准
 

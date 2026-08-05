@@ -1735,3 +1735,6 @@
   policy deep module + application authority Port；运维性以 bounded Settings/Compose 和结构化无 raw payload 日志
   闭合。工单验收项已全部勾选，但在实现提交精确 GitHub Actions 四路全绿前仍保持 `in_progress`，Ticket 10
   不启动。
+- Ticket 09 实现提交 `a3986b0` 已由精确 GitHub Actions `31008124606` 四路全绿验证：Python 完整
+  `1995 passed, 3 skipped in 1074.93s`；Web lint/typecheck/unit/E2E/build/audit、Container builds、
+  Gitleaks 与 SBOM 均成功。Ticket 09 正式 `complete`；状态提交全绿前 Ticket 10 保持锁定。
