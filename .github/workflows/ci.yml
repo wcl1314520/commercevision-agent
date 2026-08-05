@@ -136,7 +136,7 @@ jobs:
           --markdown-output .artifacts/acceptance/phase2-release.md
       - name: Retain Phase 2 release acceptance evidence
         if: ${{ always() && hashFiles('.artifacts/acceptance/*') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: phase2-release-acceptance
           path: .artifacts/acceptance/
@@ -150,7 +150,7 @@ jobs:
           --markdown-output .artifacts/phase3-acceptance/phase3-release.md
       - name: Retain Phase 3 release acceptance evidence
         if: ${{ always() && hashFiles('.artifacts/phase3-acceptance/*') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: phase3-release-acceptance
           path: .artifacts/phase3-acceptance/
@@ -167,7 +167,7 @@ jobs:
           --markdown-output .artifacts/evaluation/retrieval-daily-v1.md
       - name: Retain daily retrieval evaluation reports
         if: ${{ always() && hashFiles('.artifacts/evaluation/*') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: retrieval-evaluation-daily
           path: .artifacts/evaluation/
@@ -185,7 +185,7 @@ jobs:
           --markdown-output .artifacts/planner-evaluation/planner-ci-v1.md
       - name: Retain Planner evaluation reports
         if: ${{ always() && hashFiles('.artifacts/planner-evaluation/*') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: planner-evaluation-ci
           path: .artifacts/planner-evaluation/
@@ -254,7 +254,7 @@ jobs:
         with:
           path: .
           output-file: sbom.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom-spdx
           path: sbom.spdx.json
