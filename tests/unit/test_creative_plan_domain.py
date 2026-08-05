@@ -377,6 +377,13 @@ def test_creative_plan_rejects_duplicate_stable_keys_and_citation_selections() -
     )
     with pytest.raises(ValueError, match="duplicate keys"):
         replace(direction, tool_intents=(intent, intent))
+    with pytest.raises(ValueError, match="duplicate Tool Intent keys"):
+        CreativePlanPayload(
+            directions=(
+                replace(direction, key="amazon-detail", tool_intents=(intent,)),
+                replace(direction, tool_intents=(intent,)),
+            )
+        )
 
     duplicate_citations = (
         CreativePlanCitationSelection(

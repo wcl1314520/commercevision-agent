@@ -10,6 +10,34 @@ def test_settings_reject_unknown_environment() -> None:
         Settings(environment="invalid")
 
 
+def test_tool_intent_policy_configuration_is_bounded_and_server_owned() -> None:
+    settings = Settings(
+        tool_intent_policy_version="tool-intent-policy-v2",
+        tool_intent_granted_scopes=["image.generate"],
+        tool_intent_allowed_providers=["fixture"],
+        tool_intent_allowed_cost_classes=["low"],
+        tool_intent_quota_units=8,
+        tool_intent_budget_units=7,
+        tool_intent_maximum_intents=6,
+    )
+
+    assert settings.tool_intent_policy_version == "tool-intent-policy-v2"
+    assert settings.tool_intent_granted_scopes == ["image.generate"]
+    assert settings.tool_intent_quota_units == 8
+    assert settings.tool_intent_budget_units == 7
+    assert settings.tool_intent_maximum_intents == 6
+
+    for invalid in (
+        {"tool_intent_policy_version": "policy with spaces"},
+        {"tool_intent_quota_units": -1},
+        {"tool_intent_budget_units": -1},
+        {"tool_intent_maximum_intents": 193},
+        {"tool_intent_allowed_cost_classes": ["unbounded"]},
+    ):
+        with pytest.raises(ValidationError):
+            Settings(**invalid)
+
+
 def test_retrieval_settings_enforce_short_lived_preview_and_retention_bounds() -> None:
     settings = Settings(
         retrieval_preview_token_lifetime_seconds=30,

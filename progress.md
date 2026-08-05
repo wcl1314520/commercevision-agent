@@ -1702,3 +1702,36 @@
 - Ticket 08 测试安全修复 `91cb015` 的精确 GitHub Actions `31001264761` 四路全绿：Python 完整
   `1959 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功。Ticket 08 正式
   `complete`；状态提交全绿前 Ticket 09 保持未启动。
+
+# 2026-08-05 Phase 3 Ticket 09 启动
+
+- Ticket 08 状态提交 `648bb33` 的精确 GitHub Actions `31002543590` 四路全绿，Ticket 09 按
+  blockers-first 正式解锁；不重新规划或重复 Ticket 01–08。
+- Ticket 09 首个纵向切片固定为 server-owned registry contract：稳定工具名/schema version、允许节点、
+  typed arguments、resource resolver、cost class 与 audit level 必须来自服务端定义；Planner proposal 仅作为
+  不可信数据进入纯授权决策，当前阶段不得调用 Phase 4 Provider。
+- Ticket 09 已完成 registry → pure authorizer → application → real MySQL → Worker resume 纵向闭环：
+  exact Plan/Approval/actor 从 MySQL execution claim 获取，Rights/provider/quota/budget 从不可变服务端配置/Port
+  获取；未来 command key 绑定 workspace、actor、Workflow/version、Plan/version、Approval、node、tool/schema、
+  typed canonical args、resource identities、provider 与 cost。授权定义没有 Phase 4 execution adapter。
+- fail-closed 矩阵覆盖 unknown tool/version、node/schema drift、extra/URL/path/SQL/object-key、重复 JSON key、
+  strict narrowing、跨 workspace resource、provider/cost class、Rights、quota、budget、resolver failure 与
+  Prompt Injection。资源审计仅保留 SHA-256；raw purpose/arguments/resource identity 不进入 audit projection。
+- Worker 在 CREATIVE_PLAN APPROVE resume 后、Agent 恢复前重新执行 exact MySQL execution claim 和 Tool Policy；
+  denied intent 稳定 DLQ 为 `tool_intent_policy_denied`，真实测试证明无 Workflow Attempt/Provider 调用。空 intent
+  的历史 Phase 1 fixture 仍兼容；用户编辑 v2 approve/reject 与真实 fixture intent allow 路径通过。
+- 终审发现并闭合三个 Required：JSON 重复键后值覆盖、resolver 异常缺少稳定 decision、声明 schema 与 typed
+  model 漂移；另补全跨 direction Tool Intent key 全局唯一不变量，避免未来 command idempotency key 碰撞。
+- 当前本地证据：最终完整 unit+contract `1414 passed, 1 skipped`；Ticket 09/Creative Plan/Worker 真实 MySQL
+  组合 `34 passed`；最终领域/registry/application 聚焦 `77 passed`。全仓 Ruff、strict 新模块 Mypy、
+  正式 432-diagnostic baseline、Python
+  license/vulnerability audit、Compose config 与 `git diff --check` 全绿。
+- Celery full-seam readiness 用例在事件处理前因本机 Milvus readiness 不可用退出，未进入 Tool Policy；同一
+  Worker 业务路径绕过外部 readiness 的真实 restart/duplicate/human-resume 测试通过。保留该环境证据，最终
+  Linux CI 仍作为完整基础设施权威门禁。
+- Ticket 09 五轴终审未发现剩余 Critical/Required：正确性以 exact claim + global intent identity + canonical
+  command key；安全性以 registry/typed schema/resource/provider/Rights/budget fail-closed 与 hash-only audit；
+  可靠性以 pure deterministic decision、resolver containment、Worker DLQ/no-attempt；维护性以 tool-runtime
+  policy deep module + application authority Port；运维性以 bounded Settings/Compose 和结构化无 raw payload 日志
+  闭合。工单验收项已全部勾选，但在实现提交精确 GitHub Actions 四路全绿前仍保持 `in_progress`，Ticket 10
+  不启动。

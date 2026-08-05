@@ -172,6 +172,13 @@ from .routing import (
     UnsupportedSchemaVersionError,
     build_event_routing_registry,
 )
+from .tool_authorization import (
+    ConfiguredToolAuthorizationEntitlements,
+    PlanToolAuthorizationResult,
+    PlanToolAuthorizationService,
+    ToolAuthorizationEntitlements,
+    ToolAuthorizationPolicy,
+)
 from .upload_maintenance import UploadSessionMaintenanceService
 from .workflows import (
     CreativePlanExecutionClaim,
@@ -311,6 +318,11 @@ __all__ = [
     "UnknownOperationOutcome",
     "UploadObjectCleaner",
     "UploadSessionMaintenanceService",
+    "ConfiguredToolAuthorizationEntitlements",
+    "PlanToolAuthorizationResult",
+    "PlanToolAuthorizationService",
+    "ToolAuthorizationEntitlements",
+    "ToolAuthorizationPolicy",
     "upload_cleanup_input_hash",
     "VISION_ANALYSIS_PURPOSE",
     "VisionDataTransferAuthorization",

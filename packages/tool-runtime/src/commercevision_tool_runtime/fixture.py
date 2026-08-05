@@ -5,8 +5,44 @@ from __future__ import annotations
 import hashlib
 import time
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from .errors import ToolExecutionError
 from .models import ToolExecutionContext, ToolInvocation, ToolResult
+from .registry import ToolAuditLevel, ToolCostClass, ToolDefinition
+
+
+class FixtureImageIntentInput(BaseModel):
+    """Typed arguments for the Phase 3 future fixture generation command."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    count: int = Field(ge=1, le=10)
+
+
+def _fixture_resources(arguments: BaseModel) -> tuple[str, ...]:
+    del arguments
+    return ()
+
+
+def fixture_image_intent_definition() -> ToolDefinition:
+    """Return a Planner-authorizable definition without a Phase 4 execution adapter."""
+
+    return ToolDefinition(
+        name="fixture.image.generate",
+        version="1.0",
+        description="Authorize a future deterministic fixture image generation command.",
+        input_schema=FixtureImageIntentInput.model_json_schema(),
+        output_schema={},
+        implementation=None,
+        input_model=FixtureImageIntentInput,
+        allowed_nodes=frozenset({"execute_tool"}),
+        resource_resolver=_fixture_resources,
+        provider="fixture",
+        required_scopes=frozenset({"image.generate"}),
+        cost_class=ToolCostClass.LOW,
+        audit_level=ToolAuditLevel.METADATA,
+    )
 
 
 class FixtureImageTool:

@@ -42,6 +42,10 @@ _OBJECT_STORAGE_READINESS_REQUEST_BOUND = 3
 _OBJECT_STORAGE_READINESS_TIMEOUT_PHASE_BOUND = 2
 
 
+def _default_tool_intent_cost_classes() -> list[Literal["low", "standard", "high"]]:
+    return ["low"]
+
+
 def _secret_directories() -> list[Path]:
     configured = os.getenv("CV_SECRETS_DIR")
     if configured:
@@ -517,6 +521,27 @@ class Settings(BaseSettings):
     workflow_retention_hours: int = Field(default=72, ge=1, le=168)
     workflow_step_lease_seconds: int = Field(default=300, ge=30, le=3600)
     workflow_message_max_attempts: int = Field(default=8, ge=1, le=50)
+    tool_intent_policy_version: str = Field(
+        default="tool-intent-policy-v1",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    tool_intent_granted_scopes: list[str] = Field(
+        default_factory=lambda: ["image.generate"],
+        max_length=64,
+    )
+    tool_intent_allowed_providers: list[str] = Field(
+        default_factory=lambda: ["fixture"],
+        max_length=64,
+    )
+    tool_intent_allowed_cost_classes: list[Literal["low", "standard", "high"]] = Field(
+        default_factory=_default_tool_intent_cost_classes,
+        max_length=3,
+    )
+    tool_intent_quota_units: int = Field(default=16, ge=0, le=1_000_000)
+    tool_intent_budget_units: int = Field(default=16, ge=0, le=1_000_000)
+    tool_intent_maximum_intents: int = Field(default=16, ge=1, le=192)
     worker_message_retry_initial_seconds: float = Field(default=1.0, gt=0, le=3600)
     worker_message_retry_max_seconds: float = Field(default=300.0, gt=0, le=86400)
     worker_consumer_name: str = "agent-worker"
@@ -746,6 +771,32 @@ class Settings(BaseSettings):
         if len(set(normalized)) != len(normalized):
             raise ValueError("validation data transfer allowlists must be unique")
         return normalized
+
+    @field_validator(
+        "tool_intent_granted_scopes",
+        "tool_intent_allowed_providers",
+    )
+    @classmethod
+    def _validate_tool_intent_allowlists(cls, value: list[str]) -> list[str]:
+        if any(
+            not isinstance(item, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", item) is None
+            for item in value
+        ):
+            raise ValueError("Tool Intent allowlist contains an invalid identifier")
+        if len(set(value)) != len(value):
+            raise ValueError("Tool Intent allowlist identifiers must be unique")
+        return value
+
+    @field_validator("tool_intent_allowed_cost_classes")
+    @classmethod
+    def _validate_tool_intent_cost_classes(
+        cls,
+        value: list[Literal["low", "standard", "high"]],
+    ) -> list[Literal["low", "standard", "high"]]:
+        if len(set(value)) != len(value):
+            raise ValueError("Tool Intent cost classes must be unique")
+        return value
 
     @field_validator(
         "validation_data_transfer_allowed_endpoint_hosts",

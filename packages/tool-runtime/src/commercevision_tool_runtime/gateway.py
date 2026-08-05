@@ -44,6 +44,8 @@ class ToolExecutionGateway:
     ) -> ToolResult:
         self.policy.validate(invocation)
         definition = self.registry.resolve(invocation.tool_name, invocation.tool_version)
+        if definition.implementation is None:
+            raise ToolExecutionError("tool execution adapter is unavailable")
         if not definition.required_scopes.issubset(context.scopes):
             raise ToolPolicyError("tool scope is not authorized")
         if definition.input_model is not None:

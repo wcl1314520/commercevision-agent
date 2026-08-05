@@ -22,6 +22,7 @@ from commercevision_application import (
     BrandProfileInvalidationApplicationService,
     BrandProfileInvalidationPort,
     CollectionRebuildRunner,
+    ConfiguredToolAuthorizationEntitlements,
     CreativePlanApplicationService,
     DurableFixturePlanner,
     DurableFixturePlannerNode,
@@ -37,12 +38,15 @@ from commercevision_application import (
     OperationReconciliationPolicy,
     OperationRetryPolicy,
     PlanningContextApplicationService,
+    PlanToolAuthorizationService,
     ProductBriefContinuation,
     ProductBriefContinuationAuthorityError,
     ProductBriefContinuationClaim,
     ProductBriefRecoveryClaim,
     PromptRegistryApplicationService,
     StaleProductBriefContinuation,
+    ToolAuthorizationEntitlements,
+    ToolAuthorizationPolicy,
     UploadObjectCleaner,
     WorkflowApplicationService,
     build_event_routing_registry,
@@ -151,9 +155,12 @@ from commercevision_persistence import (
 from commercevision_retrieval import MilvusVectorIndexAdapter
 from commercevision_tool_runtime import (
     FixtureImageTool,
+    ToolCostClass,
     ToolDefinition,
     ToolExecutionGateway,
+    ToolIntentAuthorizer,
     ToolRegistry,
+    fixture_image_intent_definition,
 )
 from commercevision_tool_runtime.policy import ToolPolicy
 
@@ -230,6 +237,7 @@ class WorkerRuntime:
     brand_profile_invalidation: BrandProfileInvalidationPort | None = None
     lifecycle: DurableNodeLifecycle | None = None
     workflow_service: WorkflowApplicationService | None = None
+    tool_authorization: PlanToolAuthorizationService | None = None
     telemetry: Phase2Telemetry = field(default_factory=Phase2Telemetry)
 
     @classmethod
@@ -496,6 +504,31 @@ class WorkerRuntime:
                 ),
             ),
         )
+        workflow_service = WorkflowApplicationService(uow_factory=cast(Any, uow_factory))
+        tool_authorization = PlanToolAuthorizationService(
+            execution_authority=workflow_service,
+            entitlements=ConfiguredToolAuthorizationEntitlements(
+                ToolAuthorizationEntitlements(
+                    granted_scopes=frozenset(settings.tool_intent_granted_scopes),
+                    authorized_resource_ids=frozenset(),
+                    allowed_providers=frozenset(settings.tool_intent_allowed_providers),
+                    allowed_cost_classes=frozenset(
+                        ToolCostClass(value) for value in settings.tool_intent_allowed_cost_classes
+                    ),
+                    remaining_quota_units=settings.tool_intent_quota_units,
+                    remaining_budget_units=settings.tool_intent_budget_units,
+                )
+            ),
+            authorizer=ToolIntentAuthorizer(
+                registry=ToolRegistry([fixture_image_intent_definition()]),
+                policy_version=settings.tool_intent_policy_version,
+            ),
+            policy=ToolAuthorizationPolicy(
+                version=settings.tool_intent_policy_version,
+                node="execute_tool",
+                maximum_intents=settings.tool_intent_maximum_intents,
+            ),
+        )
         runtime = cls(
             database=database,
             settings=settings,
@@ -521,7 +554,8 @@ class WorkerRuntime:
             image_vector_index=image_vector_index,
             collection_rebuild_runner=collection_rebuild_runner,
             lifecycle=lifecycle,
-            workflow_service=WorkflowApplicationService(uow_factory=cast(Any, uow_factory)),
+            workflow_service=workflow_service,
+            tool_authorization=tool_authorization,
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
@@ -903,6 +937,55 @@ class WorkerRuntime:
                         reason="creative_plan_resume_mismatch",
                     ) from exc
                 trusted_creative_plan_version_id = plan_claim.plan.id
+                if validated.decision.value == "APPROVE":
+                    if self.tool_authorization is None:
+                        raise RuntimeError("Worker Tool Intent authorization is unavailable")
+                    try:
+                        authorization = self.tool_authorization.authorize_plan(
+                            workspace_id=event.workspace_id or "",
+                            workflow_id=validated.workflow_id,
+                            creative_plan_id=validated.subject_id,
+                            creative_plan_version=validated.subject_version,
+                            approval_id=validated.approval_id,
+                        )
+                    except (ApprovalConflictError, NotFoundError, ValueError) as exc:
+                        raise EventRoutingError(
+                            "Creative Plan Tool Intent authority is no longer current",
+                            reason="tool_intent_authority_mismatch",
+                        ) from exc
+                    audit_summary = tuple(
+                        {
+                            "intent_key": item.audit.intent_key,
+                            "tool_name": item.audit.tool_name,
+                            "schema_version": item.audit.schema_version,
+                            "allowed": item.audit.allowed,
+                            "reason": item.audit.reason.value,
+                            "audit_level": item.audit.audit_level.value,
+                            "argument_sha256": item.audit.argument_sha256,
+                            "resource_count": item.audit.resource_count,
+                            "resource_identity_sha256s": (item.audit.resource_identity_sha256s),
+                            "estimated_cost_units": item.audit.estimated_cost_units,
+                        }
+                        for item in authorization.decisions
+                    )
+                    logger.info(
+                        "tool_intent_authorization",
+                        extra={
+                            "workflow_id": authorization.workflow_id,
+                            "workflow_version": authorization.workflow_version,
+                            "creative_plan_id": authorization.creative_plan_id,
+                            "creative_plan_version_id": (authorization.creative_plan_version_id),
+                            "creative_plan_version": authorization.creative_plan_version,
+                            "approval_id": authorization.approval_id,
+                            "policy_version": self.settings.tool_intent_policy_version,
+                            "decisions": audit_summary,
+                        },
+                    )
+                    if not authorization.allowed:
+                        raise EventRoutingError(
+                            "Approved Creative Plan contains a denied Tool Intent",
+                            reason="tool_intent_policy_denied",
+                        )
                 resume_payload = validated.model_dump(mode="json")
             elif validated.approval_type == ApprovalType.PRODUCT_BRIEF:
                 if validated.decision.value != "APPROVE":

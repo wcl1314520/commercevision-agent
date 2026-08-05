@@ -380,6 +380,11 @@ class CreativePlanPayload:
         keys = [item.key for item in self.directions]
         if len(keys) != len(set(keys)):
             raise ValueError("Creative Plan directions contain duplicate keys")
+        intent_keys = [
+            intent.intent_key for direction in self.directions for intent in direction.tool_intents
+        ]
+        if len(intent_keys) != len(set(intent_keys)):
+            raise ValueError("Creative Plan contains duplicate Tool Intent keys")
         object.__setattr__(
             self, "directions", tuple(sorted(self.directions, key=lambda item: item.key))
         )
