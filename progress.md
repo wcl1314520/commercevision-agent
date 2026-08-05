@@ -1695,3 +1695,7 @@
 - 最终 unit+contract 首轮唯一失败为未改动 ClamAV concurrency saturation 的 20ms Windows 调度边界，
   期望 `TIMEOUT` 而得到 `UNAVAILABLE`；隔离复跑通过，随后完整二次运行明确汇总
   `1384 passed, 1 skipped`。未修改生产超时或测试阈值，远程 Linux CI 继续作为发布权威证据。
+- Ticket 08 实现提交 `a4db757` 的精确 CI `31000063916` 中 Python（完整
+  `1959 passed, 3 skipped`）、Web 与 Container 全绿；Security 的 Gitleaks 仅命中两处新增测试
+  `idempotency_key` 高熵占位符。未添加 allowlist 或关闭规则，只把两个测试键改为低熵值；对应真实
+  MySQL 测试 `2 passed`，等待修复提交的新一轮四路 CI。

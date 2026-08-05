@@ -1491,7 +1491,7 @@ def test_real_mysql_plan_rejection_limit_is_bounded_before_side_effects(
                 decision=ApprovalDecision.REJECT,
                 reason_code="PLAN_NEEDS_REVISION",
             ),
-            idempotency_key="bounded-plan-rejection-001",
+            idempotency_key="test-limit-test-limit",
             trace_id="trace-bounded-plan-rejection",
         )
 

@@ -450,7 +450,7 @@ def test_durable_fixture_planner_writes_one_replay_safe_authoritative_version(
             decision=ApprovalDecision.REJECT,
             reason_code="PLAN_NEEDS_REVISION",
         ),
-        idempotency_key="reject-durable-fixture-plan-001",
+        idempotency_key="test-reject-test-reject",
         trace_id="trace-reject-durable-fixture-plan",
     )
     with integration_database.engine.begin() as connection:
