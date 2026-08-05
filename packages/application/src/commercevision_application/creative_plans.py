@@ -38,6 +38,7 @@ from .creative_plan_ports import (
     CreativePlanUnitOfWorkFactory,
     CreativePlanUnitOfWorkPort,
 )
+from .planning_observability import NullPlanningObserver, PlanningObserver
 
 _IDEMPOTENCY_RETENTION = timedelta(days=30)
 _IDEMPOTENCY_RESOURCE_TYPE = "CREATIVE_PLAN_VERSION"
@@ -162,11 +163,41 @@ class CreativePlanApplicationService:
         unit_of_work_factory: CreativePlanUnitOfWorkFactory,
         *,
         cursor_codec: CreativePlanCursorCodecPort | None = None,
+        observer: PlanningObserver | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._cursor_codec = cursor_codec
+        self._observer = observer or NullPlanningObserver()
 
     def create_plan(
+        self,
+        *,
+        workspace_id: str,
+        actor_id: str,
+        request: CreativePlanCreateRequestV1,
+        trace_id: str,
+        idempotency_key: str,
+    ) -> CreativePlanWriteResult:
+        with self._observer.observe(
+            step="versioning",
+            trace_id=trace_id,
+            workflow_id=request.workflow_id,
+            plan_id=request.creative_plan_id,
+            plan_version=1,
+            context_hash=request.provenance.context_sha256,
+            prompt_revision=request.provenance.prompt_revision,
+            policy_id=request.provenance.context_policy_version,
+            operation_id=idempotency_key,
+        ):
+            return self._create_plan(
+                workspace_id=workspace_id,
+                actor_id=actor_id,
+                request=request,
+                trace_id=trace_id,
+                idempotency_key=idempotency_key,
+            )
+
+    def _create_plan(
         self,
         *,
         workspace_id: str,
@@ -246,9 +277,37 @@ class CreativePlanApplicationService:
                 expected_head_version=request.expected_head_version,
             )
             unit_of_work.commit()
+            self._observer.annotate(plan_version=result.version.version_number)
+            self._observer.record_revision(outcome="created")
             return result
 
     def revise_plan(
+        self,
+        *,
+        workspace_id: str,
+        creative_plan_id: str,
+        actor_id: str,
+        request: CreativePlanRevisionRequestV1,
+        trace_id: str,
+        idempotency_key: str,
+    ) -> CreativePlanWriteResult:
+        with self._observer.observe(
+            step="versioning",
+            trace_id=trace_id,
+            workflow_id=request.workflow_id,
+            plan_id=creative_plan_id,
+            operation_id=idempotency_key,
+        ):
+            return self._revise_plan(
+                workspace_id=workspace_id,
+                creative_plan_id=creative_plan_id,
+                actor_id=actor_id,
+                request=request,
+                trace_id=trace_id,
+                idempotency_key=idempotency_key,
+            )
+
+    def _revise_plan(
         self,
         *,
         workspace_id: str,
@@ -329,6 +388,13 @@ class CreativePlanApplicationService:
                 expected_head_version=request.expected_head_version,
             )
             unit_of_work.commit()
+            self._observer.annotate(
+                plan_version=result.version.version_number,
+                context_hash=result.version.provenance.context_sha256,
+                prompt_revision=result.version.provenance.prompt_revision,
+                policy_id=result.version.provenance.context_policy_version,
+            )
+            self._observer.record_revision(outcome="revised")
             return result
 
     def append_version(

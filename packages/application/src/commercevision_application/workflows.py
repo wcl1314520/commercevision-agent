@@ -46,6 +46,7 @@ from commercevision_domain.workflow.errors import (
     IdempotencyConflictError,
 )
 
+from .planning_observability import NullPlanningObserver, PlanningObserver
 from .ports import UnitOfWorkFactory, UnitOfWorkPort
 from .projections import workflow_response
 
@@ -101,8 +102,14 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
 
 
 class WorkflowApplicationService:
-    def __init__(self, *, uow_factory: UnitOfWorkFactory) -> None:
+    def __init__(
+        self,
+        *,
+        uow_factory: UnitOfWorkFactory,
+        observer: PlanningObserver | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._observer = observer or NullPlanningObserver()
 
     def create(
         self,
@@ -303,6 +310,45 @@ class WorkflowApplicationService:
         idempotency_key: str,
         trace_id: str,
     ) -> WorkflowResponse:
+        with self._observer.observe(
+            step="approval",
+            trace_id=trace_id,
+            workflow_id=workflow_id,
+            plan_id=(request.subject_id if approval_type is ApprovalType.CREATIVE_PLAN else None),
+            plan_version=(
+                request.subject_version if approval_type is ApprovalType.CREATIVE_PLAN else None
+            ),
+            operation_id=idempotency_key,
+        ):
+            try:
+                return self._approve(
+                    workflow_id=workflow_id,
+                    workspace_id=workspace_id,
+                    actor_id=actor_id,
+                    approval_type=approval_type,
+                    request=request,
+                    idempotency_key=idempotency_key,
+                    trace_id=trace_id,
+                )
+            except (
+                ConcurrencyError,
+                CreativePlanApprovalSubjectConflictError,
+                CreativePlanApprovalVersionConflictError,
+            ):
+                self._observer.record_approval(outcome="stale")
+                raise
+
+    def _approve(
+        self,
+        *,
+        workflow_id: str,
+        workspace_id: str,
+        actor_id: str,
+        approval_type: ApprovalType,
+        request: ApprovalRequest,
+        idempotency_key: str,
+        trace_id: str,
+    ) -> WorkflowResponse:
         scope = f"workflow:approval:{workflow_id}:{approval_type.value}"
         key_hash = _key_hash(idempotency_key)
         request_hash = _canonical_hash(
@@ -351,27 +397,27 @@ class WorkflowApplicationService:
                 comment_ref=request.comment_ref,
                 now=now,
             )
+            human_wait_seconds = max(0.0, (now - workflow.updated_at).total_seconds())
             workflow.transition(target, current_node=workflow.current_node, now=now)
             uow.approvals.add(approval)
             uow.workflows.save(workflow)
-            uow.outbox.add(
-                self._workflow_event(
-                    workflow=workflow,
-                    event_type=EventType.WORKFLOW_RESUME_REQUESTED,
-                    trace_id=trace_id,
-                    payload=WorkflowResumeRequestedPayload(
-                        workflow_id=workflow.id,
-                        approval_id=approval.id,
-                        approval_type=approval_type,
-                        decision=request.decision,
-                        expected_workflow_version=request.expected_workflow_version,
-                        resulting_workflow_version=workflow.version,
-                        subject_id=request.subject_id,
-                        subject_version=request.subject_version,
-                    ).model_dump(mode="json"),
-                    now=now,
-                )
+            resume_event = self._workflow_event(
+                workflow=workflow,
+                event_type=EventType.WORKFLOW_RESUME_REQUESTED,
+                trace_id=trace_id,
+                payload=WorkflowResumeRequestedPayload(
+                    workflow_id=workflow.id,
+                    approval_id=approval.id,
+                    approval_type=approval_type,
+                    decision=request.decision,
+                    expected_workflow_version=request.expected_workflow_version,
+                    resulting_workflow_version=workflow.version,
+                    subject_id=request.subject_id,
+                    subject_version=request.subject_version,
+                ).model_dump(mode="json"),
+                now=now,
             )
+            uow.outbox.add(resume_event)
             response = workflow_response(workflow, approvals=[approval])
             uow.idempotency.complete(
                 scope=scope,
@@ -395,6 +441,15 @@ class WorkflowApplicationService:
                 now=now,
             )
             uow.commit()
+            self._observer.annotate(
+                approval_id=approval.id,
+                event_id=resume_event.envelope.event_id,
+            )
+            self._observer.record_approval(outcome=request.decision.value.lower())
+            self._observer.record_human(
+                outcome=request.decision.value.lower(),
+                wait_seconds=human_wait_seconds,
+            )
         return response
 
     @staticmethod

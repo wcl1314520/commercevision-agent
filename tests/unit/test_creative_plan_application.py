@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -349,7 +350,21 @@ def _workflow_for(version: CreativePlanVersion) -> Workflow:
 def test_create_command_constructs_agent_version_and_records_aggregate_audit() -> None:
     fixture = _version()
     unit_of_work = _UnitOfWork(_workflow_for(fixture))
-    service = CreativePlanApplicationService(lambda: unit_of_work)
+    observations: list[tuple[str, dict[str, object]]] = []
+
+    class Observer:
+        @contextmanager
+        def observe(self, **values):
+            observations.append(("span", values))
+            yield
+
+        def annotate(self, **values):
+            observations.append(("annotate", values))
+
+        def record_revision(self, **values):
+            observations.append(("revision", values))
+
+    service = CreativePlanApplicationService(lambda: unit_of_work, observer=Observer())
 
     result = service.create_plan(
         workspace_id=fixture.workspace_id,
@@ -378,6 +393,24 @@ def test_create_command_constructs_agent_version_and_records_aggregate_audit() -
         "expected_workflow_version": 7,
         "expected_head_version": 0,
     }
+    assert observations == [
+        (
+            "span",
+            {
+                "step": "versioning",
+                "trace_id": "trace-create-plan",
+                "workflow_id": fixture.workflow_id,
+                "plan_id": fixture.creative_plan_id,
+                "plan_version": 1,
+                "context_hash": fixture.provenance.context_sha256,
+                "prompt_revision": fixture.provenance.prompt_revision,
+                "policy_id": fixture.provenance.context_policy_version,
+                "operation_id": "create-plan-request-001",
+            },
+        ),
+        ("annotate", {"plan_version": 1}),
+        ("revision", {"outcome": "created"}),
+    ]
 
 
 def test_create_command_replays_exact_result_without_new_version_or_audit() -> None:

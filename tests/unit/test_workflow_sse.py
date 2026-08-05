@@ -1,10 +1,12 @@
 import json
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from commercevision_api.workflow_routes import workflow_events
 from commercevision_api.workflow_sse import (
+    WorkflowSseClientTracker,
     WorkflowSsePolicy,
     encode_retry_hint,
     encode_workflow_event,
@@ -129,6 +131,101 @@ async def test_workflow_sse_disconnect_stops_without_another_database_poll() -> 
     assert chunks[0] == b"retry: 3000\n\n"
     assert len(chunks) == 2
     assert b"id: v1.current.opaque.signature" in chunks[1]
+
+
+@pytest.mark.asyncio
+async def test_workflow_sse_observes_reconnect_lag_and_client_lifecycle() -> None:
+    occurred_at = datetime(2026, 8, 5, 14, 0, tzinfo=UTC)
+    delivery = WorkflowEventDelivery(
+        event=EventResponse(
+            event_id="019fac40-0000-7000-8000-000000000002",
+            event_type="workflow.cancelled",
+            schema_version=1,
+            aggregate_type="workflow",
+            aggregate_id="019fac40-0000-7000-8000-000000000001",
+            aggregate_version=4,
+            occurred_at=occurred_at,
+            trace_id="trace-safe",
+            payload={"arbitrary_user_text": "must never reach telemetry"},
+        ),
+        cursor="v1.current.opaque.signature",
+    )
+    observations: list[tuple[str, dict[str, object]]] = []
+
+    class Observer:
+        @contextmanager
+        def observe(self, **values):
+            observations.append(("span", values))
+            yield
+
+        def annotate(self, **values):
+            observations.append(("annotate", values))
+
+        def record_sse(self, **values):
+            observations.append(("sse", values))
+
+    stream = stream_workflow_events(
+        request=_DisconnectAfterDelivery(),  # type: ignore[arg-type]
+        service=_UnexpectedPoll(),  # type: ignore[arg-type]
+        workspace_id="workspace-a",
+        workflow_id="019fac40-0000-7000-8000-000000000001",
+        cursor="v1.previous.opaque.signature",
+        first_page=WorkflowEventPage(items=(delivery,), next_cursor=delivery.cursor),
+        policy=WorkflowSsePolicy(
+            poll_interval_seconds=1,
+            heartbeat_seconds=15,
+            retry_milliseconds=3000,
+            max_session_seconds=300,
+        ),
+        observer=Observer(),
+        client_tracker=WorkflowSseClientTracker(),
+        utc_now=lambda: datetime(2026, 8, 5, 14, 0, 2, tzinfo=UTC),
+    )
+
+    assert [chunk async for chunk in stream]
+    assert observations == [
+        (
+            "span",
+            {
+                "step": "sse",
+                "trace_id": None,
+                "workflow_id": "019fac40-0000-7000-8000-000000000001",
+            },
+        ),
+        (
+            "sse",
+            {
+                "outcome": "connected",
+                "reconnect": True,
+                "active_clients": 1,
+                "lag_seconds": 0.0,
+            },
+        ),
+        (
+            "annotate",
+            {
+                "event_id": "019fac40-0000-7000-8000-000000000002",
+            },
+        ),
+        (
+            "sse",
+            {
+                "outcome": "emitted",
+                "reconnect": False,
+                "active_clients": 1,
+                "lag_seconds": 2.0,
+            },
+        ),
+        (
+            "sse",
+            {
+                "outcome": "disconnected",
+                "reconnect": False,
+                "active_clients": 0,
+                "lag_seconds": 0.0,
+            },
+        ),
+    ]
 
 
 @pytest.mark.asyncio

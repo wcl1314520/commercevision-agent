@@ -1831,3 +1831,22 @@
   aggregate artifact retention、Web、Container builds、Gitleaks 与 SBOM 全部成功。
 - Ticket 12 正式 `complete`；Ticket 13 `Planning observability and operator runbooks` 已按 blockers-first
   解锁并进入 `in_progress`。状态提交精确 CI 全绿前不开始 Ticket 13 RED。
+
+# 2026-08-06 Phase 3 Ticket 13 本地实现
+
+- 新增技术中立 `PlanningObserver` 与生产 `SafePlanningObserver`：可观测性构造、进入、退出、注解或指标
+  exporter 的异常均 fail-open，不改变事务结果；真实业务异常始终原样抛出。Phase 3 adapter 仅暴露固定 span、
+  allowlist label 和安全身份，request trace/operation 无条件 SHA-256，非安全 ID 哈希，不接收 Plan、Prompt、
+  Context、Provider payload、任意用户文本或 Citation 内容。
+- Planning Context clipping、Prompt semantic/DB revision、Planner validity/latency、Creative Plan revision、exact
+  Approval/Outbox event、Tool Policy reason、LangGraph resume outcome 与 SSE connection/reconnect/emission lag 已
+  接入公开应用/运行时 seam；所有写后指标只在 commit 后发出，幂等 replay 不重复计数，遥测故障不影响写命令。
+- 终审以 RED 复现两个语义缺口并最小修复：旧 Workflow/Plan 页面冲突现在计为 stale Approval 且不误记人工确认；
+  SSE 只证明事件已交给 ASGI，因此 bounded outcome 使用 `emitted` 而不虚报浏览器 `delivered`。
+- 运维文档锁定 bounded-cardinality labels、初始告警阈值、readiness/degradation 边界；Runbook 覆盖 stuck planning、
+  invalid output、stale approval、repeated rejection、resume mismatch、policy denial surge、SSE lag/reconnect storm 与
+  retention expiry，并为每类事故给出 Signal、Containment、Recovery、Recovery proof、Escalate。
+- 最终本地证据：公开 telemetry/业务 seam 聚焦 `18 passed`；完整 unit+contract
+  `1460 passed, 1 skipped, 2 warnings in 62.02s`；全仓 Ruff `462 files`、431 条 Mypy baseline、Python license、
+  dependency vulnerability、Compose config 与 `git diff --check` 全绿。工单保持 `in_progress`，只在实现提交的
+  精确 GitHub Actions 四路全绿后正式完成并解锁 Ticket 14。

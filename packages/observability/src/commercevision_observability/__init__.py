@@ -9,6 +9,7 @@ from .phase2 import (
     TelemetryError,
     TelemetryIdentity,
 )
+from .planning import PlanningSpan, PlanningTelemetry, PlanningTelemetryIdentity
 from .product_briefs import ProductBriefTelemetry
 from .retrieval import RetrievalTelemetry
 from .runtime import TelemetryRuntime, build_telemetry_runtime, configure_telemetry
@@ -16,6 +17,9 @@ from .runtime import TelemetryRuntime, build_telemetry_runtime, configure_teleme
 __all__ = [
     "Phase2Span",
     "Phase2Telemetry",
+    "PlanningSpan",
+    "PlanningTelemetry",
+    "PlanningTelemetryIdentity",
     "IndexingTelemetry",
     "ProductBriefTelemetry",
     "RetrievalTelemetry",

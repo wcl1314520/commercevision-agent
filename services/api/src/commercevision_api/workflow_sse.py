@@ -6,8 +6,14 @@ import asyncio
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from threading import Lock
 
-from commercevision_application import WorkflowEventStreamService
+from commercevision_application import (
+    NullPlanningObserver,
+    PlanningObserver,
+    WorkflowEventStreamService,
+)
 from commercevision_application.workflow_events import (
     WorkflowEventDelivery,
     WorkflowEventPage,
@@ -18,6 +24,35 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 _MAX_CURSOR_BYTES = 256
+
+
+class WorkflowSseClientTracker:
+    """Keep a process-local active SSE client count for telemetry only."""
+
+    def __init__(self) -> None:
+        self._active = 0
+        self._lock = Lock()
+
+    def connect(self) -> int:
+        with self._lock:
+            self._active += 1
+            return self._active
+
+    def disconnect(self) -> int:
+        with self._lock:
+            self._active = max(0, self._active - 1)
+            return self._active
+
+    def active(self) -> int:
+        with self._lock:
+            return self._active
+
+
+_SSE_CLIENTS = WorkflowSseClientTracker()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,12 +139,68 @@ async def stream_workflow_events(
     service: WorkflowEventStreamService,
     workspace_id: str,
     workflow_id: str,
+    trace_id: str | None = None,
     cursor: str | None,
     first_page: WorkflowEventPage,
     policy: WorkflowSsePolicy,
     monotonic: Callable[[], float] = time.monotonic,
+    utc_now: Callable[[], datetime] = _utc_now,
+    observer: PlanningObserver | None = None,
+    client_tracker: WorkflowSseClientTracker = _SSE_CLIENTS,
 ) -> AsyncIterator[bytes]:
     """Poll short transactions and stop on disconnect or the session budget."""
+
+    resolved_observer = observer or NullPlanningObserver()
+    active_clients = client_tracker.connect()
+    with resolved_observer.observe(
+        step="sse",
+        trace_id=trace_id,
+        workflow_id=workflow_id,
+    ):
+        resolved_observer.record_sse(
+            outcome="connected",
+            reconnect=cursor is not None,
+            active_clients=active_clients,
+            lag_seconds=0.0,
+        )
+        try:
+            async for chunk in _poll_workflow_events(
+                request=request,
+                service=service,
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                cursor=cursor,
+                first_page=first_page,
+                policy=policy,
+                monotonic=monotonic,
+                utc_now=utc_now,
+                observer=resolved_observer,
+                client_tracker=client_tracker,
+            ):
+                yield chunk
+        finally:
+            resolved_observer.record_sse(
+                outcome="disconnected",
+                reconnect=False,
+                active_clients=client_tracker.disconnect(),
+                lag_seconds=0.0,
+            )
+
+
+async def _poll_workflow_events(
+    *,
+    request: Request,
+    service: WorkflowEventStreamService,
+    workspace_id: str,
+    workflow_id: str,
+    cursor: str | None,
+    first_page: WorkflowEventPage,
+    policy: WorkflowSsePolicy,
+    monotonic: Callable[[], float],
+    utc_now: Callable[[], datetime],
+    observer: PlanningObserver,
+    client_tracker: WorkflowSseClientTracker,
+) -> AsyncIterator[bytes]:
 
     started_at = monotonic()
     deadline = started_at + policy.max_session_seconds
@@ -125,6 +216,16 @@ async def stream_workflow_events(
         for delivery in page.items:
             if await request.is_disconnected():
                 return
+            observer.annotate(event_id=delivery.event.event_id)
+            observer.record_sse(
+                outcome="emitted",
+                reconnect=False,
+                active_clients=client_tracker.active(),
+                lag_seconds=max(
+                    0.0,
+                    (utc_now() - delivery.event.occurred_at).total_seconds(),
+                ),
+            )
             yield encode_workflow_event(
                 delivery,
                 retry_milliseconds=policy.retry_milliseconds,

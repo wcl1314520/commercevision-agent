@@ -2,49 +2,26 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from enum import StrEnum
-from typing import Protocol
 
 from opentelemetry import metrics, trace
 from opentelemetry.metrics import Meter
 from opentelemetry.trace import Status, StatusCode, Tracer
 
+from ._safe_telemetry import (
+    StructuredLogger as _StructuredLogger,
+)
+from ._safe_telemetry import (
+    bounded_dimension as _dimension,
+)
+from ._safe_telemetry import (
+    safe_token as _token,
+)
 from .logging import get_logger
-
-_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-_SAFE_DIMENSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
-
-
-class _StructuredLogger(Protocol):
-    def info(self, event: str, **values: object) -> object: ...
-
-    def warning(self, event: str, **values: object) -> object: ...
-
-    def error(self, event: str, **values: object) -> object: ...
-
-
-def _token(value: str | None, *, always_hash: bool = False) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise TypeError("telemetry identifiers must be strings")
-    if not always_hash and _SAFE_IDENTIFIER.fullmatch(value):
-        return value
-    return f"sha256:{hashlib.sha256(value.encode()).hexdigest()}"
-
-
-def _dimension(name: str, value: str | None) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or _SAFE_DIMENSION.fullmatch(value) is None:
-        raise ValueError(f"telemetry {name} must be a bounded symbolic value")
-    return value
 
 
 class Phase2Span(StrEnum):

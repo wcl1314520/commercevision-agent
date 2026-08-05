@@ -3,8 +3,8 @@
 | 属性 | 值 |
 |---|---|
 | 状态 | decision |
-| 最后更新 | 2026-08-04 |
-| 适用版本 | Operations v1 / Phase 2 |
+| 最后更新 | 2026-08-05 |
+| 适用版本 | Operations v1 / Phase 2–3 |
 
 ## OpenTelemetry
 
@@ -139,6 +139,46 @@ Operation/Asset IDs、attempt、stage、verdict、reason、validator identity �
 - 人工与 Judge 一致率。
 - 分品类首轮通过率。
 - Regression。
+
+### Phase 3 planning and HITL
+
+Planning Context、Prompt resolution、Planner、Plan versioning、Approval、Tool Policy、LangGraph
+resume 与 SSE 使用 `commercevision.phase3.planning.*` span。允许关联的身份仅为 Workflow、Plan
+ID/version、Context SHA-256、Prompt revision ID、Approval、Event、Operation、无条件哈希的 request
+trace 与 Policy ID；身份不进入 metrics label。
+
+指标如下：
+
+- `commercevision.phase3.planning.context.clipped_sources`。
+- `commercevision.phase3.planning.planner.validity` 与
+  `commercevision.phase3.planning.planner.duration`。
+- `commercevision.phase3.planning.revisions` 与
+  `commercevision.phase3.planning.approvals.stale`。
+- `commercevision.phase3.planning.policy.denials`。
+- `commercevision.phase3.planning.human.wait` 与
+  `commercevision.phase3.planning.human.confirmations`。
+- `commercevision.phase3.planning.sse.clients`、
+  `commercevision.phase3.planning.sse.reconnects` 与
+  `commercevision.phase3.planning.sse.lag`。
+- `commercevision.phase3.planning.resume.failures`。
+
+这是 bounded-cardinality 契约。labels 只允许以下固定集合：Context `complete|clipped`；Planner
+`valid|invalid`；revision `created|revised`；Approval/HITL `approve|reject|regenerate|stale|confirmed`；
+Policy outcome `allowed|denied`，reason 只允许 Tool Registry 发布的固定枚举；SSE
+`connected|emitted|disconnected`；resume
+`succeeded|checkpoint_mismatch|contract_mismatch|execution_failed`。Workspace、Workflow、Plan、Approval、
+Event、Operation、Prompt revision、Context hash、trace 和 Citation ID 均不得作为 label。
+
+Raw Creative Plan、Prompt、Planning Context、Provider payload、Secret、签名 URL、arbitrary user text、
+sensitive Citation、异常消息以及 SSE payload 不得进入 log/span/metric/event/error。错误只输出固定 code、
+category、retryability 与 class。Collector/exporter 是 best-effort；SSE 不是 readiness，SSE 或浏览器降级
+不得让控制面写命令摘流。
+
+初始告警：Planner invalid 5 分钟 >1%（最少 20）；Planner stuck >5 分钟预警、>15 分钟 critical；
+stale Approval 5 分钟 >5；resume `checkpoint_mismatch` 任意新增；Tool Policy denial 5 分钟 >20 且高于
+基线 3 倍；SSE lag P95 连续 5 分钟 >10 秒；reconnect >3 次/客户端/分钟且总量 >30；等待人工任务距
+retention expiry <24 小时。全部处置见
+[Phase 3 Planning Observability Runbook](../runbooks/planning-observability.md)。
 
 ### 数据
 

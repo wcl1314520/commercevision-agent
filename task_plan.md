@@ -242,6 +242,11 @@
   `2030 passed, 3 skipped`，Planner contract/CLI/artifact、Web、Container builds、Gitleaks 与 SBOM 全部
   成功。Ticket 12 正式完成，Ticket 13 已按 blockers-first 解锁并进入 Planning observability/runbooks 的
   首个 TDD 纵向切片。
+- Ticket 13 已完成本地实现与生产质量审查：Planning Context、Prompt、Planner、版本、Approval、Tool Policy、
+  LangGraph resume 与 SSE 通过技术中立 observer 串联，身份脱敏、固定低基数指标、fail-open 遥测、8 类事故
+  Runbook、告警阈值与本地 Compose OTLP/Prometheus 契约均已闭合。完整 unit+contract
+  `1460 passed, 1 skipped`，Ruff、431-diagnostic Mypy baseline、许可证/漏洞、Compose 与 diff 门禁全绿；
+  当前只允许形成实现提交并等待该精确 GitHub Actions 四路全绿，Ticket 14 保持锁定。
 
 ## 成功标准
 

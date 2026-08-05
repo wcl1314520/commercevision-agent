@@ -15,6 +15,7 @@ from commercevision_tool_runtime import (
     ToolIntentCandidate,
 )
 
+from .planning_observability import NullPlanningObserver, PlanningObserver
 from .workflows import CreativePlanExecutionClaim
 
 
@@ -122,6 +123,7 @@ class PlanToolAuthorizationService:
         entitlements: ToolAuthorizationEntitlementsPort,
         authorizer: ToolIntentAuthorizer,
         policy: ToolAuthorizationPolicy,
+        observer: PlanningObserver | None = None,
     ) -> None:
         if authorizer.policy_version != policy.version:
             raise ValueError("Tool authorization policy versions do not match")
@@ -129,8 +131,44 @@ class PlanToolAuthorizationService:
         self._entitlements = entitlements
         self._authorizer = authorizer
         self._policy = policy
+        self._observer = observer or NullPlanningObserver()
 
     def authorize_plan(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        creative_plan_version: int,
+        approval_id: str,
+    ) -> PlanToolAuthorizationResult:
+        with self._observer.observe(
+            step="tool.policy",
+            workflow_id=workflow_id,
+            plan_id=creative_plan_id,
+            plan_version=creative_plan_version,
+            approval_id=approval_id,
+            policy_id=self._policy.version,
+        ):
+            try:
+                result = self._authorize_plan(
+                    workspace_id=workspace_id,
+                    workflow_id=workflow_id,
+                    creative_plan_id=creative_plan_id,
+                    creative_plan_version=creative_plan_version,
+                    approval_id=approval_id,
+                )
+            except ApprovalConflictError:
+                self._observer.record_approval(outcome="stale")
+                raise
+            for decision in result.decisions:
+                self._observer.record_policy(
+                    outcome=("allowed" if decision.allowed else "denied"),
+                    reason=decision.reason.value,
+                )
+            return result
+
+    def _authorize_plan(
         self,
         *,
         workspace_id: str,

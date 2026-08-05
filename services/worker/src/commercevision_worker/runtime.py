@@ -44,6 +44,7 @@ from commercevision_application import (
     ProductBriefContinuationClaim,
     ProductBriefRecoveryClaim,
     PromptRegistryApplicationService,
+    SafePlanningObserver,
     StaleProductBriefContinuation,
     ToolAuthorizationEntitlements,
     ToolAuthorizationPolicy,
@@ -126,6 +127,7 @@ from commercevision_object_storage import (
 from commercevision_observability import (
     Phase2Span,
     Phase2Telemetry,
+    PlanningTelemetry,
     TelemetryDimensions,
     TelemetryError,
     TelemetryIdentity,
@@ -453,6 +455,7 @@ class WorkerRuntime:
             maximum_tokens=2_000,
             maximum_images=4,
         )
+        planning_telemetry = SafePlanningObserver(PlanningTelemetry())
         if creative_plan_node is None:
             creative_plan_node = DurableFixturePlannerNode(
                 DurableFixturePlanner(
@@ -463,9 +466,11 @@ class WorkerRuntime:
                             policies={planning_context_policy.version: planning_context_policy},
                         ),
                         snapshots=SqlAlchemyPlanningContextSnapshotStore(database.session_factory),
+                        observer=planning_telemetry,
                     ),
                     prompts=PromptRegistryApplicationService(prompt_registry_uow_factory),
                     plans=CreativePlanApplicationService(creative_plan_uow_factory),
+                    observer=planning_telemetry,
                 )
             )
         graph = build_fixture_graph(
@@ -504,7 +509,10 @@ class WorkerRuntime:
                 ),
             ),
         )
-        workflow_service = WorkflowApplicationService(uow_factory=cast(Any, uow_factory))
+        workflow_service = WorkflowApplicationService(
+            uow_factory=cast(Any, uow_factory),
+            observer=planning_telemetry,
+        )
         tool_authorization = PlanToolAuthorizationService(
             execution_authority=workflow_service,
             entitlements=ConfiguredToolAuthorizationEntitlements(
@@ -528,6 +536,7 @@ class WorkerRuntime:
                 node="execute_tool",
                 maximum_intents=settings.tool_intent_maximum_intents,
             ),
+            observer=planning_telemetry,
         )
         runtime = cls(
             database=database,
@@ -542,7 +551,11 @@ class WorkerRuntime:
                 retry_initial=timedelta(seconds=settings.worker_message_retry_initial_seconds),
                 retry_max=timedelta(seconds=settings.worker_message_retry_max_seconds),
             ),
-            agent=FixtureAgentRuntime(graph, checkpointer),
+            agent=FixtureAgentRuntime(
+                graph,
+                checkpointer,
+                observer=planning_telemetry,
+            ),
             operation_worker=operation_worker,
             operation_executors=executor_registry,
             brand_profile_invalidation=brand_profile_invalidation,

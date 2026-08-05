@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -599,9 +600,21 @@ async def test_async_human_resume_survives_runtime_restart() -> None:
 
 def test_resume_without_a_matching_checkpoint_is_a_stable_conflict() -> None:
     checkpointer = InMemorySaver()
+    observations: list[tuple[str, dict[str, object]]] = []
+
+    class Observer:
+        @contextmanager
+        def observe(self, **values):
+            observations.append(("span", values))
+            yield
+
+        def record_resume(self, **values):
+            observations.append(("resume", values))
+
     runtime = FixtureAgentRuntime(
         _build_human_wait_probe_graph(checkpointer, []),
         checkpointer,
+        observer=Observer(),
     )
 
     with pytest.raises(ResumeCheckpointConflictError, match="no matching durable checkpoint"):
@@ -625,6 +638,21 @@ def test_resume_without_a_matching_checkpoint_is_a_stable_conflict() -> None:
                 "subject_version": 1,
             },
         )
+
+    assert observations == [
+        (
+            "span",
+            {
+                "step": "langgraph.resume",
+                "trace_id": "checkpoint-missing-resume-trace",
+                "workflow_id": "checkpoint-missing-resume",
+                "plan_id": "plan-missing-v1",
+                "plan_version": 1,
+                "approval_id": "approval-missing-0001",
+            },
+        ),
+        ("resume", {"outcome": "checkpoint_mismatch"}),
+    ]
 
 
 @pytest.mark.parametrize("current_node", ["execute_tool", "export"])

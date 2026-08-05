@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -102,6 +103,7 @@ def _service(
     authority: _ExecutionAuthority,
     entitlements: _Entitlements,
     maximum_intents: int = 16,
+    observer=None,
 ) -> PlanToolAuthorizationService:
     registry = ToolRegistry(
         [
@@ -134,6 +136,7 @@ def _service(
             node="execute_tool",
             maximum_intents=maximum_intents,
         ),
+        observer=observer,
     )
 
 
@@ -243,3 +246,47 @@ def test_application_returns_auditable_denials_when_intent_limit_is_narrowed() -
     ]
     assert all(item.idempotency_key is None for item in result.decisions)
     assert result.allowed is False
+
+
+def test_application_observes_policy_denial_without_plan_or_user_text() -> None:
+    observations: list[tuple[str, dict[str, object]]] = []
+
+    class Observer:
+        @contextmanager
+        def observe(self, **values):
+            observations.append(("span", values))
+            yield
+
+        def record_policy(self, **values):
+            observations.append(("policy", values))
+
+        def record_approval(self, **values):
+            observations.append(("approval", values))
+
+    result = _service(
+        authority=_ExecutionAuthority(),
+        entitlements=_Entitlements(frozenset()),
+        observer=Observer(),
+    ).authorize_plan(
+        workspace_id="workspace",
+        workflow_id="workflow",
+        creative_plan_id="plan",
+        creative_plan_version=2,
+        approval_id="approval",
+    )
+
+    assert result.allowed is False
+    assert observations == [
+        (
+            "span",
+            {
+                "step": "tool.policy",
+                "workflow_id": "workflow",
+                "plan_id": "plan",
+                "plan_version": 2,
+                "approval_id": "approval",
+                "policy_id": "tool-intent-policy-v1",
+            },
+        ),
+        ("policy", {"outcome": "denied", "reason": "RIGHTS_DENIED"}),
+    ]

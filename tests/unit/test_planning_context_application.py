@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -153,12 +154,42 @@ def test_build_revalidates_exact_authority_and_persists_reconstructable_snapshot
         }
     )
     snapshots = _Snapshots()
-    service = PlanningContextApplicationService(authority=authority, snapshots=snapshots)
+    observations: list[tuple[str, dict[str, object]]] = []
+
+    class Observer:
+        @contextmanager
+        def observe(self, **values):
+            observations.append(("span", values))
+            yield
+
+        def annotate(self, **values):
+            observations.append(("annotate", values))
+
+        def record_context(self, **values):
+            observations.append(("context", values))
+
+    service = PlanningContextApplicationService(
+        authority=authority,
+        snapshots=snapshots,
+        observer=Observer(),
+    )
 
     context = service.build(_request(product_brief, citation))
 
     assert snapshots.saved == context
     assert snapshots.retain_until == NOW + timedelta(days=30)
+    assert observations == [
+        (
+            "span",
+            {
+                "step": "context.build",
+                "workflow_id": WORKFLOW_ID,
+                "policy_id": "planning-context-v1",
+            },
+        ),
+        ("annotate", {"context_hash": context.context_sha256}),
+        ("context", {"outcome": "complete", "clipped_sources": 0}),
+    ]
     assert (
         service.reconstruct(
             workspace_id=WORKSPACE_ID,

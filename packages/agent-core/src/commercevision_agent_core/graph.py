@@ -34,6 +34,7 @@ from langgraph.checkpoint.base import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from .observability import AgentRuntimeObserver, NullAgentRuntimeObserver
 from .ports import CreativePlanNodePort, NodeLifecyclePort, ProductBriefContinuationLike
 from .state import FixtureAgentState
 
@@ -1032,11 +1033,18 @@ def build_fixture_graph(
 
 
 class FixtureAgentRuntime:
-    def __init__(self, graph: Any, checkpointer: BaseCheckpointSaver[str]) -> None:
+    def __init__(
+        self,
+        graph: Any,
+        checkpointer: BaseCheckpointSaver[str],
+        *,
+        observer: AgentRuntimeObserver | None = None,
+    ) -> None:
         self._graph = (
             graph if isinstance(graph, _GenerationAwareGraph) else _GenerationAwareGraph(graph)
         )
         self._checkpointer = checkpointer
+        self._observer = observer or NullAgentRuntimeObserver()
         graph_checkpointer = self._graph.checkpointer
         if isinstance(graph_checkpointer, _GenerationCheckpointSaver):
             if graph_checkpointer.delegate is not checkpointer:
@@ -1045,6 +1053,45 @@ class FixtureAgentRuntime:
             self._graph.checkpointer = _GenerationCheckpointSaver(checkpointer)
 
     def run(
+        self,
+        *,
+        initial_state: FixtureAgentState,
+        resume_payload: dict[str, Any] | None = None,
+        trusted_creative_plan_version_id: str | None = None,
+        preclaimed_step_id: str | None = None,
+        preclaimed_lease_token: str | None = None,
+    ) -> dict[str, Any]:
+        if resume_payload is None:
+            return self._run(
+                initial_state=initial_state,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+                preclaimed_step_id=preclaimed_step_id,
+                preclaimed_lease_token=preclaimed_lease_token,
+            )
+        plan_id, plan_version = self._resume_plan_identity(initial_state, resume_payload)
+        with self._observer.observe(
+            step="langgraph.resume",
+            trace_id=initial_state.trace_id,
+            workflow_id=initial_state.workflow_id,
+            plan_id=plan_id,
+            plan_version=plan_version,
+            approval_id=self._resume_string(resume_payload, "approval_id"),
+        ):
+            try:
+                result = self._run(
+                    initial_state=initial_state,
+                    resume_payload=resume_payload,
+                    trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+                    preclaimed_step_id=preclaimed_step_id,
+                    preclaimed_lease_token=preclaimed_lease_token,
+                )
+            except Exception as exc:
+                self._observer.record_resume(outcome=self._resume_outcome(exc))
+                raise
+            self._observer.record_resume(outcome="succeeded")
+            return result
+
+    def _run(
         self,
         *,
         initial_state: FixtureAgentState,
@@ -1102,6 +1149,45 @@ class FixtureAgentRuntime:
         preclaimed_step_id: str | None = None,
         preclaimed_lease_token: str | None = None,
     ) -> dict[str, Any]:
+        if resume_payload is None:
+            return await self._arun(
+                initial_state=initial_state,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+                preclaimed_step_id=preclaimed_step_id,
+                preclaimed_lease_token=preclaimed_lease_token,
+            )
+        plan_id, plan_version = self._resume_plan_identity(initial_state, resume_payload)
+        with self._observer.observe(
+            step="langgraph.resume",
+            trace_id=initial_state.trace_id,
+            workflow_id=initial_state.workflow_id,
+            plan_id=plan_id,
+            plan_version=plan_version,
+            approval_id=self._resume_string(resume_payload, "approval_id"),
+        ):
+            try:
+                result = await self._arun(
+                    initial_state=initial_state,
+                    resume_payload=resume_payload,
+                    trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+                    preclaimed_step_id=preclaimed_step_id,
+                    preclaimed_lease_token=preclaimed_lease_token,
+                )
+            except Exception as exc:
+                self._observer.record_resume(outcome=self._resume_outcome(exc))
+                raise
+            self._observer.record_resume(outcome="succeeded")
+            return result
+
+    async def _arun(
+        self,
+        *,
+        initial_state: FixtureAgentState,
+        resume_payload: dict[str, Any] | None = None,
+        trusted_creative_plan_version_id: str | None = None,
+        preclaimed_step_id: str | None = None,
+        preclaimed_lease_token: str | None = None,
+    ) -> dict[str, Any]:
         self._validate_trusted_plan_resume(
             resume_payload=resume_payload,
             trusted_creative_plan_version_id=trusted_creative_plan_version_id,
@@ -1141,6 +1227,37 @@ class FixtureAgentRuntime:
         finally:
             _PRECLAIMED_NODE_AUTHORITY.reset(authority_token)
         return cast(dict[str, Any], result)
+
+    @staticmethod
+    def _resume_string(payload: dict[str, Any], name: str) -> str | None:
+        value = payload.get(name)
+        return value if isinstance(value, str) else None
+
+    @staticmethod
+    def _resume_integer(payload: dict[str, Any], name: str) -> int | None:
+        value = payload.get(name)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    @classmethod
+    def _resume_plan_identity(
+        cls,
+        initial_state: FixtureAgentState,
+        payload: dict[str, Any],
+    ) -> tuple[str | None, int | None]:
+        if payload.get("approval_type") == ApprovalType.CREATIVE_PLAN.value:
+            return (
+                cls._resume_string(payload, "subject_id"),
+                cls._resume_integer(payload, "subject_version"),
+            )
+        return initial_state.creative_plan_ref, initial_state.creative_plan_version
+
+    @staticmethod
+    def _resume_outcome(exc: Exception) -> str:
+        if isinstance(exc, ResumeCheckpointConflictError):
+            return "checkpoint_mismatch"
+        if isinstance(exc, (TypeError, ValueError)):
+            return "contract_mismatch"
+        return "execution_failed"
 
     @staticmethod
     def _preclaimed_authority(

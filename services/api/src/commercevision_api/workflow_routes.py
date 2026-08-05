@@ -131,9 +131,11 @@ async def workflow_events(
             service=service,
             workspace_id=workspace_id,
             workflow_id=workflow_id,
+            trace_id=getattr(request.state, "trace_id", None),
             cursor=cursor,
             first_page=first_page,
             policy=policy,
+            observer=getattr(request.app.state, "planning_telemetry", None),
         ),
         media_type="text/event-stream",
         headers={

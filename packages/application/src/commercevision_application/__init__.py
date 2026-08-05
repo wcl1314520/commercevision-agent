@@ -119,6 +119,7 @@ from .planning_contexts import (
     PlanningContextBuildRequest,
     PlanningContextExactReference,
 )
+from .planning_observability import NullPlanningObserver, PlanningObserver, SafePlanningObserver
 from .product_brief_artifacts import (
     ProductBriefProviderArtifactReconciler,
     ProductBriefProviderArtifactService,
@@ -297,6 +298,9 @@ __all__ = [
     "PlanningContextAuthorizedSource",
     "PlanningContextBuildRequest",
     "PlanningContextExactReference",
+    "PlanningObserver",
+    "NullPlanningObserver",
+    "SafePlanningObserver",
     "ProviderArtifactOwner",
     "ProviderArtifactReconciliationBatch",
     "ProviderArtifactReconciliationCursor",

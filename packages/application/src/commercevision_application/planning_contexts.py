@@ -21,6 +21,8 @@ from commercevision_domain import (
     validate_workspace_id,
 )
 
+from .planning_observability import NullPlanningObserver, PlanningObserver
+
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", re.ASCII)
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 
@@ -199,13 +201,29 @@ class PlanningContextApplicationService:
         *,
         authority: PlanningContextAuthorityPort,
         snapshots: PlanningContextSnapshotRepositoryPort,
+        observer: PlanningObserver | None = None,
     ) -> None:
         self._authority = authority
         self._snapshots = snapshots
+        self._observer = observer or NullPlanningObserver()
 
     def build(self, request: PlanningContextBuildRequest) -> PlanningContextSnapshot:
         if not isinstance(request, PlanningContextBuildRequest):
             raise ValueError("Planning Context build request is invalid")
+        with self._observer.observe(
+            step="context.build",
+            workflow_id=request.workflow_id,
+            policy_id=request.context_policy_version,
+        ):
+            snapshot = self._build(request)
+            self._observer.annotate(context_hash=snapshot.context_sha256)
+            self._observer.record_context(
+                outcome=("clipped" if snapshot.omitted_sources else "complete"),
+                clipped_sources=len(snapshot.omitted_sources),
+            )
+            return snapshot
+
+    def _build(self, request: PlanningContextBuildRequest) -> PlanningContextSnapshot:
         now = _utc(self._authority.database_now(), "authority decision time")
         policy = self._authority.load_policy(version=request.context_policy_version)
         if not isinstance(policy, PlanningContextPolicy) or policy.version != (

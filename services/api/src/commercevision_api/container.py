@@ -20,6 +20,7 @@ from commercevision_application import (
     DeadLetterOperatorService,
     ImageIndexStatusApplicationService,
     OperationApplicationService,
+    PlanningObserver,
     ProductBriefApplicationService,
     ProductBriefPolicy,
     ProductBriefViewApplicationService,
@@ -164,6 +165,7 @@ class ApiContainer:
         settings: Settings,
         *,
         trust_key_ring: ApiTrustKeyRing,
+        planning_observer: PlanningObserver | None = None,
     ) -> ApiContainer:
         database = create_database(settings)
 
@@ -314,6 +316,7 @@ class ApiContainer:
             creative_plans=CreativePlanApplicationService(
                 creative_plan_uow_factory,
                 cursor_codec=creative_plan_cursor_codec,
+                observer=planning_observer,
             ),
             catalog=CatalogApplicationService(uow_factory=catalog_uow_factory),
             operations=OperationApplicationService(
@@ -335,7 +338,10 @@ class ApiContainer:
                 uow_factory=operator_uow_factory,
                 access_policy=access_policy,
             ),
-            workflows=WorkflowApplicationService(uow_factory=uow_factory),
+            workflows=WorkflowApplicationService(
+                uow_factory=uow_factory,
+                observer=planning_observer,
+            ),
             workflow_events=WorkflowEventStreamService(
                 uow_factory=uow_factory,
                 cursor_codec=workflow_event_cursor_codec,

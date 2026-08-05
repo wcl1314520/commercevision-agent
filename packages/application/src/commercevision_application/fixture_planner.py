@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid5
@@ -32,6 +34,7 @@ from .planning_contexts import (
     PlanningContextBuildRequest,
     PlanningContextExactReference,
 )
+from .planning_observability import NullPlanningObserver, PlanningObserver
 
 _MODEL_FAMILY = "fixture-planner"
 _NODE = "CREATE_CREATIVE_PLAN"
@@ -210,6 +213,8 @@ class DurableFixturePlanner:
         planner: DeterministicFixturePlanner | None = None,
         context_policy_version: str = "planning-context-v1",
         prompt_id: str = "creative-planner",
+        observer: PlanningObserver | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._authority = authority
         self._contexts = contexts
@@ -218,19 +223,45 @@ class DurableFixturePlanner:
         self._planner = planner or DeterministicFixturePlanner()
         self._context_policy_version = context_policy_version
         self._prompt_id = prompt_id
+        self._observer = observer or NullPlanningObserver()
+        self._monotonic = monotonic or time.monotonic
 
     def create_plan(self, command: DurableFixturePlannerCommand) -> DurableFixturePlanResult:
         if not isinstance(command, DurableFixturePlannerCommand):
             raise ValueError("Durable Fixture Planner command is invalid")
+        creative_plan_id = str(
+            uuid5(_PLAN_NAMESPACE, f"{command.workspace_id}\0{command.workflow_id}")
+        )
+        with self._observer.observe(
+            step="planner",
+            trace_id=command.trace_id,
+            workflow_id=command.workflow_id,
+            plan_id=creative_plan_id,
+            plan_version=command.prior_plan_version,
+            operation_id=command.idempotency_key,
+            policy_id=self._context_policy_version,
+        ):
+            result = self._create_plan(command, creative_plan_id=creative_plan_id)
+            self._observer.annotate(
+                plan_id=result.creative_plan_id,
+                plan_version=result.version_number,
+                context_hash=result.context_sha256,
+                prompt_revision=result.prompt_revision,
+            )
+            return result
+
+    def _create_plan(
+        self,
+        command: DurableFixturePlannerCommand,
+        *,
+        creative_plan_id: str,
+    ) -> DurableFixturePlanResult:
         authority = self._authority.load(
             workspace_id=command.workspace_id,
             workflow_id=command.workflow_id,
             product_brief_version_id=command.product_brief_version_id,
             product_brief_version_number=command.product_brief_version_number,
             expected_workflow_version=command.expected_workflow_version,
-        )
-        creative_plan_id = str(
-            uuid5(_PLAN_NAMESPACE, f"{command.workspace_id}\0{command.workflow_id}")
         )
         current: CreativePlanWriteResult | None = None
         try:
@@ -287,62 +318,101 @@ class DurableFixturePlanner:
                 context_policy_version=self._context_policy_version,
             )
         )
-        prompt = self._prompts.resolve_production_revision(
-            workspace_id=command.workspace_id,
-            prompt_id=self._prompt_id,
-            node=_NODE,
-            category=authority.category,
-            model_family=_MODEL_FAMILY,
-        )
-        draft = self._planner.plan(
-            FixturePlannerRequest(
-                context=context,
-                prompt=prompt,
-                retrieval_run_id=authority.retrieval_run_id,
+        with self._observer.observe(
+            step="prompt.resolution",
+            trace_id=command.trace_id,
+            workflow_id=command.workflow_id,
+            plan_id=creative_plan_id,
+            context_hash=context.context_sha256,
+        ):
+            prompt = self._prompts.resolve_production_revision(
+                workspace_id=command.workspace_id,
+                prompt_id=self._prompt_id,
+                node=_NODE,
+                category=authority.category,
+                model_family=_MODEL_FAMILY,
             )
+            self._observer.annotate(
+                prompt_revision=prompt.semantic_revision,
+                prompt_revision_id=prompt.id,
+                policy_id=prompt.policy_version,
+            )
+        started = self._monotonic()
+        try:
+            draft = self._planner.plan(
+                FixturePlannerRequest(
+                    context=context,
+                    prompt=prompt,
+                    retrieval_run_id=authority.retrieval_run_id,
+                )
+            )
+        except Exception:
+            self._observer.record_planner(
+                outcome="invalid",
+                latency_ms=max(0.0, self._monotonic() - started) * 1000,
+                valid=False,
+            )
+            raise
+        self._observer.record_planner(
+            outcome="valid",
+            latency_ms=max(0.0, self._monotonic() - started) * 1000,
+            valid=True,
         )
         provenance = draft.provenance
-        if current is None:
-            stored = self._plans.create_plan(
-                workspace_id=command.workspace_id,
-                actor_id=command.actor_id,
-                request=CreativePlanCreateRequestV1.model_validate(
-                    {
-                        "workflow_id": command.workflow_id,
-                        "creative_plan_id": creative_plan_id,
-                        "payload": draft.payload.to_canonical_data(),
-                        "provenance": {
-                            "product_brief_id": provenance.product_brief_id,
-                            "product_brief_version": provenance.product_brief_version,
-                            "product_brief_sha256": provenance.product_brief_sha256,
-                            "brand_profile_id": provenance.brand_profile_id,
-                            "brand_profile_version": provenance.brand_profile_version,
-                            "brand_profile_sha256": provenance.brand_profile_sha256,
-                            "retrieval_run_id": provenance.retrieval_run_id,
-                            "retrieval_citation_ids": list(provenance.retrieval_citation_ids),
-                            "context_policy_version": provenance.context_policy_version,
-                            "context_sha256": provenance.context_sha256,
-                            "prompt_id": provenance.prompt_id,
-                            "prompt_revision": provenance.prompt_revision,
-                            "prompt_sha256": provenance.prompt_sha256,
-                        },
-                        "expected_workflow_version": command.expected_workflow_version,
-                        "expected_head_version": 0,
-                    }
-                ),
-                trace_id=command.trace_id,
-                idempotency_key=command.idempotency_key,
-            )
-        else:
-            stored = self._plans.append_version(
-                version=current.version.revise_by_agent(
-                    payload=draft.payload,
-                    provenance=draft.provenance,
+        with self._observer.observe(
+            step="versioning",
+            trace_id=command.trace_id,
+            workflow_id=command.workflow_id,
+            plan_id=creative_plan_id,
+            plan_version=(1 if current is None else current.version.version_number + 1),
+            context_hash=context.context_sha256,
+            prompt_revision=prompt.semantic_revision,
+            prompt_revision_id=prompt.id,
+            operation_id=command.idempotency_key,
+            policy_id=self._context_policy_version,
+        ):
+            if current is None:
+                stored = self._plans.create_plan(
+                    workspace_id=command.workspace_id,
                     actor_id=command.actor_id,
-                ),
-                expected_workflow_version=command.expected_workflow_version,
-                expected_head_version=current.head.version,
-            )
+                    request=CreativePlanCreateRequestV1.model_validate(
+                        {
+                            "workflow_id": command.workflow_id,
+                            "creative_plan_id": creative_plan_id,
+                            "payload": draft.payload.to_canonical_data(),
+                            "provenance": {
+                                "product_brief_id": provenance.product_brief_id,
+                                "product_brief_version": provenance.product_brief_version,
+                                "product_brief_sha256": provenance.product_brief_sha256,
+                                "brand_profile_id": provenance.brand_profile_id,
+                                "brand_profile_version": provenance.brand_profile_version,
+                                "brand_profile_sha256": provenance.brand_profile_sha256,
+                                "retrieval_run_id": provenance.retrieval_run_id,
+                                "retrieval_citation_ids": list(provenance.retrieval_citation_ids),
+                                "context_policy_version": provenance.context_policy_version,
+                                "context_sha256": provenance.context_sha256,
+                                "prompt_id": provenance.prompt_id,
+                                "prompt_revision": provenance.prompt_revision,
+                                "prompt_sha256": provenance.prompt_sha256,
+                            },
+                            "expected_workflow_version": command.expected_workflow_version,
+                            "expected_head_version": 0,
+                        }
+                    ),
+                    trace_id=command.trace_id,
+                    idempotency_key=command.idempotency_key,
+                )
+            else:
+                stored = self._plans.append_version(
+                    version=current.version.revise_by_agent(
+                        payload=draft.payload,
+                        provenance=draft.provenance,
+                        actor_id=command.actor_id,
+                    ),
+                    expected_workflow_version=command.expected_workflow_version,
+                    expected_head_version=current.head.version,
+                )
+            self._observer.record_revision(outcome=("created" if current is None else "revised"))
         return self._to_result(stored)
 
     @staticmethod

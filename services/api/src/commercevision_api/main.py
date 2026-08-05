@@ -3,12 +3,14 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
+from commercevision_application import SafePlanningObserver
 from commercevision_contracts import HealthResponse, ServiceMetadata, Settings
 from commercevision_contracts.config import load_settings
 from commercevision_domain import StorageLocationClass, new_uuid7
 from commercevision_observability import (
     Phase2Span,
     Phase2Telemetry,
+    PlanningTelemetry,
     TelemetryDimensions,
     TelemetryIdentity,
     configure_logging,
@@ -48,10 +50,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         api.state.telemetry = (
             telemetry_runtime.phase2() if telemetry_runtime is not None else Phase2Telemetry()
         )
+        api.state.planning_telemetry = SafePlanningObserver(PlanningTelemetry())
         logger = get_logger("commercevision.api")
         container = ApiContainer.build(
             runtime_settings,
             trust_key_ring=trust_key_ring,
+            planning_observer=api.state.planning_telemetry,
         )
         api.state.container = container
         logger.info(

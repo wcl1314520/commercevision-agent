@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -163,6 +164,21 @@ def test_durable_fixture_planner_composes_exact_authority_into_one_plan_write() 
     )
     calls: dict[str, object] = {}
 
+    class Observer:
+        @contextmanager
+        def observe(self, **kwargs):
+            calls.setdefault("observations", []).append(("span", kwargs))
+            yield
+
+        def annotate(self, **kwargs):
+            calls.setdefault("observations", []).append(("annotate", kwargs))
+
+        def record_planner(self, **kwargs):
+            calls.setdefault("observations", []).append(("planner", kwargs))
+
+        def record_revision(self, **kwargs):
+            calls.setdefault("observations", []).append(("revision", kwargs))
+
     class Authority:
         def load(self, **kwargs):
             calls["authority"] = kwargs
@@ -238,6 +254,8 @@ def test_durable_fixture_planner_composes_exact_authority_into_one_plan_write() 
         contexts=Contexts(),
         prompts=Prompts(),
         plans=plans,
+        observer=Observer(),
+        monotonic=lambda: 4.0,
     )
     command = DurableFixturePlannerCommand(
         workspace_id="planning-domain",
@@ -283,6 +301,17 @@ def test_durable_fixture_planner_composes_exact_authority_into_one_plan_write() 
     assert calls["plan"]["idempotency_key"] == "fixture-plan-step-001"
     assert calls["prompt_count"] == 1
     assert calls["plan_count"] == 1
+    observations = calls["observations"]
+    assert ("planner", {"outcome": "valid", "latency_ms": 0.0, "valid": True}) in observations
+    assert ("revision", {"outcome": "created"}) in observations
+    assert (
+        "annotate",
+        {
+            "prompt_revision": fixture_request.prompt.semantic_revision,
+            "prompt_revision_id": fixture_request.prompt.id,
+            "policy_id": fixture_request.prompt.policy_version,
+        },
+    ) in observations
 
     revised = planner.create_plan(
         replace(
