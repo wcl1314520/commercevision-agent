@@ -1669,3 +1669,7 @@
 - 仅为这 8 个生产 Planner 场景补齐既有 `seed_fixture_planner_prompt` 前置，不恢复 `fixture://` 权威、
   不注入 legacy Planner，也不放宽生产失败关闭。10 个参数化恢复场景复验 `10 passed`，Ruff 与
   `git diff --check` 全绿；等待修复提交的精确 CI，Ticket 08 继续锁定。
+- Ticket 06/07 实现提交 `54d3a00`、安全测试修复 `7e6a37e` 与真实 Prompt 测试前置修复 `9be6f0a`
+  已由精确 GitHub Actions `30992819136` 四路全绿验证：Python checks（真实 MySQL/Milvus、完整 pytest、
+  Mypy/License/Eval/OpenAPI）、Web checks、Container builds 与 Security/SBOM 全部成功。Ticket 06/07
+  正式完成；状态提交门禁通过后解锁 Ticket 08。

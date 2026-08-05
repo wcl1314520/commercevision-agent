@@ -207,6 +207,8 @@
   GitHub Actions 全绿前保持 `in_progress`，Ticket 08 不启动。
 - Ticket 06/07 首个 CI `30990797615` 识别出 8 个旧 ProductBrief 恢复测试缺少真实 Planner Prompt 前置；
   已以显式 production Prompt seed 最小修复并通过 10 个精确场景，等待修复提交的四路 CI 全绿。
+- Ticket 06/07 提交链 `54d3a00`、`7e6a37e`、`9be6f0a` 已由精确 GitHub Actions `30992819136`
+  四路全绿验证并正式完成；当前只允许状态提交取得精确 CI，全绿后 Ticket 08 进入 TDD。
 
 ## 成功标准
 
