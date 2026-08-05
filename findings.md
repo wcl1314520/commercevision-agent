@@ -775,3 +775,13 @@
 - Resume payload 是不可信消息事实：即使 Contract 校验通过，仍需核对 Outbox aggregate version、Approval ID/type/
   decision/subject/version、Workflow expected/resulting version/status/node、current Plan head 和 retention。checkpoint
   不存在或匹配多个 generation 是独立稳定冲突，不能降级为新图入口或重跑副作用节点。
+
+## Phase 3 最终完成审计
+
+- 工单状态、验收框、实现提交、发布 artifact 与精确 CI 都已证明 Phase 3 完成；根 `task_plan.md` 的 Phase 14
+  标题仍为 `in_progress`，属于权威计划记录漂移，不是实现缺口。完成审计必须同时校验阶段级状态与票级状态，
+  不能只依赖尾部叙述或单票 `complete`。
+- 当前 HEAD 的五轴复核未发现新的 Critical/Required：正确性由 exact version/approval/Workflow 围栏与迁移矩阵支撑；
+  安全性由 workspace-first lookup、server-owned Tool Policy、Prompt Injection 失败关闭和聚合脱敏报告支撑；可靠性由
+  幂等、Outbox/Inbox、LangGraph/MySQL 重启、SSE 重连与 retention 收敛支撑；维护性由领域/应用/持久化/传输边界和
+  versioned fixture/manifest 支撑；运维性由四路 CI、Compose、OpenAPI、Eval、审计、容器与 SBOM 门禁支撑。

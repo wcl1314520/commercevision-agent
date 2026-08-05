@@ -168,7 +168,7 @@
 - 已生成锁定规格与 14 个 blockers-first 工单；Ticket 01 已进入首个 TDD 纵切
 
 ### Phase 14：Phase 3 blockers-first TDD 实现
-**Status:** in_progress
+**Status:** complete
 - 从无外部模型依赖的 Creative Plan 版本与审批不变量纵向切片开始
 - 每个 TDD 循环只增加一个公开行为：RED -> 最小 GREEN；结构重构留到审查阶段
 - 逐 Ticket 完成受影响测试、静态检查、迁移、OpenAPI/Web、审查、提交与精确 GitHub Actions 验证
