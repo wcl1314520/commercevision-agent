@@ -5,7 +5,7 @@ Policy, LangGraph resume, and SSE while documenting concrete recovery procedures
 
 **Blocked by:** 07–12 — complete planning execution, policy, stream, Web, and evaluation paths.
 
-**Status:** ready-for-agent
+**Status:** in_progress
 
 - [ ] Spans propagate Workflow, plan/version, context hash, Prompt revision, approval, event, operation, trace, and policy identifiers.
 - [ ] Metrics cover context clipping, planner validity/latency, revisions, stale approvals, policy denials, human wait/confirmation, SSE clients/reconnects, and resume failures.

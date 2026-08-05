@@ -1823,3 +1823,11 @@
 - 五轴终审闭合两个 Required：manifest 质量阈值降级绕过，以及攻击者重算报告摘要但不重算 Gate 的语义伪造。
   当前无剩余 Critical/Required；Ticket 12 验收项已全部勾选，但在实现提交精确 CI 四路全绿前保持
   `in_progress`，Ticket 13 不启动。
+
+# 2026-08-06 Phase 3 Ticket 12 完成与 Ticket 13 启动
+
+- Ticket 12 实现提交 `8b1756f` 的精确 GitHub Actions `31037855818` 四路全绿：Python 完整
+  `2030 passed, 3 skipped in 916.88s`；新增 Planner fixture parity contract `4 passed`、Planner CLI gate、
+  aggregate artifact retention、Web、Container builds、Gitleaks 与 SBOM 全部成功。
+- Ticket 12 正式 `complete`；Ticket 13 `Planning observability and operator runbooks` 已按 blockers-first
+  解锁并进入 `in_progress`。状态提交精确 CI 全绿前不开始 Ticket 13 RED。

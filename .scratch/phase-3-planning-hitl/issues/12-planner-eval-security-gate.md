@@ -5,7 +5,7 @@ and release gates for plan validity, provenance, policy safety, determinism, and
 
 **Blocked by:** 02 — Prompt Registry; 03 — Planning Context; 07 — Fixture Planner; 09 — Tool Policy.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Datasets freeze ProductBrief, Brand Profile, Retrieval Citations, context policy, Prompt Revision, expected plan facts, and malicious variants.
 - [x] Metrics cover schema validity, required constraints, citation precision, provenance completeness, policy violations, determinism, and latency.

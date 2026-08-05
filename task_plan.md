@@ -238,6 +238,10 @@
   CI small profile 与外置 hidden-release 命令。完整 unit+contract `1447 passed, 1 skipped`，Planner 专项
   `15 passed`，Ruff、strict evaluation Mypy、431-diagnostic 全仓基线、许可证/漏洞审计与 CLI gate 全绿；
   工单验收项已全部勾选，但在实现提交精确 GitHub Actions 四路全绿前保持 `in_progress`，Ticket 13 锁定。
+- Ticket 12 实现提交 `8b1756f` 已由精确 GitHub Actions `31037855818` 四路全绿验证：Python
+  `2030 passed, 3 skipped`，Planner contract/CLI/artifact、Web、Container builds、Gitleaks 与 SBOM 全部
+  成功。Ticket 12 正式完成，Ticket 13 已按 blockers-first 解锁并进入 Planning observability/runbooks 的
+  首个 TDD 纵向切片。
 
 ## 成功标准
 
