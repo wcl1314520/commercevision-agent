@@ -723,6 +723,14 @@
   10 SSE；11 Web；12 Eval/Security；13 Observability；14 Release Acceptance。
 - 规格明确真实生图与真实 Planning Provider Adapter 不属于 Phase 3；确定性 Fixture Planner 足以证明
   结构化计划、审批、恢复、Tool Policy 和 Agent Eval，避免为 Phase 4 预建单实现 Provider seam。
+- Ticket 03 的 Planning Context public command 只携带 exact identity/hash/rights/run/policy reference；
+  ProductBrief、Brand Profile 与 Retrieval content 只能由 Authority Port 在 workspace、Workflow、purpose、
+  retention 和当前 Rights 围栏内加载，避免把隐藏聊天历史或任意外部引用伪装成上下文。
+- Context hash 与 storage hash 是两个不同事实：前者只覆盖实际送入 Planner 的 source data 及全部 omission
+  identity/reason，后者覆盖为 Workflow 生命周期保留的完整 included/omitted reconstruction blob；二者都要
+  精确校验，才能同时保持预算语义和数据库防篡改。
+- 单源 JSON 的 64KB/深度/节点界限不能复用于聚合快照；聚合由最多 52 个已分别验证的来源组成，使用独立
+  4MB 总界限和 token/image budget。复用单源序列化器会错误拒绝合法的多来源上下文。
 - Domain 根包通过显式 import 与 `__all__` 暴露公共 Interface；Ticket 01 继续采用一个高内聚
   `creative_plans.py` 模块，等真实职责增长再按行为拆包，不为首个 tracer bullet 预建目录层级。
 - Prompt Registry mutation 的幂等 scope 必须同时绑定 operation、workspace hash 与 prompt/revision identity；

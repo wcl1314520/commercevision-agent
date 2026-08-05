@@ -33,6 +33,7 @@ WORKSPACE_ID_TABLES = {
     "collection_rebuild_placements",
     "product_search_documents",
     "outbox_events",
+    "planning_context_snapshots",
     "products",
     "product_brief_analysis_requests",
     "product_brief_confirmations",

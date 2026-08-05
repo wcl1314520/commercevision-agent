@@ -97,6 +97,12 @@ from .operations import (
 )
 from .operator_ports import AuthenticatedPrincipal, OperatorAccessPolicyPort
 from .operators import DeadLetterDetail, DeadLetterOperatorService
+from .planning_contexts import (
+    PlanningContextApplicationService,
+    PlanningContextAuthorizedSource,
+    PlanningContextBuildRequest,
+    PlanningContextExactReference,
+)
 from .product_brief_artifacts import (
     ProductBriefProviderArtifactReconciler,
     ProductBriefProviderArtifactService,
@@ -242,6 +248,10 @@ __all__ = [
     "ProductBriefPolicy",
     "ProductBriefViewApplicationService",
     "PromptRegistryApplicationService",
+    "PlanningContextApplicationService",
+    "PlanningContextAuthorizedSource",
+    "PlanningContextBuildRequest",
+    "PlanningContextExactReference",
     "ProviderArtifactOwner",
     "ProviderArtifactReconciliationBatch",
     "ProviderArtifactReconciliationCursor",

@@ -186,7 +186,10 @@
 - Ticket 02 进入 TDD：先锁定 immutable Prompt Revision 的领域/应用公开 Interface，再接 MySQL 与管理 HTTP
 - Ticket 02 领域与只读解析切片完成；当前推进版本化写命令、MySQL CAS/pointer、Audit/Outbox 和管理 HTTP
 - Ticket 02 领域、幂等生命周期写命令、精确 production pointer/rollback、MySQL migration/repository、
-  Audit/Outbox、管理/解析 HTTP、OpenAPI 与 Web 生成类型已落地；当前执行五轴审查、全量门禁和真实 MySQL CI 验证
+  Audit/Outbox、管理/解析 HTTP、OpenAPI 与 Web 生成类型已落地；精确 CI `30898303008` 四路全绿，Ticket 02 完成
+- Ticket 03 本地实现与发布门禁已完成：exact refs、MySQL authority revalidation、有界确定性快照、
+  included/omitted provenance、双 SHA-256 防篡改、Workflow-lifetime retention 与 reconstruction 已闭合；
+  当前只允许提交、推送并等待精确 GitHub Actions，全绿前不启动 Ticket 04
 
 ## 成功标准
 

@@ -81,6 +81,16 @@ from .operations import (
     ReconciliationOutcome,
     normalize_provider_request_id,
 )
+from .planning_contexts import (
+    PlanningContextIncludedSource,
+    PlanningContextOmissionReason,
+    PlanningContextOmittedSource,
+    PlanningContextPolicy,
+    PlanningContextSnapshot,
+    PlanningContextSource,
+    PlanningContextSourceKind,
+    build_planning_context,
+)
 from .product_briefs import (
     CATEGORY_SCHEMA_VERSIONS,
     COMMON_SCHEMA_VERSION,
@@ -218,6 +228,13 @@ __all__ = [
     "OperationKind",
     "OperationState",
     "ObjectMismatchError",
+    "PlanningContextIncludedSource",
+    "PlanningContextOmissionReason",
+    "PlanningContextOmittedSource",
+    "PlanningContextPolicy",
+    "PlanningContextSnapshot",
+    "PlanningContextSource",
+    "PlanningContextSourceKind",
     "Product",
     "PromptProductionPointer",
     "PromptRevision",
@@ -301,6 +318,7 @@ __all__ = [
     "validate_product_brief_evidence_reference",
     "validate_product_brief_field_value",
     "build_controlled_product_text",
+    "build_planning_context",
     "compute_product_fused_input_hash",
     "serialize_controlled_product_sections",
     "ReciprocalRankedCandidate",

@@ -26,6 +26,8 @@ from .indexing_requests import (
 from .indexing_status import SqlAlchemyImageIndexStatusQueries
 from .operations import SqlAlchemyOperationUnitOfWork
 from .operator import SqlAlchemyOperatorUnitOfWork
+from .planning_context_authority import MySqlPlanningContextAuthority
+from .planning_contexts import PlanningContextSnapshotRepository
 from .product_brief_views import SqlAlchemyProductBriefViewQueries
 from .product_briefs import (
     SqlAlchemyProductBriefUnitOfWork,
@@ -59,6 +61,8 @@ __all__ = [
     "ProductFusedIndexNotApplicable",
     "MySqlProductLexicalSearch",
     "ProductLexicalHit",
+    "PlanningContextSnapshotRepository",
+    "MySqlPlanningContextAuthority",
     "MySqlRetrievalAuthority",
     "MySqlRetrievalPreviewService",
     "MySqlRetrievalRunStore",

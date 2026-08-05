@@ -1594,3 +1594,14 @@
 - 安全修复后的 CI `30896799515` 中 Prompt Registry 真实 MySQL 四项全部通过；唯一 Python 失败是既有
   workspace collation 全表白名单未登记两张新表（总汇总 `1870 passed, 1 failed, 3 skipped`）。修复仅扩展
   该迁移契约集合，继续要求两个新表的 `workspace_id` 为 `utf8mb4_0900_bin`，不改生产 schema。
+- Ticket 02 最终提交链 `91d0d7c`、`98139fb`、`ac87d85` 已由精确 GitHub Actions `30898303008`
+  四路全绿验证：Python（含真实 MySQL 四项、schema drift、完整 pytest、OpenAPI）、Web、Container builds、
+  Gitleaks 与 SBOM 全部通过；Ticket 02 正式完成，Ticket 03 进入 TDD。
+- Ticket 03 已完成领域、应用、MySQL Authority、不可变快照仓储和 Alembic 纵向闭环；公开输入只接收
+  ProductBrief/Brand Profile/Retrieval Citation 精确引用与 context policy version，来源内容由同租户 authority
+  内部加载、重验并脱敏，调用方无法注入 URL/path/SQL/object key/chat history 或基础设施权限。
+- Ticket 03 两轮审查修复了聚合快照误用单源 64KB 哈希上限，以及 omitted retained content 未受完整性哈希
+  保护的问题；现以公开 context SHA-256 与完整 storage SHA-256 分工保护计划输入和保留事实。
+- Ticket 03 本地门禁：相关 unit `10 passed`、完整 unit `1146 passed`、真实 MySQL authority `1 passed`、
+  migration/trigger/downgrade `2 passed`、全局迁移契约 `7 passed`；全仓 Ruff、strict touched Mypy、
+  Mypy baseline 432 零漂移、dependency audit 和 `git diff --check` 全绿。等待精确 GitHub Actions 放行。
