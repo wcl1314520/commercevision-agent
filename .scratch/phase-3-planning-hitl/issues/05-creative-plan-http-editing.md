@@ -5,7 +5,7 @@ Creative Planning module with idempotency, optimistic conflicts, and generated W
 
 **Blocked by:** 04 — Creative Plan MySQL authority.
 
-**Status:** ready-for-agent
+**Status:** in_progress
 
 - [ ] Create/revise commands require idempotency keys and expected head/Workflow versions.
 - [ ] Read/list responses expose immutable versions, current head, provenance, hashes, and no internal object location or secret.

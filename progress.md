@@ -1627,3 +1627,6 @@
   C2PA 生产 deadline 或测试阈值，最终 Linux CI 仍需给出完整单进程汇总。
 - 最终 Ticket 04 领域/应用/真实 MySQL/迁移聚焦套件以当前代码明确汇总为 `54 passed`；五轴终审未发现
   剩余 Critical/Required，用户自有 `.scratch/retrieval-explorer-mobile.png` 始终排除在变更范围外。
+- Ticket 04 实现提交 `d213f5908645f3b2b14d1977af97562b62033705` 的精确 GitHub Actions
+  `30976515426` 全绿：Python checks（完整 pytest/MySQL/Alembic/Mypy/License/Eval/OpenAPI）、Web checks、
+  Container builds 与 Security/SBOM 全部成功。Ticket 04 正式完成，Ticket 05 进入 `in_progress`。

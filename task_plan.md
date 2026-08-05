@@ -195,6 +195,8 @@
 - Ticket 04 本地实现与审查已完成：tenant-first 复合主键/FK、immutable versions、CAS head、
   exact provenance authority、审批期 USER revision、Workflow retention clamp、按版本读取与有序重建均已闭合；
   当前只允许提交、推送并等待精确 GitHub Actions，全绿前 Ticket 05 保持未启动
+- Ticket 04 实现提交 `d213f59` 已由精确 GitHub Actions `30976515426` 四路全绿验证并正式完成；
+  Ticket 05 已按 blockers-first 解锁，进入 Creative Plan REST read/versioned editing 的首个 TDD 纵切
 
 ## 成功标准
 
