@@ -593,6 +593,12 @@ class Settings(BaseSettings):
         le=604_800,
     )
     brand_profile_cursor_future_skew_seconds: int = Field(default=30, ge=0, le=300)
+    creative_plan_cursor_max_age_seconds: int = Field(
+        default=86_400,
+        ge=60,
+        le=604_800,
+    )
+    creative_plan_cursor_future_skew_seconds: int = Field(default=30, ge=0, le=300)
 
     @field_validator(
         "trusted_principal_previous_key_id",

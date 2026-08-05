@@ -54,6 +54,19 @@ from .collection_rebuild import (
     CollectionRebuildValidationV1,
 )
 from .config import Settings
+from .creative_plans import (
+    CreativePlanCitationSelectionV1,
+    CreativePlanCreateRequestV1,
+    CreativePlanCurrentResponseV1,
+    CreativePlanDirectionV1,
+    CreativePlanHeadResponseV1,
+    CreativePlanPayloadV1,
+    CreativePlanProvenanceV1,
+    CreativePlanRevisionRequestV1,
+    CreativePlanToolIntentV1,
+    CreativePlanVersionListResponseV1,
+    CreativePlanVersionResponseV1,
+)
 from .endpoint_identity import validate_canonical_endpoint_host
 from .errors import ErrorResponse
 from .events import EventContract, EventHandling, EventQueue, EventType
@@ -168,6 +181,17 @@ from .workspace_identity import (
 
 __all__ = [
     "ApprovalRequest",
+    "CreativePlanCitationSelectionV1",
+    "CreativePlanCreateRequestV1",
+    "CreativePlanCurrentResponseV1",
+    "CreativePlanDirectionV1",
+    "CreativePlanHeadResponseV1",
+    "CreativePlanPayloadV1",
+    "CreativePlanProvenanceV1",
+    "CreativePlanRevisionRequestV1",
+    "CreativePlanToolIntentV1",
+    "CreativePlanVersionResponseV1",
+    "CreativePlanVersionListResponseV1",
     "ApprovalResponse",
     "AssetsGetTemporaryReferenceInputV1",
     "AssetsGetTemporaryReferenceOutputV1",

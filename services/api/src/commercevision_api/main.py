@@ -23,6 +23,7 @@ from .brand_profile_routes import router as brand_profile_router
 from .catalog_routes import router as catalog_router
 from .collection_rebuild_routes import router as collection_rebuild_router
 from .container import ApiContainer, ApiTrustKeyRing
+from .creative_plan_routes import router as creative_plan_router
 from .errors import install_error_handlers
 from .operation_routes import router as operation_router
 from .product_brief_routes import router as product_brief_router
@@ -162,6 +163,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(prompt_registry_router)
     api.include_router(retrieval_router)
     api.include_router(workflow_router)
+    api.include_router(creative_plan_router)
     return api
 
 

@@ -9781,6 +9781,841 @@
           }
         }
       }
+    },
+    "/api/v1/creative-plans": {
+      "post": {
+        "tags": [
+          "creative-plans"
+        ],
+        "summary": "Create Creative Plan",
+        "operationId": "create_creative_plan_api_v1_creative_plans_post",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 255,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreativePlanCreateRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreativePlanCurrentResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Creative Plan argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Creative Plan not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Creative Plan state, version, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Creative Plan contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Creative Plan dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/creative-plans/{creative_plan_id}:revise": {
+      "post": {
+        "tags": [
+          "creative-plans"
+        ],
+        "summary": "Revise Creative Plan",
+        "operationId": "revise_creative_plan_api_v1_creative_plans__creative_plan_id__revise_post",
+        "parameters": [
+          {
+            "name": "creative_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Creative Plan Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Actor-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 255,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreativePlanRevisionRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreativePlanCurrentResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Creative Plan argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Creative Plan not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Creative Plan state, version, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Creative Plan contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Creative Plan dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/creative-plans/{creative_plan_id}/versions": {
+      "get": {
+        "tags": [
+          "creative-plans"
+        ],
+        "summary": "List Creative Plan Versions",
+        "operationId": "list_creative_plan_versions_api_v1_creative_plans__creative_plan_id__versions_get",
+        "parameters": [
+          {
+            "name": "creative_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Creative Plan Id"
+            }
+          },
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreativePlanVersionListResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Creative Plan argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Creative Plan not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Creative Plan state, version, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Creative Plan contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Creative Plan dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/creative-plans/{creative_plan_id}/versions/{version_number}": {
+      "get": {
+        "tags": [
+          "creative-plans"
+        ],
+        "summary": "Get Creative Plan Version",
+        "operationId": "get_creative_plan_version_api_v1_creative_plans__creative_plan_id__versions__version_number__get",
+        "parameters": [
+          {
+            "name": "creative_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Creative Plan Id"
+            }
+          },
+          {
+            "name": "version_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version Number"
+            }
+          },
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreativePlanVersionResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Creative Plan argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Creative Plan not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Creative Plan state, version, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Creative Plan contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Creative Plan dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/creative-plans/{creative_plan_id}": {
+      "get": {
+        "tags": [
+          "creative-plans"
+        ],
+        "summary": "Get Current Creative Plan",
+        "operationId": "get_current_creative_plan_api_v1_creative_plans__creative_plan_id__get",
+        "parameters": [
+          {
+            "name": "creative_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Creative Plan Id"
+            }
+          },
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "name": "X-Trusted-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trusted-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreativePlanCurrentResponseV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Creative Plan argument",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Trusted principal required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace membership required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Creative Plan not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Creative Plan state, version, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Creative Plan contract validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Creative Plan dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11834,6 +12669,632 @@
         ],
         "title": "CollectionRebuildValidationV1"
       },
+      "CreativePlanCitationSelectionV1": {
+        "properties": {
+          "citation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Citation Id"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "citation_id",
+          "reason"
+        ],
+        "title": "CreativePlanCitationSelectionV1"
+      },
+      "CreativePlanCreateRequestV1": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Workflow Id"
+          },
+          "creative_plan_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Creative Plan Id"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CreativePlanPayloadV1"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/CreativePlanProvenanceV1"
+          },
+          "expected_workflow_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Workflow Version"
+          },
+          "expected_head_version": {
+            "type": "integer",
+            "const": 0,
+            "title": "Expected Head Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "creative_plan_id",
+          "payload",
+          "provenance",
+          "expected_workflow_version",
+          "expected_head_version"
+        ],
+        "title": "CreativePlanCreateRequestV1"
+      },
+      "CreativePlanCurrentResponseV1": {
+        "properties": {
+          "head": {
+            "$ref": "#/components/schemas/CreativePlanHeadResponseV1"
+          },
+          "version": {
+            "$ref": "#/components/schemas/CreativePlanVersionResponseV1"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "head",
+          "version"
+        ],
+        "title": "CreativePlanCurrentResponseV1"
+      },
+      "CreativePlanDirectionV1": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Key"
+          },
+          "image_role": {
+            "$ref": "#/components/schemas/ImageRole"
+          },
+          "scene": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Scene"
+          },
+          "composition": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Composition"
+          },
+          "camera": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Camera"
+          },
+          "lighting": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Lighting"
+          },
+          "color_direction": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Color Direction"
+          },
+          "product_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Product Constraints"
+          },
+          "required_elements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Required Elements"
+          },
+          "prohibited_elements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Prohibited Elements"
+          },
+          "citation_selections": {
+            "items": {
+              "$ref": "#/components/schemas/CreativePlanCitationSelectionV1"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Citation Selections"
+          },
+          "candidate_count": {
+            "type": "integer",
+            "maximum": 16.0,
+            "minimum": 1.0,
+            "title": "Candidate Count"
+          },
+          "quality_targets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Quality Targets"
+          },
+          "repair_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Repair Scope"
+          },
+          "tool_intents": {
+            "items": {
+              "$ref": "#/components/schemas/CreativePlanToolIntentV1"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Tool Intents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "image_role",
+          "scene",
+          "composition",
+          "camera",
+          "lighting",
+          "color_direction",
+          "product_constraints",
+          "required_elements",
+          "prohibited_elements",
+          "citation_selections",
+          "candidate_count",
+          "quality_targets",
+          "repair_scope",
+          "tool_intents"
+        ],
+        "title": "CreativePlanDirectionV1"
+      },
+      "CreativePlanHeadResponseV1": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Workspace Id"
+          },
+          "workflow_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Workflow Id"
+          },
+          "creative_plan_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Creative Plan Id"
+          },
+          "current_version_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Current Version Id"
+          },
+          "current_version_number": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Current Version Number"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "retain_until": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Retain Until"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "workflow_id",
+          "creative_plan_id",
+          "current_version_id",
+          "current_version_number",
+          "version",
+          "retain_until",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CreativePlanHeadResponseV1"
+      },
+      "CreativePlanPayloadV1": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Schema Version"
+          },
+          "directions": {
+            "items": {
+              "$ref": "#/components/schemas/CreativePlanDirectionV1"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Directions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "directions"
+        ],
+        "title": "CreativePlanPayloadV1"
+      },
+      "CreativePlanProvenanceV1": {
+        "properties": {
+          "product_brief_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Product Brief Id"
+          },
+          "product_brief_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Product Brief Version"
+          },
+          "product_brief_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Product Brief Sha256"
+          },
+          "brand_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Profile Id"
+          },
+          "brand_profile_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Profile Version"
+          },
+          "brand_profile_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Profile Sha256"
+          },
+          "retrieval_run_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Retrieval Run Id"
+          },
+          "retrieval_citation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Retrieval Citation Ids"
+          },
+          "context_policy_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Context Policy Version"
+          },
+          "context_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Context Sha256"
+          },
+          "prompt_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Prompt Id"
+          },
+          "prompt_revision": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Prompt Revision"
+          },
+          "prompt_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Prompt Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_brief_id",
+          "product_brief_version",
+          "product_brief_sha256",
+          "retrieval_run_id",
+          "retrieval_citation_ids",
+          "context_policy_version",
+          "context_sha256",
+          "prompt_id",
+          "prompt_revision",
+          "prompt_sha256"
+        ],
+        "title": "CreativePlanProvenanceV1"
+      },
+      "CreativePlanRevisionRequestV1": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Workflow Id"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CreativePlanPayloadV1"
+          },
+          "revision_reason": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Revision Reason"
+          },
+          "expected_workflow_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Workflow Version"
+          },
+          "expected_head_version": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Expected Head Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "payload",
+          "revision_reason",
+          "expected_workflow_version",
+          "expected_head_version"
+        ],
+        "title": "CreativePlanRevisionRequestV1"
+      },
+      "CreativePlanSource": {
+        "type": "string",
+        "enum": [
+          "AGENT",
+          "USER"
+        ],
+        "title": "CreativePlanSource"
+      },
+      "CreativePlanToolIntentV1": {
+        "properties": {
+          "intent_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Intent Key"
+          },
+          "tool_name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Tool Name"
+          },
+          "schema_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Schema Version"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Purpose"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Arguments"
+          },
+          "estimated_cost_units": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Estimated Cost Units"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "intent_key",
+          "tool_name",
+          "schema_version",
+          "purpose",
+          "arguments",
+          "estimated_cost_units"
+        ],
+        "title": "CreativePlanToolIntentV1"
+      },
+      "CreativePlanVersionListResponseV1": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CreativePlanVersionResponseV1"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CreativePlanVersionListResponseV1"
+      },
+      "CreativePlanVersionResponseV1": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Workspace Id"
+          },
+          "workflow_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Workflow Id"
+          },
+          "creative_plan_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Creative Plan Id"
+          },
+          "version_number": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version Number"
+          },
+          "supersedes_version_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Version Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CreativePlanSource"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CreativePlanPayloadV1"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/CreativePlanProvenanceV1"
+          },
+          "payload_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Payload Sha256"
+          },
+          "actor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Actor Id"
+          },
+          "revision_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "workflow_id",
+          "creative_plan_id",
+          "version_number",
+          "source",
+          "payload",
+          "provenance",
+          "payload_sha256",
+          "actor_id",
+          "created_at"
+        ],
+        "title": "CreativePlanVersionResponseV1"
+      },
       "DeadLetterDetailResponseV1": {
         "properties": {
           "dead_letter": {
@@ -12221,6 +13682,17 @@
           "version"
         ],
         "title": "HealthResponse"
+      },
+      "ImageRole": {
+        "type": "string",
+        "enum": [
+          "MAIN",
+          "HERO",
+          "SCENE",
+          "DETAIL",
+          "SELLING_POINT"
+        ],
+        "title": "ImageRole"
       },
       "JsonValue": {},
       "OperationErrorResponseV1": {

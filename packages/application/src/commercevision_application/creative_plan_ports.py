@@ -8,7 +8,7 @@ from typing import Protocol
 
 from commercevision_domain import CreativePlanHead, CreativePlanVersion
 
-from .ports import WorkflowRepositoryPort
+from .ports import AuditRepositoryPort, IdempotencyRepositoryPort, WorkflowRepositoryPort
 
 
 class CreativePlanRepositoryPort(Protocol):
@@ -38,6 +38,15 @@ class CreativePlanRepositoryPort(Protocol):
         version_number: int,
     ) -> CreativePlanVersion | None: ...
 
+    def get_version_by_id(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        version_id: str,
+    ) -> CreativePlanVersion | None: ...
+
     def list_versions(
         self,
         *,
@@ -46,10 +55,42 @@ class CreativePlanRepositoryPort(Protocol):
         creative_plan_id: str,
     ) -> tuple[CreativePlanVersion, ...] | None: ...
 
+    def list_version_page(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        after_version_number: int | None,
+        limit: int,
+    ) -> tuple[CreativePlanVersion, ...] | None: ...
+
+
+class CreativePlanCursorCodecPort(Protocol):
+    def encode(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        version_number: int,
+    ) -> str: ...
+
+    def decode(
+        self,
+        token: str,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+    ) -> int: ...
+
 
 class CreativePlanUnitOfWorkPort(Protocol):
     workflows: WorkflowRepositoryPort
     creative_plans: CreativePlanRepositoryPort
+    idempotency: IdempotencyRepositoryPort
+    audit: AuditRepositoryPort
 
     def __enter__(self) -> CreativePlanUnitOfWorkPort: ...
 

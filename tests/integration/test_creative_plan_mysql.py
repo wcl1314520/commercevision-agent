@@ -6,7 +6,11 @@ from datetime import UTC, datetime, timedelta
 from threading import Barrier
 
 import pytest
-from commercevision_application import CreativePlanApplicationService
+from commercevision_application import CreativePlanApplicationService, CreativePlanCursorCodec
+from commercevision_contracts import (
+    CreativePlanCreateRequestV1,
+    CreativePlanRevisionRequestV1,
+)
 from commercevision_domain import (
     ConcurrencyError,
     CreativePlanDirection,
@@ -32,7 +36,7 @@ from commercevision_persistence.creative_plan_models import (
     CreativePlanModel,
     CreativePlanVersionModel,
 )
-from commercevision_persistence.models import WorkflowModel
+from commercevision_persistence.models import AuditEventModel, IdempotencyKeyModel, WorkflowModel
 from commercevision_persistence.prompt_registry import PromptRevisionRepository
 from commercevision_persistence.retrieval_models import RetrievalRunModel
 from sqlalchemy import func, select
@@ -43,6 +47,34 @@ pytestmark = pytest.mark.integration
 NOW = datetime(2026, 8, 5, 3, 30, tzinfo=UTC)
 WORKFLOW_ID = "019b0000-0000-7000-8000-000000000710"
 PLAN_ID = "019b0000-0000-7000-8000-000000000713"
+
+
+def _create_request(version: CreativePlanVersion) -> CreativePlanCreateRequestV1:
+    provenance = version.provenance
+    return CreativePlanCreateRequestV1.model_validate(
+        {
+            "workflow_id": version.workflow_id,
+            "creative_plan_id": version.creative_plan_id,
+            "payload": version.payload.to_canonical_data(),
+            "provenance": {
+                "product_brief_id": provenance.product_brief_id,
+                "product_brief_version": provenance.product_brief_version,
+                "product_brief_sha256": provenance.product_brief_sha256,
+                "brand_profile_id": provenance.brand_profile_id,
+                "brand_profile_version": provenance.brand_profile_version,
+                "brand_profile_sha256": provenance.brand_profile_sha256,
+                "retrieval_run_id": provenance.retrieval_run_id,
+                "retrieval_citation_ids": list(provenance.retrieval_citation_ids),
+                "context_policy_version": provenance.context_policy_version,
+                "context_sha256": provenance.context_sha256,
+                "prompt_id": provenance.prompt_id,
+                "prompt_revision": provenance.prompt_revision,
+                "prompt_sha256": provenance.prompt_sha256,
+            },
+            "expected_workflow_version": 7,
+            "expected_head_version": 0,
+        }
+    )
 
 
 def _version() -> CreativePlanVersion:
@@ -484,6 +516,103 @@ def test_real_mysql_duplicate_delivery_and_revision_preserve_ordered_history(
         assert session.scalar(select(func.count()).select_from(CreativePlanVersionModel)) == 2
 
 
+def test_real_mysql_version_history_uses_signed_keyset_pagination(
+    integration_database,
+) -> None:
+    deadline = NOW + timedelta(days=30)
+    first, snapshot, prompt = _authorized_bundle()
+    with integration_database.session_factory.begin() as session:
+        session.add(
+            WorkflowModel(
+                id=WORKFLOW_ID,
+                workspace_id="planning-domain",
+                created_by="operator",
+                workflow_type="creative-planning",
+                status="PLANNING",
+                retention_status="ACTIVE",
+                current_node="create_plan",
+                version=7,
+                input_json={},
+                result_json=None,
+                expires_at=deadline,
+                cancellation_requested_at=None,
+                created_at=NOW - timedelta(hours=1),
+                updated_at=NOW,
+            )
+        )
+        _seed_authority(session, snapshot=snapshot, prompt=prompt, deadline=deadline)
+    cursor_codec = CreativePlanCursorCodec(
+        current_key_id="test-current",
+        current_secret="c" * 32,
+        max_age_seconds=300,
+        future_skew_seconds=30,
+        clock=lambda: NOW,
+    )
+    service = CreativePlanApplicationService(
+        lambda: SqlAlchemyCreativePlanUnitOfWork(integration_database.session_factory),
+        cursor_codec=cursor_codec,
+    )
+    service.append_version(
+        version=first,
+        expected_workflow_version=7,
+        expected_head_version=0,
+    )
+    second = first.revise_by_user(
+        payload=CreativePlanPayload(
+            directions=(replace(first.payload.directions[0], scene="Retail shelf"),)
+        ),
+        actor_id="reviewer-a",
+        reason="Use the approved retail setting",
+        now=NOW + timedelta(seconds=1),
+    )
+    service.append_version(
+        version=second,
+        expected_workflow_version=7,
+        expected_head_version=1,
+    )
+    third = second.revise_by_user(
+        payload=CreativePlanPayload(
+            directions=(replace(second.payload.directions[0], scene="Bathroom vanity"),)
+        ),
+        actor_id="reviewer-b",
+        reason="Use the approved bathroom setting",
+        now=NOW + timedelta(seconds=2),
+    )
+    service.append_version(
+        version=third,
+        expected_workflow_version=7,
+        expected_head_version=2,
+    )
+
+    first_page = service.list_version_page(
+        workspace_id=first.workspace_id,
+        workflow_id=first.workflow_id,
+        creative_plan_id=first.creative_plan_id,
+        limit=2,
+        cursor=None,
+    )
+    assert tuple(item.version_number for item in first_page.items) == (1, 2)
+    assert first_page.next_cursor is not None
+
+    second_page = service.list_version_page(
+        workspace_id=first.workspace_id,
+        workflow_id=first.workflow_id,
+        creative_plan_id=first.creative_plan_id,
+        limit=2,
+        cursor=first_page.next_cursor,
+    )
+    assert second_page.items == (third,)
+    assert second_page.next_cursor is None
+    with pytest.raises(ValueError, match="Creative Plan cursor is invalid"):
+        service.list_version_page(
+            workspace_id="foreign-workspace",
+            workflow_id=first.workflow_id,
+            creative_plan_id=first.creative_plan_id,
+            limit=2,
+            cursor=first_page.next_cursor,
+        )
+
+
 def test_real_mysql_concurrent_revisions_allow_one_head_winner_without_orphan(
     integration_database,
 ) -> None:
@@ -733,3 +862,105 @@ def test_real_mysql_user_revision_is_allowed_while_exact_plan_is_awaiting_review
 
     assert revised.version.source is CreativePlanSource.USER
     assert revised.head.current_version_number == 2
+
+
+def test_real_mysql_http_commands_are_idempotent_and_audit_only_aggregates(
+    integration_database,
+) -> None:
+    deadline = NOW + timedelta(days=30)
+    fixture, snapshot, prompt = _authorized_bundle()
+    with integration_database.session_factory.begin() as session:
+        session.add(
+            WorkflowModel(
+                id=WORKFLOW_ID,
+                workspace_id="planning-domain",
+                created_by="operator",
+                workflow_type="creative-planning",
+                status="PLANNING",
+                retention_status="ACTIVE",
+                current_node="create_plan",
+                version=7,
+                input_json={},
+                result_json=None,
+                expires_at=deadline,
+                cancellation_requested_at=None,
+                created_at=NOW - timedelta(hours=1),
+                updated_at=NOW,
+            )
+        )
+        _seed_authority(session, snapshot=snapshot, prompt=prompt, deadline=deadline)
+    service = CreativePlanApplicationService(
+        lambda: SqlAlchemyCreativePlanUnitOfWork(integration_database.session_factory)
+    )
+    create_request = _create_request(fixture)
+    create_arguments = {
+        "workspace_id": fixture.workspace_id,
+        "actor_id": "creative-planner",
+        "request": create_request,
+        "trace_id": "trace-create-http",
+        "idempotency_key": "mysql-create-request-001",
+    }
+
+    created = service.create_plan(**create_arguments)
+    assert service.create_plan(**create_arguments) == created
+
+    with integration_database.session_factory.begin() as session:
+        workflow = session.get(WorkflowModel, WORKFLOW_ID)
+        assert workflow is not None
+        workflow.status = "AWAITING_PLAN_APPROVAL"
+        workflow.current_node = "approve_plan"
+        workflow.version = 8
+    changed_payload = CreativePlanPayload(
+        directions=(replace(fixture.payload.directions[0], scene="Approved retail shelf"),)
+    )
+    revise_request = CreativePlanRevisionRequestV1.model_validate(
+        {
+            "workflow_id": WORKFLOW_ID,
+            "payload": changed_payload.to_canonical_data(),
+            "revision_reason": "Use the approved retail setting",
+            "expected_workflow_version": 8,
+            "expected_head_version": 1,
+        }
+    )
+    revise_arguments = {
+        "workspace_id": fixture.workspace_id,
+        "creative_plan_id": PLAN_ID,
+        "actor_id": "creative-reviewer",
+        "request": revise_request,
+        "trace_id": "trace-revise-http",
+        "idempotency_key": "mysql-revise-request-001",
+    }
+
+    revised = service.revise_plan(**revise_arguments)
+    with integration_database.session_factory.begin() as session:
+        workflow = session.get(WorkflowModel, WORKFLOW_ID)
+        assert workflow is not None
+        workflow.status = "COMPLETED"
+        workflow.current_node = "completed"
+        workflow.version = 9
+    assert service.revise_plan(**revise_arguments) == revised
+
+    with integration_database.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(CreativePlanModel)) == 1
+        assert session.scalar(select(func.count()).select_from(CreativePlanVersionModel)) == 2
+        assert session.scalar(select(func.count()).select_from(IdempotencyKeyModel)) == 2
+        audit_events = tuple(
+            session.scalars(select(AuditEventModel).order_by(AuditEventModel.created_at))
+        )
+    assert [event.action for event in audit_events] == [
+        "creative_plan.created",
+        "creative_plan.revised",
+    ]
+    for event in audit_events:
+        assert set(event.metadata_json) == {
+            "version_number",
+            "source",
+            "direction_count",
+            "payload_sha256",
+            "expected_workflow_version",
+            "expected_head_version",
+        }
+        serialized = str(event.metadata_json)
+        assert "Approved retail shelf" not in serialized
+        assert "approved retail setting" not in serialized
+        assert "product_brief_id" not in serialized

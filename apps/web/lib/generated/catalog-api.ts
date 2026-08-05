@@ -266,6 +266,116 @@ export interface CatalogDeleteRequestV1 {
   expected_version: number;
 }
 
+export interface CreativePlanCitationSelectionV1 {
+  citation_id: string;
+  reason: string;
+}
+
+export interface CreativePlanCreateRequestV1 {
+  workflow_id: string;
+  creative_plan_id: string;
+  payload: CreativePlanPayloadV1;
+  provenance: CreativePlanProvenanceV1;
+  expected_workflow_version: number;
+  expected_head_version: 0;
+}
+
+export interface CreativePlanCurrentResponseV1 {
+  head: CreativePlanHeadResponseV1;
+  version: CreativePlanVersionResponseV1;
+}
+
+export interface CreativePlanDirectionV1 {
+  key: string;
+  image_role: ImageRole;
+  scene: string;
+  composition: string;
+  camera: string;
+  lighting: string;
+  color_direction: string;
+  product_constraints: [string, ...Array<string>];
+  required_elements: [string, ...Array<string>];
+  prohibited_elements: Array<string>;
+  citation_selections: Array<CreativePlanCitationSelectionV1>;
+  candidate_count: number;
+  quality_targets: [string, ...Array<string>];
+  repair_scope: Array<string>;
+  tool_intents: Array<CreativePlanToolIntentV1>;
+}
+
+export interface CreativePlanHeadResponseV1 {
+  workspace_id: string;
+  workflow_id: string;
+  creative_plan_id: string;
+  current_version_id: string;
+  current_version_number: number;
+  version: number;
+  retain_until: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreativePlanPayloadV1 {
+  schema_version: string;
+  directions: [CreativePlanDirectionV1, ...Array<CreativePlanDirectionV1>];
+}
+
+export interface CreativePlanProvenanceV1 {
+  product_brief_id: string;
+  product_brief_version: number;
+  product_brief_sha256: string;
+  brand_profile_id?: string | null;
+  brand_profile_version?: number | null;
+  brand_profile_sha256?: string | null;
+  retrieval_run_id: string;
+  retrieval_citation_ids: Array<string>;
+  context_policy_version: string;
+  context_sha256: string;
+  prompt_id: string;
+  prompt_revision: string;
+  prompt_sha256: string;
+}
+
+export interface CreativePlanRevisionRequestV1 {
+  workflow_id: string;
+  payload: CreativePlanPayloadV1;
+  revision_reason: string;
+  expected_workflow_version: number;
+  expected_head_version: number;
+}
+
+export type CreativePlanSource = "AGENT" | "USER";
+
+export interface CreativePlanToolIntentV1 {
+  intent_key: string;
+  tool_name: string;
+  schema_version: string;
+  purpose: string;
+  arguments: Record<string, unknown>;
+  estimated_cost_units: number;
+}
+
+export interface CreativePlanVersionListResponseV1 {
+  items: Array<CreativePlanVersionResponseV1>;
+  next_cursor?: string | null;
+}
+
+export interface CreativePlanVersionResponseV1 {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  creative_plan_id: string;
+  version_number: number;
+  supersedes_version_id?: string | null;
+  source: CreativePlanSource;
+  payload: CreativePlanPayloadV1;
+  provenance: CreativePlanProvenanceV1;
+  payload_sha256: string;
+  actor_id: string;
+  revision_reason?: string | null;
+  created_at: string;
+}
+
 export interface ErrorResponse {
   code: string;
   message: string;
@@ -275,6 +385,8 @@ export interface ErrorResponse {
   request_id: string;
   trace_id: string;
 }
+
+export type ImageRole = "MAIN" | "HERO" | "SCENE" | "DETAIL" | "SELLING_POINT";
 
 export type JsonValue = null | boolean | number | string | Array<JsonValue> | { [key: string]: JsonValue };
 

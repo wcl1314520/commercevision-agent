@@ -47,7 +47,12 @@ from .collection_rebuild import (
     RebuildValidationExpected,
     RebuildWorkBatch,
 )
-from .creative_plans import CreativePlanApplicationService, CreativePlanWriteResult
+from .creative_plan_cursors import CreativePlanCursorCodec
+from .creative_plans import (
+    CreativePlanApplicationService,
+    CreativePlanVersionPage,
+    CreativePlanWriteResult,
+)
 from .dead_letter_identity import canonicalize_dead_letter_id
 from .execution import (
     DurableNodeLifecycle,
@@ -200,6 +205,8 @@ __all__ = [
     "CollectionRebuildTarget",
     "CollectionRebuildVectorPort",
     "CreativePlanApplicationService",
+    "CreativePlanCursorCodec",
+    "CreativePlanVersionPage",
     "CreativePlanWriteResult",
     "canonicalize_dead_letter_id",
     "DuplicateEventRegistrationError",

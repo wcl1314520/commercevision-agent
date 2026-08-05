@@ -746,3 +746,12 @@
   Workflow deadline 被延长不能延长计划，被缩短则 stale revision 失败关闭，不能悄悄改变既有 retention。
 - 等待计划审批期间只允许 `USER` revision；Agent 版本仍只允许在 `PLANNING/create_plan` 写入。这样 Web 编辑可
   形成新 immutable version，同时不会让 Planner 在审批节点越权改写用户正在审阅的计划。
+- Creative Plan history cursor 不能复用 Brand Profile cursor 或暴露裸 version offset；独立 domain-separated
+  HMAC cursor 绑定 workspace、Workflow、plan、排序 schema 与签发时间，应用使用 keyset boundary 并只向
+  MySQL 请求 `limit + 1`，避免跨资源重放和先加载全历史再切片。
+- Creative Plan command 的幂等响应不能从“当前 head”重建；后续 edit 会使重放错误返回新版本。幂等记录只保存
+  原始 head 的聚合 identity/version/timestamps，并用 `resource_id` 精确加载当时的 immutable version，即使
+  Workflow 已终态或 live head 已推进也能重放原响应，同时避免在通用幂等 JSON 中复制完整 payload/provenance。
+- Ticket 05 的审计与幂等事实必须和 version/head 写入处于同一短事务：审计只存 direction count、source、
+  payload hash 与 expected versions；payload、provenance、revision reason、cursor key 和外部位置都不进入审计。
+  真实 MySQL 重复 create/revise 证明两版本、两幂等记录、两审计事件，无重复或孤儿事实。

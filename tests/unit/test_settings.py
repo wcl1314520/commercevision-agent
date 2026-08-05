@@ -848,6 +848,36 @@ def test_brand_profile_cursor_lifetime_defaults_and_bounds_are_explicit() -> Non
             Settings(**invalid)
 
 
+def test_creative_plan_cursor_lifetime_defaults_and_bounds_are_explicit() -> None:
+    settings = Settings()
+
+    assert settings.creative_plan_cursor_max_age_seconds == 86_400
+    assert settings.creative_plan_cursor_future_skew_seconds == 30
+    assert (
+        Settings(
+            creative_plan_cursor_max_age_seconds=60,
+            creative_plan_cursor_future_skew_seconds=0,
+        ).creative_plan_cursor_max_age_seconds
+        == 60
+    )
+    assert (
+        Settings(
+            creative_plan_cursor_max_age_seconds=604_800,
+            creative_plan_cursor_future_skew_seconds=300,
+        ).creative_plan_cursor_future_skew_seconds
+        == 300
+    )
+
+    for invalid in (
+        {"creative_plan_cursor_max_age_seconds": 59},
+        {"creative_plan_cursor_max_age_seconds": 604_801},
+        {"creative_plan_cursor_future_skew_seconds": -1},
+        {"creative_plan_cursor_future_skew_seconds": 301},
+    ):
+        with pytest.raises(ValidationError):
+            Settings(**invalid)
+
+
 def test_empty_compose_previous_trusted_principal_pair_is_absent_but_not_partial() -> None:
     settings = Settings(
         trusted_principal_previous_key_id="",

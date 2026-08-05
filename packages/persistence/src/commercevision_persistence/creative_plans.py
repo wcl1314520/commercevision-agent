@@ -36,7 +36,7 @@ from .integrity import (
 from .planning_context_models import PlanningContextSnapshotModel
 from .planning_contexts import PlanningContextSnapshotRepository
 from .prompt_registry import PromptRevisionRepository
-from .repositories import WorkflowRepository
+from .repositories import AuditRepository, IdempotencyRepository, WorkflowRepository
 from .retrieval_models import RetrievalRunModel
 
 
@@ -446,6 +446,21 @@ class CreativePlanRepository:
         )
         return _version_from_model(model) if model is not None else None
 
+    def get_version_by_id(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        version_id: str,
+    ) -> CreativePlanVersion | None:
+        return self.get_version(
+            workspace_id=workspace_id,
+            workflow_id=workflow_id,
+            creative_plan_id=creative_plan_id,
+            version_id=version_id,
+        )
+
     def get_version_by_number(
         self,
         *,
@@ -530,6 +545,40 @@ class CreativePlanRepository:
             raise DataIntegrityError("Creative Plan history cannot be reconstructed")
         return versions
 
+    def list_version_page(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        after_version_number: int | None,
+        limit: int,
+    ) -> tuple[CreativePlanVersion, ...] | None:
+        if (
+            self.get_head(
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                creative_plan_id=creative_plan_id,
+            )
+            is None
+        ):
+            return None
+        statement = select(CreativePlanVersionModel).where(
+            CreativePlanVersionModel.workspace_id == workspace_id,
+            CreativePlanVersionModel.workflow_id == workflow_id,
+            CreativePlanVersionModel.creative_plan_id == creative_plan_id,
+        )
+        if after_version_number is not None:
+            statement = statement.where(
+                CreativePlanVersionModel.version_number > after_version_number
+            )
+        models = tuple(
+            self._session.scalars(
+                statement.order_by(CreativePlanVersionModel.version_number).limit(limit)
+            )
+        )
+        return tuple(_version_from_model(model) for model in models)
+
 
 class SqlAlchemyCreativePlanUnitOfWork:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
@@ -543,6 +592,8 @@ class SqlAlchemyCreativePlanUnitOfWork:
         self._depth_token = enter_unit_of_work()
         self.workflows = WorkflowRepository(self.session)
         self.creative_plans = CreativePlanRepository(self.session)
+        self.idempotency = IdempotencyRepository(self.session)
+        self.audit = AuditRepository(self.session)
         return self
 
     def database_now(self) -> datetime:

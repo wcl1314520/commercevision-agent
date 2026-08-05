@@ -1630,3 +1630,20 @@
 - Ticket 04 实现提交 `d213f5908645f3b2b14d1977af97562b62033705` 的精确 GitHub Actions
   `30976515426` 全绿：Python checks（完整 pytest/MySQL/Alembic/Mypy/License/Eval/OpenAPI）、Web checks、
   Container builds 与 Security/SBOM 全部成功。Ticket 04 正式完成，Ticket 05 进入 `in_progress`。
+- Ticket 04 状态提交 `ee2a2faa6a36ac1a41e6e9057787d6a7e8dc2eb9` 的精确 GitHub Actions
+  `30977517874` 亦四路全绿，blockers-first 状态门完整闭合。
+- Ticket 05 已完成本地实现与验收，等待精确提交 CI：新增 workspace-scoped create/current/exact-version/
+  history/revise REST Interface、canonical identity/版本/集合/文本边界，以及绑定 workspace+Workflow+plan 的
+  轮换 HMAC keyset cursor；history 仅取 `limit + 1`，无裸 offset 或跨资源 cursor 重放。
+- create/revise 使用 Workflow 行锁、expected Workflow/head versions、通用幂等 claim 和 immutable version/head
+  snapshot 回放；同键异请求稳定冲突，原响应在 Workflow 终态或 live head 后续推进后仍精确重放，不重复
+  version/audit。USER revision 只追加并继承 prior provenance；审计仅保存 version/source/count/hash/expected
+  versions，不保存 payload、provenance、reason 或对象位置。
+- Ticket 05 本地证据：相关单测 `142 passed`（最终应用文件聚焦 `8 passed`）、真实 MySQL `11 passed`、
+  Creative Plan 迁移/trigger `2 passed`、完整 unit+contract `1371 passed, 1 skipped`；Web unit `196 passed`、
+  proxy `23 passed`、lint/typecheck/build 全绿。全仓 Ruff、目标 strict Mypy、432 条已知诊断基线、Python
+  license/vulnerability audit、OpenAPI 稳定导出、生成 Web types 与 `git diff --check` 均通过。
+- 本次新增代码使 `container.py`、`main.py` 和 Web type generator 中既有 Mypy 诊断只发生行号位移；确认
+  总数仍为 432、所有新增/修改 Creative Plan 生产模块严格零错误后，用仓库正式脚本刷新基线指纹并复验。
+  五轴终审未发现剩余 Critical/Required；Ticket 05 在精确 GitHub Actions 全绿前保持 `in_progress`，不启动
+  Ticket 06。

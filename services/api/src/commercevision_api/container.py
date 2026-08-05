@@ -15,6 +15,8 @@ from commercevision_application import (
     BrandProfileApplicationService,
     BrandProfileCursorCodec,
     CatalogApplicationService,
+    CreativePlanApplicationService,
+    CreativePlanCursorCodec,
     DeadLetterOperatorService,
     ImageIndexStatusApplicationService,
     OperationApplicationService,
@@ -30,6 +32,7 @@ from commercevision_application import (
 from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolicy
 from commercevision_application.asset_integrity import UploadIntegrityVerifier
 from commercevision_application.asset_validation_dispatch import AssetValidationPolicy
+from commercevision_application.creative_plan_ports import CreativePlanUnitOfWorkPort
 from commercevision_application.prompt_registry_ports import PromptRegistryUnitOfWorkPort
 from commercevision_contracts import Settings
 from commercevision_object_storage import (
@@ -46,6 +49,7 @@ from commercevision_persistence import (
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyCatalogUnitOfWork,
+    SqlAlchemyCreativePlanUnitOfWork,
     SqlAlchemyImageIndexStatusQueries,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyOperatorUnitOfWork,
@@ -134,6 +138,7 @@ class ApiContainer:
     asset_retention: AssetRetentionApplicationService
     brand_profiles: BrandProfileApplicationService
     prompt_registry: PromptRegistryApplicationService
+    creative_plans: CreativePlanApplicationService
     catalog: CatalogApplicationService
     operations: OperationApplicationService
     product_briefs: ProductBriefApplicationService
@@ -177,6 +182,12 @@ class ApiContainer:
                 SqlAlchemyPromptRegistryUnitOfWork(database.session_factory),
             )
 
+        def creative_plan_uow_factory() -> CreativePlanUnitOfWorkPort:
+            return cast(
+                CreativePlanUnitOfWorkPort,
+                SqlAlchemyCreativePlanUnitOfWork(database.session_factory),
+            )
+
         def operation_uow_factory() -> SqlAlchemyOperationUnitOfWork:
             return SqlAlchemyOperationUnitOfWork(database.session_factory)
 
@@ -202,6 +213,14 @@ class ApiContainer:
             previous_secret=trust_key_ring.previous_secret,
             max_age_seconds=settings.brand_profile_cursor_max_age_seconds,
             future_skew_seconds=settings.brand_profile_cursor_future_skew_seconds,
+        )
+        creative_plan_cursor_codec = CreativePlanCursorCodec(
+            current_key_id=trust_key_ring.current_key_id,
+            current_secret=trust_key_ring.current_secret,
+            previous_key_id=trust_key_ring.previous_key_id,
+            previous_secret=trust_key_ring.previous_secret,
+            max_age_seconds=settings.creative_plan_cursor_max_age_seconds,
+            future_skew_seconds=settings.creative_plan_cursor_future_skew_seconds,
         )
         object_storage = build_object_storage(settings)
         built_retrieval = build_retrieval(
@@ -280,6 +299,10 @@ class ApiContainer:
             ),
             prompt_registry=PromptRegistryApplicationService(
                 uow_factory=prompt_registry_uow_factory,
+            ),
+            creative_plans=CreativePlanApplicationService(
+                creative_plan_uow_factory,
+                cursor_codec=creative_plan_cursor_codec,
             ),
             catalog=CatalogApplicationService(uow_factory=catalog_uow_factory),
             operations=OperationApplicationService(
