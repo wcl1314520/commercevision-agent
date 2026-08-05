@@ -1773,3 +1773,24 @@
   Python 完整 `2015 passed, 3 skipped in 884.68s`，Web、Container builds、Gitleaks 与 SBOM 均成功。
   Ticket 10 正式 `complete`；Ticket 11 `Creative Plan editor and approval Workbench` 已按 blockers-first 解锁，
   当前只允许状态提交取得精确 CI，全绿后开始首个 Web TDD 纵向切片。
+
+# 2026-08-06 Phase 3 Ticket 11 完成与 Ticket 12 启动
+
+- Ticket 11 已闭合完整 Creative Plan review/approval 纵向路径：Workbench 精确展示 Plan/Workflow 版本、
+  ProductBrief/Brand/Prompt/Context provenance、citations、Tool Intents 与 approval history；编辑只追加不可变版本，
+  approve/reject 绑定可见 exact subject/version 与 action-scoped idempotency。`409` 会权威重载并保留原始草稿/
+  reviewer text，但绝不自动重放决策。
+- 刷新与 fetch-based SSE 重连只恢复非授权 review position 和有界 opaque cursor；每个事件在完整解码并交付后才
+  推进 cursor。跨 Workflow、无效、过大或不可打印 cursor、畸形事件、retention/policy/stream degradation 均
+  失败关闭。身份切换立即移除旧 authority surface，迟到 history 响应不能跨身份污染界面。
+- 本地 TDD/发布证据：Web unit `224 passed`、BFF proxy `26 passed`、Playwright `92 passed`；生成类型、
+  lint/typecheck、production build、Node license 与 dependency audit、`git diff --check` 全绿。E2E 覆盖不可变
+  revision 后审批、invalid raw draft 刷新恢复、`409` 单次决策无重放、375px 布局与焦点/身份隔离。
+- 首个实现 CI 仅因 `scripts/generate_web_types.py` 新增 schema 名称导致既有 Mypy `no-any-return` 诊断从
+  140 行移动至 152 行而触发基线指纹不一致；在前一全绿提交和当前提交分别运行锁定 Mypy 并归一化比较后，确认
+  诊断总数仍为 431，未新增、隐藏或消除类型债务，再由正式脚本刷新指纹。
+- 实现提交 `323c81d` 与诊断位置修正 `f7fd25d` 的精确 GitHub Actions `31028759368` 四路全绿：Python
+  `2015 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功。Ticket 11 正式 `complete`；
+  Ticket 12 已解锁并进入 `in_progress`。
+- Ticket 12 首个纵向切片固定为版本化 beauty + automotive fixture manifest/loader：先以 RED 锁定冻结 hash、
+  profile 隔离、重复键、篡改/漂移、畸形与有界输入失败关闭，再做最小 GREEN；该切片不得调用任何 Provider。
