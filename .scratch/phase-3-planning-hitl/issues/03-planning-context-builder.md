@@ -6,7 +6,7 @@ or unauthorized context.
 
 **Blocked by:** 01 — Creative Plan version contract.
 
-**Status:** awaiting-ci
+**Status:** complete
 
 - [x] The input accepts exact authoritative references and a versioned context policy, never raw URL/path/SQL/object keys or chat history.
 - [x] ProductBrief confirmation, Brand Profile publication/current usability, Retrieval Rights, workspace, retention, and purpose are revalidated.
@@ -17,7 +17,8 @@ or unauthorized context.
 - [x] Domain/application tests cover rights expiry, stale versions, conflict, budget clipping, duplicate citations, and malicious text.
 - [x] The public Interface returns a value; callers do not inspect internal loaders or ranking helpers.
 
-**Local verification:** domain/application/persistence/MySQL authority and migration tests pass; full
-unit suite `1146 passed`; full Ruff format/check, strict touched-file Mypy, 432-diagnostic Mypy
-baseline, dependency audit, migration contract, and diff checks pass. Exact GitHub Actions evidence
-is required before this Ticket becomes `complete` or Ticket 04 starts.
+**Verification:** domain/application/persistence/MySQL authority and migration tests pass; full unit
+suite `1146 passed`; full Ruff format/check, strict touched-file Mypy, 432-diagnostic Mypy baseline,
+dependency audit, migration contract, and diff checks pass. Commit
+`1db64ebb6b380aad20f55e7edd4cdb1125fbbbbd` is verified by exact GitHub Actions run
+`30970567724` (attempt 2): Python checks, Web checks, Container builds, and Security/SBOM all passed.

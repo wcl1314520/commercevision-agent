@@ -189,7 +189,9 @@
   Audit/Outbox、管理/解析 HTTP、OpenAPI 与 Web 生成类型已落地；精确 CI `30898303008` 四路全绿，Ticket 02 完成
 - Ticket 03 本地实现与发布门禁已完成：exact refs、MySQL authority revalidation、有界确定性快照、
   included/omitted provenance、双 SHA-256 防篡改、Workflow-lifetime retention 与 reconstruction 已闭合；
-  当前只允许提交、推送并等待精确 GitHub Actions，全绿前不启动 Ticket 04
+  提交 `1db64eb` 已由精确 GitHub Actions `30970567724` attempt 2 四路全绿验证，Ticket 03 完成
+- Ticket 04 已按 blockers-first 解锁并进入 TDD；先锁定 MySQL authority/optimistic head 的公开行为，
+  本状态提交取得精确 CI 全绿前不开始实现代码
 
 ## 成功标准
 

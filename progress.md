@@ -1604,4 +1604,10 @@
   保护的问题；现以公开 context SHA-256 与完整 storage SHA-256 分工保护计划输入和保留事实。
 - Ticket 03 本地门禁：相关 unit `10 passed`、完整 unit `1146 passed`、真实 MySQL authority `1 passed`、
   migration/trigger/downgrade `2 passed`、全局迁移契约 `7 passed`；全仓 Ruff、strict touched Mypy、
-  Mypy baseline 432 零漂移、dependency audit 和 `git diff --check` 全绿。等待精确 GitHub Actions 放行。
+  Mypy baseline 432 零漂移、dependency audit 和 `git diff --check` 全绿。
+- Ticket 03 提交 `1db64ebb6b380aad20f55e7edd4cdb1125fbbbbd` 的精确 GitHub Actions
+  `30970567724` 首次 Container builds 因托管 Runner BuildKit `rpc error: ... EOF` 瞬态失败；同一 run
+  attempt 2 重跑失败 job 后，Python、Web、Container builds 与 Security/SBOM 全部成功。未为基础设施
+  瞬态错误修改产品代码。
+- Ticket 03 正式完成，Ticket 04 `Creative Plan MySQL authority and optimistic head` 进入 `in_progress`；
+  blockers-first 约束要求本状态提交先取得精确 CI 全绿，再开始 Ticket 04 的 RED 测试。

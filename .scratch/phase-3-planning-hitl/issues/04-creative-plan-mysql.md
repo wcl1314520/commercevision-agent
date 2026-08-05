@@ -5,7 +5,7 @@ heads in MySQL with atomic create/revise behavior and exact retention.
 
 **Blocked by:** 01 — Creative Plan version contract.
 
-**Status:** ready-for-agent
+**Status:** in_progress
 
 - [ ] Tenant-owned keys and indexes lead with binary-exact Workspace ID and prevent cross-workspace references.
 - [ ] `(workspace_id, workflow_id, creative_plan_id, version_number)` and immutable IDs prevent duplicate logical versions.
