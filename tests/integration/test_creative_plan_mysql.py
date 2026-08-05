@@ -1433,7 +1433,7 @@ def test_http_plan_approval_rejects_a_stale_page_and_replays_the_exact_current_d
     headers = {
         "X-Workspace-Id": fixture.workspace_id,
         "X-Actor-Id": "creative-reviewer",
-        "Idempotency-Key": "http-stale-plan-approval-001",
+        "Idempotency-Key": "test-test-test",
         "X-Trace-Id": "trace-http-stale-plan-approval",
     }
     with TestClient(app) as client:
@@ -1441,7 +1441,7 @@ def test_http_plan_approval_rejects_a_stale_page_and_replays_the_exact_current_d
             f"/api/v1/workflows/{WORKFLOW_ID}/creative-plan:approve",
             headers={
                 **headers,
-                "Idempotency-Key": "http-fabricated-plan-approval-001",
+                "Idempotency-Key": "test-test-test-test",
             },
             json={
                 "expected_workflow_version": 8,
@@ -1462,7 +1462,7 @@ def test_http_plan_approval_rejects_a_stale_page_and_replays_the_exact_current_d
         )
         current_headers = {
             **headers,
-            "Idempotency-Key": "http-current-plan-approval-001",
+            "Idempotency-Key": "test-test-test-test-test",
             "X-Trace-Id": "trace-http-current-plan-approval",
         }
         payload = {
