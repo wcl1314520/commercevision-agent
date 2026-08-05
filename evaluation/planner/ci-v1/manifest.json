@@ -1,0 +1,26 @@
+{
+  "schema_version": "commercevision.planner-evaluation.v1",
+  "suite_version": "planner-ci-v1",
+  "dataset_version": "planner-beauty-automotive-v1",
+  "profile": "ci",
+  "split": "validation",
+  "fixtures_schema_version": "commercevision.planner-fixtures.v1",
+  "fixtures_sha256": "f8531bd3e714c3fbc36434da2eb9baeaeae5e6f4201aaa246291e1a9e28c4124",
+  "observations_schema_version": "commercevision.planner-observations.v1",
+  "observations_sha256": "09ad31e54cc248b295edccf9ab1c5855938aad0cf35432d11cbf979e713ee4ef",
+  "thresholds": {
+    "version": "planner-thresholds-v1",
+    "minimum_schema_validity_rate": 1.0,
+    "minimum_required_constraints_rate": 1.0,
+    "minimum_citation_precision": 1.0,
+    "minimum_provenance_completeness_rate": 1.0,
+    "minimum_determinism_rate": 1.0,
+    "maximum_p95_latency_ms": 100.0,
+    "maximum_policy_violation_count": 0,
+    "maximum_unauthorized_tool_count": 0,
+    "maximum_unauthorized_provider_count": 0,
+    "maximum_unauthorized_resource_count": 0,
+    "maximum_budget_expansion_count": 0,
+    "maximum_missing_approval_evidence_count": 0
+  }
+}

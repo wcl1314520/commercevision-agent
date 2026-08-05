@@ -25,6 +25,7 @@ node_modules/
 
 # Evaluation data provisioned only for release verification
 evaluation/retrieval/hidden-release/
+evaluation/planner/hidden-release/
 
 # Operating system metadata
 .DS_Store

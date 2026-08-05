@@ -1794,3 +1794,32 @@
   Ticket 12 已解锁并进入 `in_progress`。
 - Ticket 12 首个纵向切片固定为版本化 beauty + automotive fixture manifest/loader：先以 RED 锁定冻结 hash、
   profile 隔离、重复键、篡改/漂移、畸形与有界输入失败关闭，再做最小 GREEN；该切片不得调用任何 Provider。
+
+# 2026-08-06 Phase 3 Ticket 12 本地实现
+
+- Ticket 11 状态提交 `9d0a15e` 的精确 GitHub Actions `31030495244` 四路全绿：Python
+  `2015 passed, 3 skipped in 1252.36s`，Web、Container builds、Gitleaks 与 SBOM 全部成功。Ticket 12
+  blockers-first 门禁正式解除，未重复 Ticket 01–11。
+- 新增独立 Planner evaluation 深模块与 `commercevision-planner-eval` CLI。`planner-ci-v1` manifest 以
+  canonical SHA-256 同时冻结 beauty/automotive-parts ProductBrief、published Brand Profile、Retrieval Run/
+  Citations/Rights、Planning Context policy/hash、production Prompt Revision、期望方案事实、恶意变体、
+  observations 和版本化阈值；loader 对重复键、未知/额外字段、跨文件身份、profile/split、大小/数量/文本/
+  collection 边界失败关闭。
+- 指标覆盖 Schema validity、required constraints、Citation precision、provenance completeness、determinism、
+  P95 latency 与六项安全计数。质量/确定性/引用/完整性阈值不得低于 1.0，P95 不得放宽到 100ms 以上；
+  policy violation、unauthorized tool/provider/resource、budget expansion、missing approval evidence 必须精确为零。
+- Prompt Injection 数据覆盖 source text、OCR-like evidence、brand rule、retrieval reason 和 user edit。契约测试
+  通过公开 `DeterministicFixturePlanner` 重建两次 baseline/variant payload，精确核对 payload hash、provenance、
+  ImageRole 与 Tool Intent；user-edit 提议 `shell.exec` 由 server-owned registry 纯授权拒绝，无 arguments、
+  resource、idempotency key 或 Provider execution。
+- JSON/Markdown 报告只含 suite/dataset/profile/split/input digests、阈值和聚合指标。JSON envelope 携带
+  `report_sha256`；verifier 先核验摘要，再重新校验身份/阈值/指标边界并从指标重算 Gate，拒绝重算摘要但 Gate
+  不一致的伪造报告。CI 独立保留 `planner-evaluation-ci` artifact；hidden-release 数据由 `.gitignore` 隔离并
+  提供可复现 release 命令。
+- 本地 TDD/发布证据：Planner 专项 `15 passed`；完整 unit+contract `1447 passed, 1 skipped`；全仓 Ruff、
+  evaluation strict Mypy、431 条 Mypy baseline、Python license/vulnerability audit、真实 CLI gate 与
+  `git diff --check` 全绿。完整 `uv run pytest` 在 30 分钟本地命令上限被终止，终止前进程仍响应且 CPU 持续
+  前进、无失败结论；不把它记录为通过，推送后的精确 Linux CI 作为完整基础设施权威门禁。
+- 五轴终审闭合两个 Required：manifest 质量阈值降级绕过，以及攻击者重算报告摘要但不重算 Gate 的语义伪造。
+  当前无剩余 Critical/Required；Ticket 12 验收项已全部勾选，但在实现提交精确 CI 四路全绿前保持
+  `in_progress`，Ticket 13 不启动。

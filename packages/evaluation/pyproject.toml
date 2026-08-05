@@ -8,6 +8,7 @@ dependencies = []
 [project.scripts]
 commercevision-phase2-acceptance = "commercevision_evaluation.release_cli:main"
 commercevision-retrieval-eval = "commercevision_evaluation.cli:main"
+commercevision-planner-eval = "commercevision_evaluation.planner_cli:main"
 
 [build-system]
 requires = ["hatchling"]

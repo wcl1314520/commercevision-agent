@@ -158,6 +158,24 @@ jobs:
           name: retrieval-evaluation-daily
           path: .artifacts/evaluation/
           if-no-files-found: error
+      - name: Verify Planner fixtures and evaluation contracts
+        run: uv run pytest tests/contract/test_planner_evaluation_release_gate.py -q
+      - name: Run Planner evaluation gate
+        run: >-
+          uv run commercevision-planner-eval
+          --manifest evaluation/planner/ci-v1/manifest.json
+          --fixtures evaluation/planner/ci-v1/fixtures.json
+          --observations evaluation/planner/ci-v1/observations.json
+          --profile ci
+          --json-output .artifacts/planner-evaluation/planner-ci-v1.json
+          --markdown-output .artifacts/planner-evaluation/planner-ci-v1.md
+      - name: Retain Planner evaluation reports
+        if: ${{ always() && hashFiles('.artifacts/planner-evaluation/*') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-evaluation-ci
+          path: .artifacts/planner-evaluation/
+          if-no-files-found: error
       - run: uv run pytest
       - run: uv run python scripts/audit_python.py
       - run: uv run python scripts/export_openapi.py

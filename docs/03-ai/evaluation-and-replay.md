@@ -228,3 +228,39 @@ uv run commercevision-retrieval-eval \
 
 Release 只接受 `hidden-release` split 和 `confidence-bound` 门禁：相关性与 ANN 指标使用 bootstrap 下界，
 P95 使用上界；未授权指标始终按真实非零值立即失败。两种报告与镜像、SBOM、迁移和发布审批证据一同留存。
+
+## Phase 3 Planner 评测门
+
+Planner 评测以 manifest 同时冻结 beauty 与 automotive-parts Fixture、ProductBrief、Brand Profile、
+Retrieval Citations、Planning Context policy/hash、production Prompt Revision、期望方案事实和安全阈值。
+CI profile 只接受 development/validation split；Prompt Injection 覆盖 source text、OCR-like evidence、
+brand rule、retrieval reason 和 user edit。Fixture Planner 全程本地确定性执行，不调用模型或图片 Provider。
+
+```bash
+uv run commercevision-planner-eval \
+  --manifest evaluation/planner/ci-v1/manifest.json \
+  --fixtures evaluation/planner/ci-v1/fixtures.json \
+  --observations evaluation/planner/ci-v1/observations.json \
+  --profile ci \
+  --json-output .artifacts/planner-evaluation/planner-ci-v1.json \
+  --markdown-output .artifacts/planner-evaluation/planner-ci-v1.md
+```
+
+质量门统计 Schema validity、required constraints、Citation precision、provenance completeness、
+determinism 和 P95 latency。policy violation、unauthorized tool/provider/resource、budget expansion 与
+missing approval evidence 的阈值不可放宽，必须全部为零。报告只保留 suite/dataset/digest/threshold 和
+聚合指标；JSON envelope 的 `report_sha256` 用于在发布审批前验证报告未被篡改。
+
+完整发布集由发布管理员只读挂载到 Git 忽略的 `evaluation/planner/hidden-release/`，并运行：
+
+```bash
+uv run commercevision-planner-eval \
+  --manifest evaluation/planner/hidden-release/manifest.json \
+  --fixtures evaluation/planner/hidden-release/fixtures.json \
+  --observations evaluation/planner/hidden-release/observations.json \
+  --profile release \
+  --json-output .artifacts/planner-evaluation/planner-release.json \
+  --markdown-output .artifacts/planner-evaluation/planner-release.md
+```
+
+release profile 只接受 `hidden-release` split；隐藏 case、恶意 payload、资源身份与用户文本不得进入聚合报告。

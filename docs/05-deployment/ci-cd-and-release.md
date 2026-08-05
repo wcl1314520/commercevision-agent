@@ -152,3 +152,13 @@ Prompt 和模型不随意跟代码一起上线：
 - 公共 Demo 必须使用 `infra/public-demo/phase2.env.example` 对应的独立 workspace、四个 bucket、
   OIDC credential scope、对象前缀、配额和已授权 daily dataset；不得与私有部署 profile 混用。
 - 完整运行顺序、故障映射和类型基线策略见 [Phase 2 发布验收](phase2-release-acceptance.md)。
+
+### Planner Evaluation Report
+
+- PR/main CI 运行 provider-free `planner-ci-v1`，并以 `planner-evaluation-ci` artifact 独立留存带摘要的
+  JSON 与聚合 Markdown。
+- 正式发布从隔离存储只读挂载 `evaluation/planner/hidden-release/`，使用 `--profile release` 运行，
+  产物命名为 `planner-evaluation-release`。
+- 发布审批必须先验证 JSON `report_sha256`；任何 policy violation、unauthorized tool/provider/resource、
+  budget expansion 或 missing approval evidence 非零都拒绝发布。
+- artifact 不得包含 case ID、ProductBrief/Brand/Retrieval 身份、Prompt Injection 文本或方案 payload。
