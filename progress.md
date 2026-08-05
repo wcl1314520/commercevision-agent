@@ -1652,3 +1652,14 @@
   （lint/type/unit/proxy/build/Playwright/audit）、Container builds 与 Security/SBOM 全部成功。Ticket 05
   正式完成，Ticket 06 `Exact Creative Plan approval and execution fence` 进入 `in_progress`；状态提交精确
   CI 全绿前不开始 Ticket 06 RED。
+- 2026-08-05：Ticket 06/07 本地实现闭合。exact approval 覆盖 stale/fabricated/foreign/expired/rejected
+  subject、同键精确响应重放、异请求冲突、并发 revision/approval 单赢家，以及生成前 MySQL execution claim。
+- Durable Fixture Planner 使用 confirmed ProductBrief exact ref、不可变 Planning Context、production Prompt Revision
+  和 retained empty Retrieval Run 生成确定性 beauty/automotive Plan；Plan ID、Retrieval Run ID 与 Step 幂等键稳定。
+  Plan 已落库但 Step 完成前崩溃时，重领租约先核验 deterministic Plan ID 的已存版本，不受后续 production
+  Prompt pointer 切换影响，也不创建第二个 Plan Version。
+- 当前精确证据：Ticket 06/07 组合 `51 passed`；随后新增 pointer-safe replay、永久 node failure 分类和
+  no-raw-event 断言分别由 unit `24 passed`、真实 MySQL Planner 纵切通过；Ruff、`git diff --check`、新模块
+  strict Mypy 和正式 432-diagnostic Mypy baseline 均全绿。
+- 本机依赖 Celery runtime readiness 的 3 项旧 Phase 1 套件因 Milvus 不可用失败；直接 Worker restart/resume
+  测试与真实 ProductBrief Planner/HITL 流程均通过。未削弱生产 Milvus readiness，远程 CI 仍需给出权威结论。

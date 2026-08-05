@@ -1,6 +1,6 @@
 {
   "diagnostic_count": 432,
-  "diagnostics_sha256": "313e43ea66dccae856729b025ca750fc9d21cefcb78913a86977d562f9f6a5b7",
+  "diagnostics_sha256": "a0707e5d3d14f5c978ac365f84761b4c40cc2ebbf478c9eeb70853a8cc90a52c",
   "mypy_version": "2.3.0",
   "schema_version": "commercevision.mypy-baseline.v1"
 }

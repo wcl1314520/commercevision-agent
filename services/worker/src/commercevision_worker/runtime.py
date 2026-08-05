@@ -8,18 +8,22 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from commercevision_agent_core import (
     FixtureAgentRuntime,
     FixtureAgentState,
     build_fixture_graph,
 )
+from commercevision_agent_core.ports import CreativePlanNodePort
 from commercevision_application import (
     BrandProfileDeletionLineageError,
     BrandProfileInvalidationApplicationService,
     BrandProfileInvalidationPort,
     CollectionRebuildRunner,
+    CreativePlanApplicationService,
+    DurableFixturePlanner,
+    DurableFixturePlannerNode,
     DurableNodeLifecycle,
     DurableOperationWorker,
     EventRoutingError,
@@ -31,14 +35,18 @@ from commercevision_application import (
     OperationExecutorRegistry,
     OperationReconciliationPolicy,
     OperationRetryPolicy,
+    PlanningContextApplicationService,
     ProductBriefContinuation,
     ProductBriefContinuationAuthorityError,
     ProductBriefContinuationClaim,
     ProductBriefRecoveryClaim,
+    PromptRegistryApplicationService,
     StaleProductBriefContinuation,
     UploadObjectCleaner,
     build_event_routing_registry,
 )
+from commercevision_application.creative_plan_ports import CreativePlanUnitOfWorkPort
+from commercevision_application.prompt_registry_ports import PromptRegistryUnitOfWorkPort
 from commercevision_contracts import Settings
 from commercevision_contracts.events import (
     ASSET_DELETE_COMPLETED_V1,
@@ -99,6 +107,7 @@ from commercevision_domain import (
     NotFoundError,
     OperationKind,
     OperationState,
+    PlanningContextPolicy,
     StorageLocationClass,
     canonicalize_uuid,
 )
@@ -120,13 +129,18 @@ from commercevision_persistence import (
     MySqlAssetDeletionCoordinator,
     MySQLCheckpointSaver,
     MySqlCollectionRebuildRepository,
+    MySqlFixturePlanningAuthority,
     MySqlImageIndexRequestService,
     MySqlIndexingAuthority,
+    MySqlPlanningContextAuthority,
     MySqlProductFusedIndexRequestService,
     ProductFusedIndexNotApplicable,
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyBrandProfileUnitOfWork,
+    SqlAlchemyCreativePlanUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
+    SqlAlchemyPlanningContextSnapshotStore,
+    SqlAlchemyPromptRegistryUnitOfWork,
     SqlAlchemyUnitOfWork,
     create_database,
     is_unit_of_work_active,
@@ -221,6 +235,7 @@ class WorkerRuntime:
         *,
         operation_executors: Mapping[OperationKind, OperationExecutor] | None = None,
         brand_profile_invalidation: BrandProfileInvalidationPort | None = None,
+        creative_plan_node: CreativePlanNodePort | None = None,
     ) -> WorkerRuntime:
         configured_executors = dict(operation_executors or {})
         missing_executors = set(settings.worker_required_operation_kinds).difference(
@@ -366,6 +381,18 @@ class WorkerRuntime:
         def operation_uow_factory() -> SqlAlchemyOperationUnitOfWork:
             return SqlAlchemyOperationUnitOfWork(database.session_factory)
 
+        def prompt_registry_uow_factory() -> PromptRegistryUnitOfWorkPort:
+            return cast(
+                PromptRegistryUnitOfWorkPort,
+                SqlAlchemyPromptRegistryUnitOfWork(database.session_factory),
+            )
+
+        def creative_plan_uow_factory() -> CreativePlanUnitOfWorkPort:
+            return cast(
+                CreativePlanUnitOfWorkPort,
+                SqlAlchemyCreativePlanUnitOfWork(database.session_factory),
+            )
+
         worker_id = f"{socket.gethostname()}:{settings.service_name}"
         lifecycle = DurableNodeLifecycle(
             uow_factory=uow_factory,
@@ -409,8 +436,29 @@ class WorkerRuntime:
             database.session_factory,
             retention=timedelta(hours=settings.workflow_retention_hours),
         )
+        planning_context_policy = PlanningContextPolicy(
+            version="planning-context-v1",
+            maximum_tokens=2_000,
+            maximum_images=4,
+        )
+        if creative_plan_node is None:
+            creative_plan_node = DurableFixturePlannerNode(
+                DurableFixturePlanner(
+                    authority=MySqlFixturePlanningAuthority(database.session_factory),
+                    contexts=PlanningContextApplicationService(
+                        authority=MySqlPlanningContextAuthority(
+                            database.session_factory,
+                            policies={planning_context_policy.version: planning_context_policy},
+                        ),
+                        snapshots=SqlAlchemyPlanningContextSnapshotStore(database.session_factory),
+                    ),
+                    prompts=PromptRegistryApplicationService(prompt_registry_uow_factory),
+                    plans=CreativePlanApplicationService(creative_plan_uow_factory),
+                )
+            )
         graph = build_fixture_graph(
             lifecycle=lifecycle,
+            planner=creative_plan_node,
             tool_gateway=gateway,
             checkpointer=checkpointer,
             worker_id=worker_id,

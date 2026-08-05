@@ -17,10 +17,10 @@ from commercevision_domain import (
     PlanningContextSnapshot,
     PlanningContextSource,
 )
-from sqlalchemy import select
-from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy import insert, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
 
 from .planning_context_models import PlanningContextSnapshotModel
 
@@ -168,11 +168,20 @@ class PlanningContextSnapshotRepository:
         }
         bind = self._session.get_bind()
         if bind.dialect.name == "mysql":
-            statement = mysql_insert(PlanningContextSnapshotModel).values(**values)
-            statement = statement.on_duplicate_key_update(
-                context_sha256=statement.inserted.context_sha256
-            )
-            self._session.execute(statement)
+            if (
+                self._get_model(
+                    workspace_id=snapshot.workspace_id,
+                    workflow_id=snapshot.workflow_id,
+                    context_sha256=snapshot.context_sha256,
+                )
+                is None
+            ):
+                try:
+                    with self._session.begin_nested():
+                        self._session.execute(insert(PlanningContextSnapshotModel).values(**values))
+                except IntegrityError:
+                    # A concurrent writer may have committed the same immutable fact.
+                    self._session.expire_all()
         elif bind.dialect.name == "sqlite":
             sqlite_statement = (
                 sqlite_insert(PlanningContextSnapshotModel)
@@ -241,3 +250,31 @@ class PlanningContextSnapshotRepository:
                 PlanningContextSnapshotModel.context_sha256 == context_sha256,
             )
         )
+
+
+class SqlAlchemyPlanningContextSnapshotStore:
+    """Transaction-owning application adapter for immutable Context snapshots."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def save(self, snapshot: PlanningContextSnapshot, *, retain_until: datetime) -> None:
+        with self._session_factory.begin() as session:
+            PlanningContextSnapshotRepository(session).save(
+                snapshot,
+                retain_until=retain_until,
+            )
+
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        context_sha256: str,
+    ) -> PlanningContextSnapshot | None:
+        with self._session_factory() as session:
+            return PlanningContextSnapshotRepository(session).get(
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                context_sha256=context_sha256,
+            )

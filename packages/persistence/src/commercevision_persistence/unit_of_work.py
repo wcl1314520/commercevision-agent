@@ -9,6 +9,7 @@ from sqlalchemy import literal_column, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .creative_plans import CreativePlanRepository
 from .database import enter_unit_of_work, exit_unit_of_work
 from .integrity import classify_database_error, flush_with_integrity_classification
 from .product_briefs import ProductBriefRepository
@@ -39,6 +40,7 @@ class SqlAlchemyUnitOfWork:
         self.steps = StepRepository(self.session)
         self.attempts = AttemptRepository(self.session)
         self.approvals = ApprovalRepository(self.session)
+        self.creative_plans = CreativePlanRepository(self.session)
         self.idempotency = IdempotencyRepository(self.session)
         self.outbox = OutboxRepository(self.session)
         self.inbox = InboxRepository(self.session)

@@ -37,6 +37,25 @@ class ProductBriefContinuationLike(Protocol):
     approval_id: str | None
 
 
+class CreativePlanNodeResultLike(Protocol):
+    def to_step_output(self) -> dict[str, object]: ...
+
+
+class CreativePlanNodePort(Protocol):
+    def create_plan(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        product_brief_version_id: str | None,
+        product_brief_version_number: int | None,
+        actor_id: str,
+        expected_workflow_version: int,
+        trace_id: str,
+        idempotency_key: str,
+    ) -> CreativePlanNodeResultLike: ...
+
+
 class NodeLifecyclePort(Protocol):
     def begin_node(
         self,

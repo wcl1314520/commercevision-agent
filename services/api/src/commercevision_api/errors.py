@@ -33,6 +33,10 @@ from commercevision_domain import (
 )
 from commercevision_domain.workflow.errors import (
     ApprovalConflictError,
+    CreativePlanApprovalRejectedVersionError,
+    CreativePlanApprovalRetentionExpiredError,
+    CreativePlanApprovalSubjectConflictError,
+    CreativePlanApprovalVersionConflictError,
     IdempotencyConflictError,
     RetryNotReadyError,
 )
@@ -175,6 +179,14 @@ def _classification(exc: DomainError) -> tuple[int, str, str, bool]:
         return 409, "REFERENCE_CONSTRAINT_CONFLICT", "conflict", False
     if isinstance(exc, InvalidDataError):
         return 422, "INVALID_DATA", "validation", False
+    if isinstance(exc, CreativePlanApprovalSubjectConflictError):
+        return 409, "CREATIVE_PLAN_SUBJECT_CONFLICT", "conflict", False
+    if isinstance(exc, CreativePlanApprovalVersionConflictError):
+        return 409, "CREATIVE_PLAN_VERSION_CONFLICT", "conflict", False
+    if isinstance(exc, CreativePlanApprovalRetentionExpiredError):
+        return 410, "CREATIVE_PLAN_RETENTION_EXPIRED", "state", False
+    if isinstance(exc, CreativePlanApprovalRejectedVersionError):
+        return 409, "CREATIVE_PLAN_REJECTED_VERSION", "state", False
     if isinstance(exc, (ConcurrencyError, ApprovalConflictError)):
         return 409, "VERSION_CONFLICT", "conflict", False
     if isinstance(exc, InvalidTransitionError):

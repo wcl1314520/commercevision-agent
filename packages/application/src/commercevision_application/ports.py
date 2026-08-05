@@ -6,7 +6,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
-from commercevision_domain import ProductBrief, ProductBriefVersion
+from commercevision_domain import (
+    CreativePlanHead,
+    CreativePlanVersion,
+    ProductBrief,
+    ProductBriefVersion,
+)
 from commercevision_domain.messaging import DeadLetterMessage, OutboxEvent
 from commercevision_domain.workflow.entities import (
     Approval,
@@ -69,7 +74,18 @@ class AttemptRepositoryPort(Protocol):
 
 class ApprovalRepositoryPort(Protocol):
     def add(self, approval: Approval) -> None: ...
+    def get(self, approval_id: str, *, workflow_id: str) -> Approval | None: ...
     def list_for_workflow(self, workflow_id: str) -> list[Approval]: ...
+
+
+class CreativePlanApprovalAuthorityPort(Protocol):
+    def get_current(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+    ) -> tuple[CreativePlanHead, CreativePlanVersion] | None: ...
 
 
 class IdempotencyRepositoryPort(Protocol):
@@ -208,6 +224,7 @@ class UnitOfWorkPort(Protocol):
     steps: StepRepositoryPort
     attempts: AttemptRepositoryPort
     approvals: ApprovalRepositoryPort
+    creative_plans: CreativePlanApprovalAuthorityPort
     idempotency: IdempotencyRepositoryPort
     outbox: OutboxRepositoryPort
     inbox: InboxRepositoryPort

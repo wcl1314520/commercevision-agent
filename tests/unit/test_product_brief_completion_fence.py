@@ -12,6 +12,7 @@ from commercevision_agent_core.graph import (
 from commercevision_agent_core.state import FixtureAgentState
 from commercevision_application import ProductBriefGenerationAuthority
 from commercevision_contracts.workflow import product_brief_checkpoint_generation
+from commercevision_domain import NotFoundError
 from commercevision_tool_runtime import ToolResult
 
 
@@ -98,6 +99,7 @@ def test_preclaimed_retrieval_completion_carries_exact_continuation_generation()
     lifecycle.complete_node.return_value = 18
     nodes = FixtureNodes(
         lifecycle=lifecycle,
+        planner=MagicMock(),
         tool_gateway=MagicMock(),
         worker_id="worker-product-brief-fence",
     )
@@ -128,6 +130,103 @@ def test_preclaimed_retrieval_completion_carries_exact_continuation_generation()
     assert continuation.approval_id == "approval-v1"
 
 
+def test_plan_write_replays_the_same_step_key_after_completion_crash() -> None:
+    lifecycle = MagicMock()
+    lifecycle.begin_node.side_effect = (
+        SimpleNamespace(
+            workflow_version=17,
+            step_id="create-plan-step-v1",
+            lease_token="create-plan-lease-v1",
+            already_completed=False,
+            output_data=None,
+        ),
+        SimpleNamespace(
+            workflow_version=17,
+            step_id="create-plan-step-v1",
+            lease_token="create-plan-lease-v2",
+            already_completed=False,
+            output_data=None,
+        ),
+    )
+    lifecycle.complete_node.side_effect = (
+        RuntimeError("simulated crash after durable Plan write"),
+        18,
+    )
+    output = {
+        "creative_plan_ref": "plan-v1",
+        "creative_plan_version_id": "plan-version-v1",
+        "creative_plan_version": 1,
+        "creative_plan_payload_sha256": "1" * 64,
+        "planning_context_sha256": "2" * 64,
+        "prompt_id": "creative-planner",
+        "prompt_revision": "1.0.0",
+        "plan_decision": None,
+    }
+    planner = MagicMock()
+    planner.create_plan.return_value = SimpleNamespace(to_step_output=lambda: output)
+    nodes = FixtureNodes(
+        lifecycle=lifecycle,
+        planner=planner,
+        tool_gateway=MagicMock(),
+        worker_id="worker-product-brief-fence",
+    )
+    state = _confirmed_product_brief_state(current_node="create_plan")
+
+    with pytest.raises(RuntimeError, match="after durable Plan write"):
+        nodes.create_plan(state)
+    replayed = nodes.create_plan(state)
+
+    assert replayed == {
+        **output,
+        "workflow_version": 18,
+        "current_node": "approve_plan",
+        "initial_step_id": None,
+    }
+    assert planner.create_plan.call_count == 2
+    calls = [call.kwargs for call in planner.create_plan.call_args_list]
+    assert {call["idempotency_key"] for call in calls} == {"fixture-plan:create-plan-step-v1"}
+    assert {call["expected_workflow_version"] for call in calls} == {17}
+    completion_calls = [call.kwargs for call in lifecycle.complete_node.call_args_list]
+    assert [call["lease_token"] for call in completion_calls] == [
+        "create-plan-lease-v1",
+        "create-plan-lease-v2",
+    ]
+
+
+def test_plan_policy_rejection_is_audited_as_a_permanent_node_failure() -> None:
+    lifecycle = MagicMock()
+    lifecycle.begin_node.return_value = SimpleNamespace(
+        workflow_version=17,
+        step_id="create-plan-step-v1",
+        lease_token="create-plan-lease-v1",
+        already_completed=False,
+        output_data=None,
+    )
+    planner = MagicMock()
+    planner.create_plan.side_effect = NotFoundError(
+        "Fixture Planner authority or policy was not found"
+    )
+    nodes = FixtureNodes(
+        lifecycle=lifecycle,
+        planner=planner,
+        tool_gateway=MagicMock(),
+        worker_id="worker-product-brief-fence",
+    )
+    state = _confirmed_product_brief_state(current_node="create_plan")
+
+    with pytest.raises(NotFoundError, match="authority or policy"):
+        nodes.create_plan(state)
+
+    failure = lifecycle.fail_node.call_args.kwargs
+    assert failure["workflow_id"] == state.workflow_id
+    assert failure["step_id"] == "create-plan-step-v1"
+    assert failure["lease_token"] == "create-plan-lease-v1"
+    assert failure["expected_workflow_version"] == 17
+    assert failure["retryable"] is False
+    assert failure["retry_delay"].total_seconds() == 0
+    lifecycle.complete_node.assert_not_called()
+
+
 def test_external_tool_persistence_and_completion_share_the_node_claim_fence() -> None:
     lifecycle = MagicMock()
     lifecycle.begin_node.return_value = SimpleNamespace(
@@ -155,6 +254,7 @@ def test_external_tool_persistence_and_completion_share_the_node_claim_fence() -
     )
     nodes = FixtureNodes(
         lifecycle=lifecycle,
+        planner=MagicMock(),
         tool_gateway=tool_gateway,
         worker_id="worker-product-brief-fence",
     )

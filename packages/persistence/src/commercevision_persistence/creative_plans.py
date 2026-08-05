@@ -35,6 +35,7 @@ from .integrity import (
 )
 from .planning_context_models import PlanningContextSnapshotModel
 from .planning_contexts import PlanningContextSnapshotRepository
+from .product_brief_models import ProductBriefModel, ProductBriefVersionModel
 from .prompt_registry import PromptRevisionRepository
 from .repositories import AuditRepository, IdempotencyRepository, WorkflowRepository
 from .retrieval_models import RetrievalRunModel
@@ -387,6 +388,33 @@ class CreativePlanRepository:
             or actual_brand != expected_brand
             or not citations_match
         ):
+            raise NotFoundError("Creative Plan provenance authority does not exist")
+        product_brief = self._session.execute(
+            select(ProductBriefModel, ProductBriefVersionModel)
+            .join(
+                ProductBriefVersionModel,
+                (ProductBriefVersionModel.workspace_id == ProductBriefModel.workspace_id)
+                & (ProductBriefVersionModel.product_brief_id == ProductBriefModel.id),
+            )
+            .where(
+                ProductBriefModel.workspace_id == version.workspace_id,
+                ProductBriefModel.workflow_id == version.workflow_id,
+                ProductBriefModel.id == provenance.product_brief_id,
+                ProductBriefModel.state == "CONFIRMED",
+                ProductBriefModel.current_version_id == ProductBriefVersionModel.id,
+                ProductBriefModel.confirmed_version_id == ProductBriefVersionModel.id,
+                ProductBriefModel.retention_deadline.is_not(None),
+                ProductBriefModel.retention_deadline >= retain_until,
+                ProductBriefModel.retention_deadline > authorized_at,
+                ProductBriefVersionModel.version_number == provenance.product_brief_version,
+                ProductBriefVersionModel.payload_sha256 == provenance.product_brief_sha256,
+                ProductBriefVersionModel.retention_deadline.is_not(None),
+                ProductBriefVersionModel.retention_deadline >= retain_until,
+                ProductBriefVersionModel.retention_deadline > authorized_at,
+            )
+            .with_for_update()
+        ).first()
+        if product_brief is None:
             raise NotFoundError("Creative Plan provenance authority does not exist")
         prompt = PromptRevisionRepository(self._session).get_by_semantic_revision(
             workspace_id=version.workspace_id,

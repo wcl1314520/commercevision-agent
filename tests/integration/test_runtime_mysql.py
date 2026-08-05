@@ -453,6 +453,7 @@ def test_normal_workflow_crosses_outbox_celery_worker_seam_without_false_dlq(
     integration_database,
     integration_settings,
     monkeypatch,
+    legacy_phase1_planner_node,
 ) -> None:
     settings = integration_settings.model_copy(
         update={
@@ -464,7 +465,10 @@ def test_normal_workflow_crosses_outbox_celery_worker_seam_without_false_dlq(
     )
     client = CapturingCeleryClient()
     monkeypatch.setattr(scheduler_runtime, "Celery", lambda *_args, **_kwargs: client)
-    worker = WorkerRuntime.build(settings)
+    worker = WorkerRuntime.build(
+        settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
     monkeypatch.setattr(worker_module, "_get_runtime", lambda: worker)
 
     service = WorkflowApplicationService(
@@ -594,6 +598,7 @@ def test_phase1_durable_failure_does_not_create_second_worker_retry_schedule(
     integration_database,
     integration_settings,
     monkeypatch,
+    legacy_phase1_planner_node,
     failure_mode: str,
     expected_status: str,
     expected_event_type: EventType,
@@ -608,7 +613,10 @@ def test_phase1_durable_failure_does_not_create_second_worker_retry_schedule(
 
     monkeypatch.setattr(reliability_module, "datetime", FrozenDateTime)
     monkeypatch.setattr(execution_module, "datetime", FrozenDateTime)
-    worker = WorkerRuntime.build(integration_settings)
+    worker = WorkerRuntime.build(
+        integration_settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
     monkeypatch.setattr(worker_module, "_get_runtime", lambda: worker)
     publisher = CapturingPublisher()
     dispatcher = OutboxDispatcher(
@@ -708,7 +716,9 @@ def test_phase1_durable_failure_does_not_create_second_worker_retry_schedule(
 
 
 def test_worker_restart_duplicate_delivery_and_human_resume(
-    integration_database, integration_settings
+    integration_database,
+    integration_settings,
+    legacy_phase1_planner_node,
 ) -> None:
     def uow_factory() -> SqlAlchemyUnitOfWork:
         return SqlAlchemyUnitOfWork(integration_database.session_factory)
@@ -728,7 +738,10 @@ def test_worker_restart_duplicate_delivery_and_human_resume(
         workspace_id="integration-runtime",
     )[0]
 
-    first_worker = WorkerRuntime.build(integration_settings)
+    first_worker = WorkerRuntime.build(
+        integration_settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
     assert first_worker.process_event(initial_event.event_id) == "processed"
     assert first_worker.process_event(initial_event.event_id) == "duplicate"
     first_worker.close()
@@ -762,7 +775,10 @@ def test_worker_restart_duplicate_delivery_and_human_resume(
         if event.event_type == "workflow.resume.requested"
     ][-1]
 
-    second_worker = WorkerRuntime.build(integration_settings)
+    second_worker = WorkerRuntime.build(
+        integration_settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
     assert second_worker.process_event(resume_plan.event_id) == "processed"
     second_worker.close()
     awaiting_results = service.get(
@@ -797,7 +813,10 @@ def test_worker_restart_duplicate_delivery_and_human_resume(
         )
         if event.event_type == "workflow.resume.requested"
     ][-1]
-    third_worker = WorkerRuntime.build(integration_settings)
+    third_worker = WorkerRuntime.build(
+        integration_settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
     assert third_worker.process_event(resume_result.event_id) == "processed"
     assert third_worker.process_event(resume_result.event_id) == "duplicate"
     third_worker.close()

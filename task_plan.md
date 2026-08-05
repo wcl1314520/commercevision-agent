@@ -200,6 +200,11 @@
 - Ticket 05 实现提交 `c45a8b2` 已由精确 GitHub Actions `30981372490` 四路全绿验证并正式完成；
   Ticket 06 已按 blockers-first 解锁，进入 exact Creative Plan approval/execution fence 的 TDD 纵切；
   本状态提交取得精确 CI 全绿前不开始 Ticket 06 实现代码
+- Ticket 06 exact approval/execution fence 已完成本地实现：审批与幂等 claim 在同一 Workflow 行锁事务，
+  stale/fabricated/foreign/expired/rejected-version 均失败关闭，执行前从 MySQL 重验 exact Approval 与当前 Plan。
+- Ticket 07 durable Fixture Planner 已完成本地纵向实现：真实 Planning Context、production Prompt、确定性双品类
+  Creative Plan、MySQL 权威提交、Step 崩溃重放和 ProductBrief commit-time recheck 已闭合；Ticket 06/07 在精确
+  GitHub Actions 全绿前保持 `in_progress`，Ticket 08 不启动。
 
 ## 成功标准
 

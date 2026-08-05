@@ -63,6 +63,16 @@ from .execution import (
     ProductBriefRecoveryClaim,
     StaleProductBriefContinuation,
 )
+from .fixture_planner import (
+    DeterministicFixturePlanner,
+    DurableFixturePlanner,
+    DurableFixturePlannerCommand,
+    DurableFixturePlannerNode,
+    DurableFixturePlanResult,
+    FixturePlannerDraft,
+    FixturePlannerRequest,
+    FixturePlanningAuthority,
+)
 from .indexing import (
     EmbeddingProviderPort,
     ExactImageReferencePort,
@@ -163,7 +173,7 @@ from .routing import (
     build_event_routing_registry,
 )
 from .upload_maintenance import UploadSessionMaintenanceService
-from .workflows import WorkflowApplicationService
+from .workflows import CreativePlanExecutionClaim, WorkflowApplicationService
 
 __all__ = [
     "DurableNodeLifecycle",
@@ -211,6 +221,11 @@ __all__ = [
     "canonicalize_dead_letter_id",
     "DuplicateEventRegistrationError",
     "DeterministicContentSafetyRequestFactory",
+    "DeterministicFixturePlanner",
+    "DurableFixturePlanner",
+    "DurableFixturePlannerCommand",
+    "DurableFixturePlannerNode",
+    "DurableFixturePlanResult",
     "EventRoute",
     "EventRoutingError",
     "EventRoutingRegistry",
@@ -234,6 +249,9 @@ __all__ = [
     "DenseRetrievalTarget",
     "ProviderDenseQueryVectorService",
     "ExplicitReferenceRetrievalSource",
+    "FixturePlannerDraft",
+    "FixturePlannerRequest",
+    "FixturePlanningAuthority",
     "RetrievalApplicationService",
     "RetrievalEligibility",
     "RetrievalRecallBatch",
@@ -298,4 +316,5 @@ __all__ = [
     "build_embedding_provider_request",
     "build_milvus_upsert_request",
     "WorkflowApplicationService",
+    "CreativePlanExecutionClaim",
 ]

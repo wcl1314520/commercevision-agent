@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,7 +27,9 @@ from commercevision_domain import (
     ApprovalDecision,
     ApprovalType,
     ConcurrencyError,
+    CreativePlanVersion,
     NotFoundError,
+    RetentionStatus,
     Workflow,
     WorkflowCancellationRefusedError,
     WorkflowStatus,
@@ -35,11 +38,25 @@ from commercevision_domain import (
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 from commercevision_domain.workflow.errors import (
     ApprovalConflictError,
+    CreativePlanApprovalRejectedVersionError,
+    CreativePlanApprovalRetentionExpiredError,
+    CreativePlanApprovalSubjectConflictError,
+    CreativePlanApprovalVersionConflictError,
     IdempotencyConflictError,
 )
 
-from .ports import UnitOfWorkFactory
+from .ports import UnitOfWorkFactory, UnitOfWorkPort
 from .projections import workflow_response
+
+
+@dataclass(frozen=True, slots=True)
+class CreativePlanExecutionClaim:
+    """MySQL-revalidated authority for one approved Creative Plan version."""
+
+    workflow_version: int
+    plan: CreativePlanVersion
+    approval: Approval
+    retain_until: datetime
 
 
 def _canonical_hash(value: dict[str, Any]) -> str:
@@ -282,17 +299,33 @@ class WorkflowApplicationService:
                 "actor_id": actor_id,
             }
         )
-        existing = self._load_idempotent(scope, key_hash, request_hash, workspace_id)
-        if existing is not None:
-            return existing
         target = self._approval_target(approval_type, request.decision)
-        now = datetime.now(UTC)
         with self._uow_factory() as uow:
             workflow = uow.workflows.get(workflow_id, workspace_id=workspace_id, for_update=True)
             if workflow is None:
                 raise NotFoundError(f"workflow {workflow_id} was not found")
+            now = uow.database_now()
+            replay = self._claim_approval_idempotency(
+                uow=uow,
+                scope=scope,
+                key_hash=key_hash,
+                request_hash=request_hash,
+                workflow=workflow,
+                approval_type=approval_type,
+            )
+            if replay is not None:
+                return replay
             self._validate_approval_state(workflow.status, approval_type)
             workflow.assert_version(request.expected_workflow_version)
+            if approval_type is ApprovalType.CREATIVE_PLAN:
+                self._validate_creative_plan_subject(
+                    uow=uow,
+                    workflow=workflow,
+                    subject_id=request.subject_id,
+                    subject_version=request.subject_version,
+                    decision=request.decision,
+                    now=now,
+                )
             approval = Approval.create(
                 workflow_id=workflow.id,
                 approval_type=approval_type,
@@ -326,14 +359,14 @@ class WorkflowApplicationService:
                     now=now,
                 )
             )
-            uow.idempotency.add(
+            response = workflow_response(workflow, approvals=[approval])
+            uow.idempotency.complete(
                 scope=scope,
                 key_hash=key_hash,
                 request_hash=request_hash,
-                resource_type="workflow",
-                resource_id=workflow.id,
-                response_data={"workflow_id": workflow.id, "approval_id": approval.id},
-                expires_at=workflow.expires_at,
+                resource_type="workflow-approval",
+                resource_id=approval.id,
+                response_data=response.model_dump(mode="json"),
             )
             self._audit(
                 uow=uow,
@@ -349,7 +382,152 @@ class WorkflowApplicationService:
                 now=now,
             )
             uow.commit()
-        return workflow_response(workflow, approvals=[approval])
+        return response
+
+    @staticmethod
+    def _claim_approval_idempotency(
+        *,
+        uow: UnitOfWorkPort,
+        scope: str,
+        key_hash: str,
+        request_hash: str,
+        workflow: Workflow,
+        approval_type: ApprovalType,
+    ) -> WorkflowResponse | None:
+        record = uow.idempotency.claim(
+            scope=scope,
+            key_hash=key_hash,
+            request_hash=request_hash,
+            expires_at=workflow.expires_at,
+        )
+        if record.request_hash != request_hash:
+            raise IdempotencyConflictError(
+                "idempotency key was already used with a different request"
+            )
+        if record.status == "PENDING":
+            return None
+        if record.status != "COMPLETED":
+            raise ConcurrencyError("approval idempotency record has an unsupported status")
+        if record.resource_type != "workflow-approval" or not isinstance(
+            record.response_data, dict
+        ):
+            raise ConcurrencyError("idempotency record does not contain an approval response")
+        try:
+            response = WorkflowResponse.model_validate(record.response_data)
+        except ValueError as exc:
+            raise ConcurrencyError("idempotent approval response is invalid") from exc
+        if (
+            response.id != workflow.id
+            or response.workspace_id != workflow.workspace_id
+            or len(response.approvals) != 1
+            or response.approvals[0].id != record.resource_id
+            or response.approvals[0].approval_type is not approval_type
+        ):
+            raise ConcurrencyError("idempotent approval response has the wrong authority")
+        return response
+
+    @staticmethod
+    def _validate_creative_plan_subject(
+        *,
+        uow: UnitOfWorkPort,
+        workflow: Workflow,
+        subject_id: str,
+        subject_version: int,
+        decision: ApprovalDecision,
+        now: datetime,
+    ) -> None:
+        current = uow.creative_plans.get_current(
+            workspace_id=workflow.workspace_id,
+            workflow_id=workflow.id,
+            creative_plan_id=subject_id,
+        )
+        if current is None:
+            raise CreativePlanApprovalSubjectConflictError(
+                "approval subject is not the authoritative current Creative Plan"
+            )
+        if decision is ApprovalDecision.APPROVE and any(
+            approval.approval_type is ApprovalType.CREATIVE_PLAN
+            and approval.subject_id == subject_id
+            and approval.subject_version == subject_version
+            and approval.decision is ApprovalDecision.REJECT
+            for approval in uow.approvals.list_for_workflow(workflow.id)
+        ):
+            raise CreativePlanApprovalRejectedVersionError(
+                "rejected Creative Plan requires a later Creative Plan version"
+            )
+        head, version = current
+        if (
+            version.version_number != subject_version
+            or head.current_version_number != subject_version
+            or head.current_version_id != version.id
+        ):
+            raise CreativePlanApprovalVersionConflictError(
+                "approval subject is not the authoritative current Creative Plan"
+            )
+        if (
+            workflow.retention_status is not RetentionStatus.ACTIVE
+            or now >= head.retain_until
+            or now >= workflow.expires_at
+        ):
+            raise CreativePlanApprovalRetentionExpiredError(
+                "approval subject retention has expired"
+            )
+
+    def validate_creative_plan_execution_claim(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        creative_plan_version: int,
+        approval_id: str,
+    ) -> CreativePlanExecutionClaim:
+        """Load execution authority from current MySQL facts, never checkpoint state."""
+
+        validate_workspace_id(workspace_id)
+        with self._uow_factory() as uow:
+            workflow = uow.workflows.get(
+                workflow_id,
+                workspace_id=workspace_id,
+                for_update=True,
+            )
+            if workflow is None:
+                raise NotFoundError(f"workflow {workflow_id} was not found")
+            now = uow.database_now()
+            current = uow.creative_plans.get_current(
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                creative_plan_id=creative_plan_id,
+            )
+            approval = uow.approvals.get(approval_id, workflow_id=workflow_id)
+            if current is None or approval is None:
+                raise ApprovalConflictError(
+                    "execution claim does not match the exact approved Creative Plan"
+                )
+            head, plan = current
+            if (
+                workflow.status is not WorkflowStatus.GENERATING
+                or workflow.retention_status is not RetentionStatus.ACTIVE
+                or workflow.version != approval.expected_workflow_version + 1
+                or approval.approval_type is not ApprovalType.CREATIVE_PLAN
+                or approval.decision is not ApprovalDecision.APPROVE
+                or approval.subject_id != creative_plan_id
+                or approval.subject_version != creative_plan_version
+                or plan.version_number != creative_plan_version
+                or head.current_version_number != creative_plan_version
+                or head.current_version_id != plan.id
+                or now >= workflow.expires_at
+                or now >= head.retain_until
+            ):
+                raise ApprovalConflictError(
+                    "execution claim does not match the exact approved Creative Plan"
+                )
+            return CreativePlanExecutionClaim(
+                workflow_version=workflow.version,
+                plan=plan,
+                approval=approval,
+                retain_until=min(workflow.expires_at, head.retain_until),
+            )
 
     def events(self, *, workflow_id: str, workspace_id: str) -> list[EventResponse]:
         with self._uow_factory() as uow:

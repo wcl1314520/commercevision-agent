@@ -773,6 +773,26 @@ class PromptRegistryApplicationService:
         category: str,
         model_family: str,
     ) -> PromptRevisionResponseV1:
+        return prompt_revision_to_contract(
+            self.resolve_production_revision(
+                workspace_id=workspace_id,
+                prompt_id=prompt_id,
+                node=node,
+                category=category,
+                model_family=model_family,
+            )
+        )
+
+    def resolve_production_revision(
+        self,
+        *,
+        workspace_id: str,
+        prompt_id: str,
+        node: str,
+        category: str,
+        model_family: str,
+    ) -> PromptRevision:
+        """Resolve the domain revision for trusted in-process consumers."""
         validate_workspace_id(workspace_id)
         for value, field_name in (
             (prompt_id, "Prompt id"),
@@ -792,4 +812,4 @@ class PromptRegistryApplicationService:
             )
         if revision is None:
             raise NotFoundError("production Prompt Revision was not found")
-        return prompt_revision_to_contract(revision)
+        return revision

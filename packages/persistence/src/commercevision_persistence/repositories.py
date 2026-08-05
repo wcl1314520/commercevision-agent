@@ -459,6 +459,15 @@ class ApprovalRepository:
     def add(self, approval: Approval) -> None:
         self.session.add(approval_to_model(approval))
 
+    def get(self, approval_id: str, *, workflow_id: str) -> Approval | None:
+        model = self.session.scalar(
+            select(ApprovalModel).where(
+                ApprovalModel.id == approval_id,
+                ApprovalModel.workflow_id == workflow_id,
+            )
+        )
+        return None if model is None else approval_from_model(model)
+
     def list_for_workflow(self, workflow_id: str) -> list[Approval]:
         models = self.session.scalars(
             select(ApprovalModel)

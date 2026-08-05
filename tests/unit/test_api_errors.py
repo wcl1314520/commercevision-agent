@@ -6,6 +6,12 @@ from commercevision_domain import (
     RightsDeniedError,
     UniqueConstraintError,
 )
+from commercevision_domain.workflow.errors import (
+    CreativePlanApprovalRejectedVersionError,
+    CreativePlanApprovalRetentionExpiredError,
+    CreativePlanApprovalSubjectConflictError,
+    CreativePlanApprovalVersionConflictError,
+)
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
@@ -45,6 +51,33 @@ def test_rights_denial_has_a_stable_authorization_code() -> None:
         403,
         "RIGHTS_DENIED",
         "authorization",
+        False,
+    )
+
+
+def test_creative_plan_approval_conflicts_have_actionable_stable_codes() -> None:
+    assert _classification(CreativePlanApprovalSubjectConflictError()) == (
+        409,
+        "CREATIVE_PLAN_SUBJECT_CONFLICT",
+        "conflict",
+        False,
+    )
+    assert _classification(CreativePlanApprovalVersionConflictError()) == (
+        409,
+        "CREATIVE_PLAN_VERSION_CONFLICT",
+        "conflict",
+        False,
+    )
+    assert _classification(CreativePlanApprovalRetentionExpiredError()) == (
+        410,
+        "CREATIVE_PLAN_RETENTION_EXPIRED",
+        "state",
+        False,
+    )
+    assert _classification(CreativePlanApprovalRejectedVersionError()) == (
+        409,
+        "CREATIVE_PLAN_REJECTED_VERSION",
+        "state",
         False,
     )
 

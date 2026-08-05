@@ -14,6 +14,7 @@ from .database import (
     create_readiness_database,
     is_unit_of_work_active,
 )
+from .fixture_planner import MySqlFixturePlanningAuthority
 from .indexing import MySqlExactImageReference, MySqlIndexingAuthority
 from .indexing_requests import (
     ImageIndexNotApplicable,
@@ -28,7 +29,10 @@ from .indexing_status import SqlAlchemyImageIndexStatusQueries
 from .operations import SqlAlchemyOperationUnitOfWork
 from .operator import SqlAlchemyOperatorUnitOfWork
 from .planning_context_authority import MySqlPlanningContextAuthority
-from .planning_contexts import PlanningContextSnapshotRepository
+from .planning_contexts import (
+    PlanningContextSnapshotRepository,
+    SqlAlchemyPlanningContextSnapshotStore,
+)
 from .product_brief_views import SqlAlchemyProductBriefViewQueries
 from .product_briefs import (
     SqlAlchemyProductBriefUnitOfWork,
@@ -52,6 +56,7 @@ __all__ = [
     "MySqlCollectionRebuildControl",
     "MySqlCollectionRebuildRepository",
     "MySqlIndexingAuthority",
+    "MySqlFixturePlanningAuthority",
     "MySqlAssetDeletionCoordinator",
     "MySqlImageIndexRequestService",
     "MySqlIndexRequestService",
@@ -63,6 +68,7 @@ __all__ = [
     "MySqlProductLexicalSearch",
     "ProductLexicalHit",
     "PlanningContextSnapshotRepository",
+    "SqlAlchemyPlanningContextSnapshotStore",
     "MySqlPlanningContextAuthority",
     "MySqlRetrievalAuthority",
     "MySqlRetrievalPreviewService",

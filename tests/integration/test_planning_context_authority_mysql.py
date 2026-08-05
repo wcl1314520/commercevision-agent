@@ -4,9 +4,32 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from commercevision_application import PlanningContextExactReference
-from commercevision_domain import PlanningContextPolicy, PlanningContextSourceKind, new_uuid7
-from commercevision_persistence import MySqlPlanningContextAuthority
+from commercevision_application import (
+    CreativePlanApplicationService,
+    DurableFixturePlanner,
+    DurableFixturePlannerCommand,
+    PlanningContextApplicationService,
+    PlanningContextExactReference,
+    PromptRegistryApplicationService,
+)
+from commercevision_contracts import (
+    PromptRevisionCreateRequestV1,
+    PromptRevisionTransitionRequestV1,
+    PromptTemplateVariableV1,
+)
+from commercevision_domain import (
+    NotFoundError,
+    PlanningContextPolicy,
+    PlanningContextSourceKind,
+    new_uuid7,
+)
+from commercevision_persistence import (
+    MySqlFixturePlanningAuthority,
+    MySqlPlanningContextAuthority,
+    SqlAlchemyCreativePlanUnitOfWork,
+    SqlAlchemyPlanningContextSnapshotStore,
+    SqlAlchemyPromptRegistryUnitOfWork,
+)
 from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
@@ -160,7 +183,6 @@ def test_mysql_authority_requires_current_confirmation_and_redacts_sensitive_fie
         )
         is None
     )
-
     with integration_database.engine.begin() as connection:
         connection.execute(
             text(
@@ -215,3 +237,185 @@ def test_mysql_authority_requires_current_confirmation_and_redacts_sensitive_fie
         )
         is None
     )
+
+
+def test_fixture_planner_authority_reuses_one_exact_retained_retrieval_run(
+    integration_database,
+) -> None:
+    workflow_id, brief_id, version_id = _seed_confirmed_product_brief(integration_database)
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE workflows SET status = 'PLANNING', current_node = 'create_plan', "
+                "version = 7 WHERE workspace_id = :workspace AND id = :workflow"
+            ),
+            {"workspace": WORKSPACE_ID, "workflow": workflow_id},
+        )
+    authority = MySqlFixturePlanningAuthority(integration_database.session_factory)
+    arguments = {
+        "workspace_id": WORKSPACE_ID,
+        "workflow_id": workflow_id,
+        "product_brief_version_id": version_id,
+        "product_brief_version_number": 3,
+        "expected_workflow_version": 7,
+    }
+
+    first = authority.load(**arguments)
+    second = authority.load(**arguments)
+
+    assert second == first
+    assert first.product_brief.source_id == brief_id
+    assert first.product_brief.content_sha256 == "1" * 64
+    assert first.category == "beauty"
+    with integration_database.engine.connect() as connection:
+        runs = (
+            connection.execute(
+                text("SELECT id, query_json FROM retrieval_runs WHERE workspace_id = :workspace"),
+                {"workspace": WORKSPACE_ID},
+            )
+            .mappings()
+            .all()
+        )
+    assert len(runs) == 1
+    assert runs[0]["id"] == first.retrieval_run_id
+    assert "must-not-leak" not in str(runs[0]["query_json"])
+
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE product_briefs SET state = 'ARCHIVED' "
+                "WHERE workspace_id = :workspace AND id = :brief"
+            ),
+            {"workspace": WORKSPACE_ID, "brief": brief_id},
+        )
+    with pytest.raises(NotFoundError, match="ProductBrief was not found"):
+        authority.load(**arguments)
+
+
+def _publish_fixture_planner_prompt(database) -> PromptRegistryApplicationService:
+    service = PromptRegistryApplicationService(
+        lambda: SqlAlchemyPromptRegistryUnitOfWork(database.session_factory)
+    )
+    created = service.create_revision(
+        workspace_id=WORKSPACE_ID,
+        actor_id="prompt-admin",
+        request=PromptRevisionCreateRequestV1(
+            prompt_id="creative-planner",
+            semantic_revision="1.0.0",
+            node="CREATE_CREATIVE_PLAN",
+            category_applicability=["beauty", "automotive-parts"],
+            model_family_applicability=["fixture-planner"],
+            input_schema_version="planning-context.v1",
+            output_schema_version="creative-plan.v1",
+            policy_version="prompt-policy.v1",
+            content="Plan {{ planning_context }} into {{ output_schema }}.",
+            variables=[
+                PromptTemplateVariableV1(name="planning_context", required=True),
+                PromptTemplateVariableV1(name="output_schema", required=True),
+            ],
+            change_summary="Built-in deterministic Fixture Planner",
+        ),
+        trace_id="trace-create-fixture-prompt",
+        idempotency_key="create-fixture-prompt-001",
+    )
+    reviewed = service.submit_for_review(
+        workspace_id=WORKSPACE_ID,
+        revision_id=created.id,
+        actor_id="prompt-admin",
+        request=PromptRevisionTransitionRequestV1(expected_version=1),
+        trace_id="trace-review-fixture-prompt",
+        idempotency_key="review-fixture-prompt-001",
+    )
+    staged = service.stage(
+        workspace_id=WORKSPACE_ID,
+        revision_id=created.id,
+        actor_id="prompt-reviewer",
+        request=PromptRevisionTransitionRequestV1(expected_version=reviewed.version),
+        trace_id="trace-stage-fixture-prompt",
+        idempotency_key="stage-fixture-prompt-001",
+    )
+    service.publish(
+        workspace_id=WORKSPACE_ID,
+        revision_id=created.id,
+        actor_id="release-manager",
+        request=PromptRevisionTransitionRequestV1(expected_version=staged.version),
+        trace_id="trace-publish-fixture-prompt",
+        idempotency_key="publish-fixture-prompt-001",
+    )
+    return service
+
+
+def test_durable_fixture_planner_writes_one_replay_safe_authoritative_version(
+    integration_database,
+) -> None:
+    workflow_id, _brief_id, version_id = _seed_confirmed_product_brief(integration_database)
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE workflows SET status = 'PLANNING', current_node = 'create_plan', "
+                "version = 7 WHERE workspace_id = :workspace AND id = :workflow"
+            ),
+            {"workspace": WORKSPACE_ID, "workflow": workflow_id},
+        )
+    prompt_registry = _publish_fixture_planner_prompt(integration_database)
+    policy = PlanningContextPolicy(
+        version="planning-context-v1",
+        maximum_tokens=2_000,
+        maximum_images=4,
+    )
+    planner = DurableFixturePlanner(
+        authority=MySqlFixturePlanningAuthority(integration_database.session_factory),
+        contexts=PlanningContextApplicationService(
+            authority=MySqlPlanningContextAuthority(
+                integration_database.session_factory,
+                policies={policy.version: policy},
+            ),
+            snapshots=SqlAlchemyPlanningContextSnapshotStore(integration_database.session_factory),
+        ),
+        prompts=prompt_registry,
+        plans=CreativePlanApplicationService(
+            lambda: SqlAlchemyCreativePlanUnitOfWork(integration_database.session_factory)
+        ),
+    )
+    command = DurableFixturePlannerCommand(
+        workspace_id=WORKSPACE_ID,
+        workflow_id=workflow_id,
+        product_brief_version_id=version_id,
+        product_brief_version_number=3,
+        actor_id="fixture-planner",
+        expected_workflow_version=7,
+        trace_id="trace-durable-fixture-plan",
+        idempotency_key="durable-fixture-plan-step-001",
+    )
+
+    first = planner.create_plan(command)
+    replayed = planner.create_plan(command)
+
+    assert replayed == first
+    assert first.version_number == 1
+    assert first.prompt_revision == "1.0.0"
+    assert first.to_step_output()["creative_plan_ref"] == first.creative_plan_id
+    with integration_database.engine.connect() as connection:
+        assert connection.scalar(text("SELECT COUNT(*) FROM creative_plan_versions")) == 1
+        assert connection.scalar(text("SELECT COUNT(*) FROM planning_context_snapshots")) == 1
+        assert connection.scalar(text("SELECT COUNT(*) FROM retrieval_runs")) == 1
+        public_event_data = json.dumps(
+            {
+                "outbox": connection.execute(
+                    text("SELECT payload_json FROM outbox_events WHERE workspace_id = :workspace"),
+                    {"workspace": WORKSPACE_ID},
+                )
+                .scalars()
+                .all(),
+                "audit": connection.execute(
+                    text("SELECT metadata_json FROM audit_events WHERE workspace_id = :workspace"),
+                    {"workspace": WORKSPACE_ID},
+                )
+                .scalars()
+                .all(),
+            },
+            sort_keys=True,
+        )
+    assert "must-not-leak" not in public_event_data
+    assert "Premium vanity studio" not in public_event_data
+    assert '"directions"' not in public_event_data

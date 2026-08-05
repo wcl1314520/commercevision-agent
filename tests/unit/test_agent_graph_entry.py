@@ -120,25 +120,49 @@ class _CheckpointHistoryLifecycle:
             output_data=None,
         )
 
+    def fail_node(self, **kwargs: Any) -> None:
+        del kwargs
+
+
+class _FixturePlanner:
+    def create_plan(self, **kwargs: Any) -> SimpleNamespace:
+        if kwargs["product_brief_version_id"] is None:
+            raise ValueError("Fixture Planner requires an exact confirmed ProductBrief")
+        workflow_id = str(kwargs["workflow_id"])
+        return SimpleNamespace(
+            to_step_output=lambda: {
+                "creative_plan_ref": f"plan-{workflow_id}",
+                "creative_plan_version_id": f"plan-version-{workflow_id}",
+                "creative_plan_version": 1,
+                "creative_plan_payload_sha256": "1" * 64,
+                "planning_context_sha256": "2" * 64,
+                "prompt_id": "creative-planner",
+                "prompt_revision": "1.0.0",
+                "plan_decision": None,
+            }
+        )
+
 
 def _graph_with_two_product_brief_generations(workflow_id: str) -> Any:
     checkpointer = InMemorySaver()
     graph = build_fixture_graph(
         lifecycle=_CheckpointHistoryLifecycle(),  # type: ignore[arg-type]
+        planner=_FixturePlanner(),  # type: ignore[arg-type]
         tool_gateway=object(),  # type: ignore[arg-type]
         checkpointer=checkpointer,
         worker_id="checkpoint-history-test",
     )
     runtime = FixtureAgentRuntime(graph, checkpointer)
-    runtime.run(
-        initial_state=FixtureAgentState(
-            workflow_id=workflow_id,
-            workflow_version=1,
-            workspace_id="checkpoint-entry",
-            actor_id="checkpoint-entry-test",
-            trace_id="checkpoint-entry-legacy-trace",
+    with pytest.raises(ValueError, match="requires an exact confirmed ProductBrief"):
+        runtime.run(
+            initial_state=FixtureAgentState(
+                workflow_id=workflow_id,
+                workflow_version=1,
+                workspace_id="checkpoint-entry",
+                actor_id="checkpoint-entry-test",
+                trace_id="checkpoint-entry-legacy-trace",
+            )
         )
-    )
     for generation in ("v1", "v2"):
         runtime.run(
             initial_state=_product_brief_state(
@@ -399,6 +423,7 @@ def test_missing_checkpoint_cannot_enter_a_side_effecting_node(current_node: str
     checkpointer = InMemorySaver()
     graph = build_fixture_graph(
         lifecycle=object(),  # type: ignore[arg-type]
+        planner=_FixturePlanner(),  # type: ignore[arg-type]
         tool_gateway=object(),  # type: ignore[arg-type]
         checkpointer=checkpointer,
         worker_id="checkpoint-entry-test",
@@ -425,6 +450,7 @@ def test_missing_checkpoint_retrieval_requires_an_exact_confirmed_product_brief(
     checkpointer = InMemorySaver()
     graph = build_fixture_graph(
         lifecycle=object(),  # type: ignore[arg-type]
+        planner=_FixturePlanner(),  # type: ignore[arg-type]
         tool_gateway=object(),  # type: ignore[arg-type]
         checkpointer=checkpointer,
         worker_id="checkpoint-entry-test",
@@ -452,6 +478,7 @@ def test_exact_confirmed_entry_still_requires_runtime_private_preclaim() -> None
     checkpointer = InMemorySaver()
     graph = build_fixture_graph(
         lifecycle=object(),  # type: ignore[arg-type]
+        planner=_FixturePlanner(),  # type: ignore[arg-type]
         tool_gateway=object(),  # type: ignore[arg-type]
         checkpointer=checkpointer,
         worker_id="checkpoint-entry-test",

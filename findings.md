@@ -755,3 +755,11 @@
 - Ticket 05 的审计与幂等事实必须和 version/head 写入处于同一短事务：审计只存 direction count、source、
   payload hash 与 expected versions；payload、provenance、revision reason、cursor key 和外部位置都不进入审计。
   真实 MySQL 重复 create/revise 证明两版本、两幂等记录、两审计事件，无重复或孤儿事实。
+- Durable create-plan 重放不能重新解析“当前” production Prompt：若 Plan 已提交而 Step 尚未完成，Prompt pointer
+  切换会让同一 Step 幂等键对应不同请求。正确恢复顺序是先重验 Workflow/ProductBrief authority，再按
+  deterministic Plan ID 读取并核验已存 v1；只有不存在时才重新构建 Context、解析 Prompt 和写 Plan。
+- Fixture Planner 的图层只负责 Durable Step 与状态推进，ProductBrief/Prompt/Context/Plan authority 分别留在
+  application/persistence 深模块；生产默认 adapter 对缺失 exact ProductBrief 失败关闭，旧 Phase 1 测试通过
+  Worker composition 的显式 test-only Planner 注入保留覆盖，不在生产路径恢复 `fixture://` authority。
+- Creative Plan provenance 的 Context hash 一致仍不足以证明提交瞬间 ProductBrief 有效；Plan append 的同一事务
+  必须锁定并重验 ProductBrief 仍是 current confirmed exact version、payload hash 与 retention 覆盖 Workflow。

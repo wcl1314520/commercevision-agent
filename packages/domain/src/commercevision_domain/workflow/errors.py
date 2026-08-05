@@ -45,6 +45,22 @@ class ApprovalConflictError(DomainError):
     """Approval type, subject, decision, or workflow state is incompatible."""
 
 
+class CreativePlanApprovalSubjectConflictError(ApprovalConflictError):
+    """The submitted plan identity is not the Workflow's authoritative plan."""
+
+
+class CreativePlanApprovalVersionConflictError(ApprovalConflictError):
+    """The submitted plan version is not the authoritative current head."""
+
+
+class CreativePlanApprovalRetentionExpiredError(ApprovalConflictError):
+    """The Workflow or Creative Plan crossed its retention boundary."""
+
+
+class CreativePlanApprovalRejectedVersionError(ApprovalConflictError):
+    """A rejected plan version cannot later authorize generation."""
+
+
 class RetryNotReadyError(DomainError):
     """A retry was requested before its scheduled availability."""
 

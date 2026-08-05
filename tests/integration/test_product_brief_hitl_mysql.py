@@ -2667,6 +2667,7 @@ def _prepare_product_brief_generation_retry(
     database,
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
+    seed_fixture_planner_prompt,
 ) -> tuple[
     OutboxEvent,
     str,
@@ -2703,6 +2704,7 @@ def _prepare_product_brief_generation_retry(
     service = WorkflowApplicationService(
         uow_factory=lambda: SqlAlchemyUnitOfWork(database.session_factory)
     )
+    seed_fixture_planner_prompt(database, workspace_id=WORKSPACE_ID)
     runtime = WorkerRuntime.build(
         settings,
         operation_executors={
@@ -2798,6 +2800,7 @@ def test_product_brief_retry_restores_original_generation_and_analysis_trace(
     integration_database,
     integration_settings,
     monkeypatch: pytest.MonkeyPatch,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
     retry_event, workflow_id, _product_brief_id, executor, tool_calls = (
@@ -2805,6 +2808,7 @@ def test_product_brief_retry_restores_original_generation_and_analysis_trace(
             database=integration_database,
             settings=settings,
             monkeypatch=monkeypatch,
+            seed_fixture_planner_prompt=seed_fixture_planner_prompt,
         )
     )
     _release_product_brief_generation_retry(
@@ -2854,6 +2858,7 @@ def test_product_brief_retry_rechecks_authority_before_generation(
     integration_database,
     integration_settings,
     monkeypatch: pytest.MonkeyPatch,
+    seed_fixture_planner_prompt,
     stale_reason: str,
 ) -> None:
     settings = _settings(integration_settings)
@@ -2862,6 +2867,7 @@ def test_product_brief_retry_rechecks_authority_before_generation(
             database=integration_database,
             settings=settings,
             monkeypatch=monkeypatch,
+            seed_fixture_planner_prompt=seed_fixture_planner_prompt,
         )
     )
     if stale_reason == "expired":

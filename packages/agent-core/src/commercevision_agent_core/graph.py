@@ -12,6 +12,8 @@ from commercevision_contracts.workflow import ResumePayload
 from commercevision_domain import (
     ApprovalDecision,
     ApprovalType,
+    ConcurrencyError,
+    NotFoundError,
     StepType,
     WorkflowStatus,
 )
@@ -32,7 +34,7 @@ from langgraph.checkpoint.base import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from .ports import NodeLifecyclePort
+from .ports import CreativePlanNodePort, NodeLifecyclePort, ProductBriefContinuationLike
 from .state import FixtureAgentState
 
 StateUpdate = dict[str, Any]
@@ -470,10 +472,12 @@ class FixtureNodes:
         self,
         *,
         lifecycle: NodeLifecyclePort,
+        planner: CreativePlanNodePort,
         tool_gateway: ToolExecutionGateway,
         worker_id: str,
     ) -> None:
         self.lifecycle = lifecycle
+        self.planner = planner
         self.tool_gateway = tool_gateway
         self.worker_id = worker_id
 
@@ -530,22 +534,75 @@ class FixtureNodes:
 
     def create_plan(self, raw_state: FixtureAgentState) -> StateUpdate:
         state = _state_values(raw_state)
-        output = {
-            "creative_plan_ref": (
-                f"fixture://creative-plan/{state.workflow_id}/v{state.plan_iteration + 1}"
-            ),
-            "plan_decision": None,
-        }
-        return self._durable_node(
-            state=state,
-            step_key=f"create_plan:{state.plan_iteration}",
+        step_key = f"create_plan:{state.plan_iteration}"
+        claim = self.lifecycle.begin_node(
+            workflow_id=state.workflow_id,
+            expected_workflow_version=state.workflow_version,
+            step_key=step_key,
             step_type=StepType.CREATE_PLAN,
             running_state=WorkflowStatus.PLANNING,
-            target_state=WorkflowStatus.AWAITING_PLAN_APPROVAL,
             node_name="create_plan",
-            next_node="approve_plan",
-            output=output,
+            lease_owner=self.worker_id,
+            trace_id=state.trace_id,
+            product_brief_continuation=cast(
+                ProductBriefContinuationLike | None,
+                _product_brief_continuation(state),
+            ),
         )
+        if claim.already_completed:
+            return {
+                **(claim.output_data or {}),
+                "workflow_version": claim.workflow_version,
+                "current_node": "approve_plan",
+            }
+        try:
+            result = self.planner.create_plan(
+                workspace_id=state.workspace_id,
+                workflow_id=state.workflow_id,
+                product_brief_version_id=state.product_brief_version_id,
+                product_brief_version_number=state.product_brief_version_number,
+                actor_id=state.actor_id,
+                expected_workflow_version=claim.workflow_version,
+                trace_id=state.trace_id,
+                idempotency_key=f"fixture-plan:{claim.step_id}",
+            )
+        except (ConcurrencyError, NotFoundError, ValueError) as exc:
+            self.lifecycle.fail_node(
+                workflow_id=state.workflow_id,
+                step_id=claim.step_id,
+                lease_token=cast(str, claim.lease_token),
+                trace_id=state.trace_id,
+                error=exc,
+                retryable=False,
+                retry_delay=timedelta(0),
+                expected_workflow_version=claim.workflow_version,
+                product_brief_continuation=cast(
+                    ProductBriefContinuationLike | None,
+                    _product_brief_continuation(state),
+                ),
+            )
+            raise
+        output = result.to_step_output()
+        version = self.lifecycle.complete_node(
+            workflow_id=state.workflow_id,
+            step_id=claim.step_id,
+            lease_token=claim.lease_token,
+            target_state=WorkflowStatus.AWAITING_PLAN_APPROVAL,
+            next_node="approve_plan",
+            trace_id=state.trace_id,
+            output_data=output,
+            expected_workflow_version=claim.workflow_version,
+            product_brief_continuation=cast(
+                ProductBriefContinuationLike | None,
+                _product_brief_continuation(state),
+            ),
+        )
+        return {
+            **output,
+            "workflow_version": version,
+            "current_node": "approve_plan",
+            "initial_step_id": None,
+        }
 
     def approve_plan(self, raw_state: FixtureAgentState) -> StateUpdate:
         state = _state_values(raw_state)
@@ -900,12 +957,14 @@ class FixtureNodes:
 def build_fixture_graph(
     *,
     lifecycle: NodeLifecyclePort,
+    planner: CreativePlanNodePort,
     tool_gateway: ToolExecutionGateway,
     checkpointer: BaseCheckpointSaver[str],
     worker_id: str,
 ) -> Any:
     nodes = FixtureNodes(
         lifecycle=lifecycle,
+        planner=planner,
         tool_gateway=tool_gateway,
         worker_id=worker_id,
     )
