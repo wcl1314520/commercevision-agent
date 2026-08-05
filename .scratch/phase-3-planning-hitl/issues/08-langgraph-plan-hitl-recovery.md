@@ -5,7 +5,7 @@ survives process restart and rejects stale or unrelated resume payloads.
 
 **Blocked by:** 06 — Exact plan approval fence; 07 — Durable Fixture Planner.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Interrupt payload exposes exact Workflow and plan versions plus allowed actions, with no mutable authorization state.
 - [x] Resume validates Approval ID/type/decision/subject/version and resulting Workflow version against MySQL facts.

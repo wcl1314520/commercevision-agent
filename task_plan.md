@@ -212,7 +212,8 @@
 - Ticket 06/07 状态提交 `7d34f83` 已由精确 GitHub Actions `30994263561` 四路全绿验证；
   Ticket 08 已解锁并完成本地实现：exact Plan interrupt、MySQL resume claim、同步/异步 checkpoint restart、
   用户编辑后 exact-version resume、拒绝新版本循环与稳定冲突均已闭合。
-- Ticket 08 当前等待实现提交的精确 GitHub Actions；全绿前保持 `in_progress`，不开始 Ticket 09。
+- Ticket 08 实现提交 `a4db757` 与测试安全修复 `91cb015` 已由精确 GitHub Actions `31001264761`
+  四路全绿验证并正式完成；当前只允许状态提交取得精确 CI，全绿后 Ticket 09 进入 TDD。
 
 ## 成功标准
 

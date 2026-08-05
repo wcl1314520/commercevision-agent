@@ -1699,3 +1699,6 @@
   `1959 passed, 3 skipped`）、Web 与 Container 全绿；Security 的 Gitleaks 仅命中两处新增测试
   `idempotency_key` 高熵占位符。未添加 allowlist 或关闭规则，只把两个测试键改为低熵值；对应真实
   MySQL 测试 `2 passed`，等待修复提交的新一轮四路 CI。
+- Ticket 08 测试安全修复 `91cb015` 的精确 GitHub Actions `31001264761` 四路全绿：Python 完整
+  `1959 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功。Ticket 08 正式
+  `complete`；状态提交全绿前 Ticket 09 保持未启动。
