@@ -44,6 +44,7 @@
 - [可观测性与运行维护](05-deployment/observability-and-operations.md)
 - [CI/CD 与发布](05-deployment/ci-cd-and-release.md)
 - [Phase 2 发布验收](05-deployment/phase2-release-acceptance.md)
+- [Phase 3 发布验收](05-deployment/phase3-release-acceptance.md)
 - [Asset Validation Runbook](runbooks/asset-validation.md)
 - [Asset Rights Runbook](runbooks/asset-rights.md)
 - [ProductBrief Vision 与人工确认 Runbook](runbooks/product-brief.md)
@@ -51,6 +52,7 @@
 - [IMAGE 索引 Runbook](runbooks/image-indexing.md)
 - [Collection 重建与升级 Runbook](runbooks/collection-rebuild.md)
 - [Phase 2 可观测性事故 Runbook](runbooks/phase2-observability.md)
+- [Phase 3 Planning 可观测性 Runbook](runbooks/planning-observability.md)
 
 ## 06 路线图
 

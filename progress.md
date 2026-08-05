@@ -1859,3 +1859,32 @@
   OpenAPI drift、Web lint/type/unit/E2E/build/audit、全部服务容器、Gitleaks 与 SBOM 均成功。
 - Ticket 13 的 8 项锁定验收正式勾选并置为 `complete`；Ticket 14 `Phase 3 chaos, E2E, and release acceptance`
   按 blockers-first 解锁为 `in_progress`。状态提交取得精确 CI 全绿前不开始 Ticket 14 变更。
+
+# 2026-08-06 Phase 3 Ticket 14 本地实现
+
+- 新增 `commercevision.phase3-release-acceptance.v1` manifest/auditor/CLI/reporting 深模块。审计只读取仓库内
+  UTF-8 有界证据，不执行 manifest 内容；精确校验 requirements/faults/invariants/gates，并拒绝重复 JSON key、
+  path escape、证据 anchor 漂移、越界 quota、非授权 dataset 和 public/private Planning 边界重叠。
+- Phase 3 artifact 仅保留 manifest/evidence digest、公开 gate ID 和隔离对象计数；不输出私有 Workspace、Prompt、
+  cursor scope 或 manifest anchor。原子文件替换的中断测试证明不会发布部分文件或遗留临时文件。
+- Public Demo 新增独立 Phase 3 profile，锁定 `catalog-demo`、四个专用 bucket、低成本 Tool Intent、8 quota units、
+  900 秒 Creative Plan/Workflow cursor、fixture/deterministic adapter 与禁止外传；Compose 将 cursor settings 路由到
+  API，将 Tool Policy settings 路由到 Worker。Phase 2 profile 保持兼容。
+- Playwright 新增 SSE 在完整交付后用 `Last-Event-ID` 恢复、重连 policy denial 降级，以及 retention 410 后不暴露
+  approve/reject 的验收。完整 Web 证据：unit `224 passed`、proxy `26 passed`、Playwright `94 passed`，Lint、
+  TypeScript、生成 API 类型、production build、Node license 和 dependency audit 全绿。
+- 新增真实 MySQL pool invalidation/reconnect fault test；与迁移、Prompt/Context/Plan、审批/Tool Policy、
+  ProductBrief HITL、LangGraph restart、SSE 组合矩阵共 `162 passed in 1146.77s`。完整 unit+contract
+  `1475 passed, 1 skipped in 66.97s`。
+- 发布元数据统一为 Phase 3 / `0.3.0`：根配置、16 个 Python distribution、Web package、API OpenAPI 与
+  Scheduler phase 一致，`uv.lock`/`pnpm-lock` 冻结安装通过。README、架构、schema、AI、测试、部署、Runbook、
+  Roadmap 和验收文档均由 manifest 直接锚定。
+- 本地静态/供应链门禁：Ruff format/check、release-critical strict Mypy、431 条全仓 Mypy baseline、Python/Node
+  license、Python/Node vulnerability、OpenAPI generation、Phase 2/3 Compose config、Planner Eval、Phase 3
+  acceptance CLI 与 `git diff --check` 全绿。Ticket 14 前 9 项锁定验收已勾选；最终实现提交精确 GitHub Actions
+  四路全绿前继续保持 `in_progress`。
+- 提交前部署审查发现 Compose 把六个 Python 进程的 `CV_ENVIRONMENT` 硬编码为 `local`，使 public-demo profile
+  声明的 production 安全校验未实际生效。先以 Phase 3 Contract RED 复现，再改为 `${CV_ENVIRONMENT:-local}`；
+  Phase 2/3 分别固定独立非本地 key ID，HMAC secret 仍只允许部署平台外部注入。渲染配置确认 Phase 3 API/Worker
+  均为 `production`，缺失 secret 时保留的本地默认值会被 production API 启动校验拒绝；两版 profile 契约
+  `9 passed`，Compose config 全绿。

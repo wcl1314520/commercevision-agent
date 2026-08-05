@@ -545,7 +545,7 @@ wheels = [
 
 [[package]]
 name = "commercevision-agent-core"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/agent-core" }
 dependencies = [
     { name = "commercevision-contracts" },
@@ -564,7 +564,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-api"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "services/api" }
 dependencies = [
     { name = "aiomysql" },
@@ -603,7 +603,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-application"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/application" }
 dependencies = [
     { name = "commercevision-contracts" },
@@ -622,7 +622,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-bootstrap"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/bootstrap" }
 dependencies = [
     { name = "commercevision-application" },
@@ -649,7 +649,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-contracts"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/contracts" }
 dependencies = [
     { name = "commercevision-domain" },
@@ -666,17 +666,17 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-domain"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/domain" }
 
 [[package]]
 name = "commercevision-evaluation"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/evaluation" }
 
 [[package]]
 name = "commercevision-mcp-server"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "services/mcp-server" }
 dependencies = [
     { name = "commercevision-application" },
@@ -709,7 +709,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-object-storage"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/object-storage" }
 dependencies = [
     { name = "alibabacloud-credentials" },
@@ -730,7 +730,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-observability"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/observability" }
 dependencies = [
     { name = "opentelemetry-api" },
@@ -749,7 +749,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-persistence"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/persistence" }
 dependencies = [
     { name = "aiomysql" },
@@ -776,7 +776,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-providers"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/providers" }
 dependencies = [
     { name = "alibabacloud-green20220302" },
@@ -795,7 +795,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-retrieval"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/retrieval" }
 dependencies = [
     { name = "commercevision-contracts" },
@@ -814,7 +814,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-scheduler"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "services/scheduler" }
 dependencies = [
     { name = "celery" },
@@ -839,7 +839,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-tool-runtime"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "packages/tool-runtime" }
 dependencies = [
     { name = "commercevision-contracts" },
@@ -850,7 +850,7 @@ requires-dist = [{ name = "commercevision-contracts", editable = "packages/contr
 
 [[package]]
 name = "commercevision-worker"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "services/worker" }
 dependencies = [
     { name = "celery" },
@@ -885,7 +885,7 @@ requires-dist = [
 
 [[package]]
 name = "commercevision-workspace"
-version = "0.1.0"
+version = "0.3.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]

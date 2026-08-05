@@ -531,3 +531,16 @@
 **Status:** complete
 - ProductBrief HITL、Reliability MySQL、Agent Graph/Runtime、Contracts
 - Ruff format/check 与基线 diff-check
+
+# 2026-08-06 Phase 3 Ticket 14 本地实现
+
+- Phase 3 发布验收已形成版本化 manifest、严格只读 auditor、aggregate-only JSON/Markdown artifact 与独立 CLI；
+  固定 10 项 requirement、6 类 fault、6 项 recovery invariant 和 14 个 CI gate，并拒绝路径逃逸、重复键、
+  越界 quota 与 public/private Planning 边界重叠。
+- 浏览器补齐持久 SSE cursor 重连后 policy denial 失败关闭，以及 retention expiry 不暴露审批面的纵向用例；
+  完整 Web 门禁为 unit `224 passed`、proxy `26 passed`、Playwright `94 passed`。
+- 真实 MySQL 发布矩阵 `162 passed`；完整 unit+contract `1475 passed, 1 skipped`；Planner Eval、Phase 3 CLI、
+  Ruff、Mypy、依赖/许可证、OpenAPI、Compose 与 diff 门禁全绿。
+- Ticket 14 前 9 项验收已勾选；最终实现提交的精确 GitHub Actions 四路全绿前保持 `in_progress`。
+- 部署终审以 RED 发现并修复 public-demo `CV_ENVIRONMENT` 被 Compose 硬编码为 `local` 的安全缺口；Phase 2/3
+  使用独立 key ID，production HMAC secret 必须由平台注入且缺失时失败关闭。

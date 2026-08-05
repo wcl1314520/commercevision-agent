@@ -232,12 +232,12 @@
       "id": "metadata-phase",
       "evidence": [
         {
-          "path": "services/api/src/commercevision_api/main.py",
-          "anchor": "phase=\"phase-2\""
+          "path": "docs/05-deployment/phase2-release-acceptance.md",
+          "anchor": "| 适用版本 | Phase 2 / 0.2.0 |"
         },
         {
-          "path": "tests/unit/test_api_health.py",
-          "anchor": "def test_metadata_reports_phase2_after_release_acceptance()"
+          "path": "tests/contract/test_phase2_release_acceptance.py",
+          "anchor": "assert report.phase == \"phase-2\""
         }
       ]
     },

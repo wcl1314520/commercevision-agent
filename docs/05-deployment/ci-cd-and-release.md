@@ -161,4 +161,14 @@ Prompt 和模型不随意跟代码一起上线：
   产物命名为 `planner-evaluation-release`。
 - 发布审批必须先验证 JSON `report_sha256`；任何 policy violation、unauthorized tool/provider/resource、
   budget expansion 或 missing approval evidence 非零都拒绝发布。
+
+### Phase 3 Release Acceptance
+
+- 版本化入口为 `evaluation/phase3/release-v1/manifest.json`，由
+  `commercevision-phase3-acceptance` 失败关闭地校验证据、故障矩阵、恢复/授权不变量和 14 项 CI gate。
+- `phase3-release-acceptance` artifact 只保留固定 gate、manifest/evidence digest 与 public-demo 边界数量，
+  不保留 Workspace、Prompt revision、cursor signing scope、Plan/Approval 或隐藏数据。
+- 公共 Demo 使用 `infra/public-demo/phase3.env.example` 的独立 deployment profile；Prompt、cursor、quota、
+  Planner dataset 和 credential scope 均不得与 private profile 重叠。
+- 完整运行顺序与同一最终 SHA 规则见 [Phase 3 发布验收](phase3-release-acceptance.md)。
 - artifact 不得包含 case ID、ProductBrief/Brand/Retrieval 身份、Prompt Injection 文本或方案 payload。

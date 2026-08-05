@@ -141,6 +141,20 @@ jobs:
           name: phase2-release-acceptance
           path: .artifacts/acceptance/
           if-no-files-found: error
+      - name: Audit Phase 3 release acceptance evidence
+        run: >-
+          uv run commercevision-phase3-acceptance
+          --manifest evaluation/phase3/release-v1/manifest.json
+          --repository-root .
+          --json-output .artifacts/phase3-acceptance/phase3-release.json
+          --markdown-output .artifacts/phase3-acceptance/phase3-release.md
+      - name: Retain Phase 3 release acceptance evidence
+        if: ${{ always() && hashFiles('.artifacts/phase3-acceptance/*') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-release-acceptance
+          path: .artifacts/phase3-acceptance/
+          if-no-files-found: error
       - name: Verify daily retrieval ranking fixture
         run: uv run pytest tests/contract/test_retrieval_evaluation_release_gate.py -q
       - name: Run daily retrieval evaluation gate
@@ -212,12 +226,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -f infra/compose/docker-compose.yml config --quiet
-      - name: Validate isolated public-demo Compose profile
-        run: >-
-          docker compose
-          --env-file infra/public-demo/phase2.env.example
-          -f infra/compose/docker-compose.yml
-          config --quiet
+      - name: Validate isolated public-demo Compose profiles
+        run: |
+          docker compose \
+            --env-file infra/public-demo/phase2.env.example \
+            -f infra/compose/docker-compose.yml \
+            config --quiet
+          docker compose \
+            --env-file infra/public-demo/phase3.env.example \
+            -f infra/compose/docker-compose.yml \
+            config --quiet
       - run: >-
           docker compose -f infra/compose/docker-compose.yml build
           api worker scheduler mcp-server web otel-collector

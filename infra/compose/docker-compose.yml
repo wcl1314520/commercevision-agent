@@ -125,7 +125,7 @@ services:
     command: ["alembic", "upgrade", "head"]
     environment:
       CV_SERVICE_NAME: migration
-      CV_ENVIRONMENT: local
+      CV_ENVIRONMENT: ${CV_ENVIRONMENT:-local}
       CV_MIGRATION_MYSQL_DSN: ${CV_MIGRATION_MYSQL_DSN:-mysql+pymysql://root:${CV_MYSQL_ROOT_PASSWORD:-root-change-me}@mysql:3306/commercevision}
     depends_on:
       mysql:
@@ -209,7 +209,7 @@ services:
     command: ["commercevision-provision-minio"]
     environment:
       CV_SERVICE_NAME: object-storage-init
-      CV_ENVIRONMENT: local
+      CV_ENVIRONMENT: ${CV_ENVIRONMENT:-local}
       CV_OBJECT_STORE_BACKEND: minio
       CV_OBJECT_STORE_ENDPOINT: http://minio:9000
       CV_OBJECT_STORE_ACCESS_KEY: ${CV_OBJECT_STORE_ACCESS_KEY:-commercevision}
@@ -307,7 +307,7 @@ services:
     environment:
       <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: control-api
-      CV_ENVIRONMENT: local
+      CV_ENVIRONMENT: ${CV_ENVIRONMENT:-local}
       CV_READINESS_PROBE_EXTERNAL: "true"
       CV_MYSQL_DSN: mysql+aiomysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
@@ -333,6 +333,8 @@ services:
       CV_TRUSTED_PRINCIPAL_FUTURE_SKEW_SECONDS: ${CV_TRUSTED_PRINCIPAL_FUTURE_SKEW_SECONDS:-30}
       CV_BRAND_PROFILE_CURSOR_MAX_AGE_SECONDS: ${CV_BRAND_PROFILE_CURSOR_MAX_AGE_SECONDS:-86400}
       CV_BRAND_PROFILE_CURSOR_FUTURE_SKEW_SECONDS: ${CV_BRAND_PROFILE_CURSOR_FUTURE_SKEW_SECONDS:-30}
+      CV_CREATIVE_PLAN_CURSOR_MAX_AGE_SECONDS: ${CV_CREATIVE_PLAN_CURSOR_MAX_AGE_SECONDS:-86400}
+      CV_CREATIVE_PLAN_CURSOR_FUTURE_SKEW_SECONDS: ${CV_CREATIVE_PLAN_CURSOR_FUTURE_SKEW_SECONDS:-30}
       CV_WORKFLOW_EVENT_CURSOR_MAX_AGE_SECONDS: ${CV_WORKFLOW_EVENT_CURSOR_MAX_AGE_SECONDS:-3600}
       CV_WORKFLOW_EVENT_CURSOR_FUTURE_SKEW_SECONDS: ${CV_WORKFLOW_EVENT_CURSOR_FUTURE_SKEW_SECONDS:-30}
       CV_WORKFLOW_EVENT_PAGE_SIZE: ${CV_WORKFLOW_EVENT_PAGE_SIZE:-100}
@@ -382,7 +384,7 @@ services:
     environment:
       <<: [*object-storage-runtime-environment, *upload-cleanup-runtime-environment, *product-brief-policy-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: agent-worker
-      CV_ENVIRONMENT: local
+      CV_ENVIRONMENT: ${CV_ENVIRONMENT:-local}
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
@@ -506,7 +508,7 @@ services:
     environment:
       <<: [*upload-cleanup-runtime-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: scheduler
-      CV_ENVIRONMENT: local
+      CV_ENVIRONMENT: ${CV_ENVIRONMENT:-local}
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_RABBITMQ_URL: amqp://commercevision:${CV_RABBITMQ_PASSWORD:-commercevision}@rabbitmq:5672//
@@ -547,7 +549,7 @@ services:
     environment:
       <<: [*object-storage-runtime-environment, *otel-runtime-environment]
       CV_SERVICE_NAME: mcp-server
-      CV_ENVIRONMENT: local
+      CV_ENVIRONMENT: ${CV_ENVIRONMENT:-local}
       CV_MYSQL_DSN: mysql+pymysql://commercevision:${CV_MYSQL_PASSWORD:-commercevision}@mysql:3306/commercevision
       CV_MYSQL_CONNECT_TIMEOUT_SECONDS: ${CV_MYSQL_CONNECT_TIMEOUT_SECONDS:-5}
       CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID: ${CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID:-local-web-gateway}

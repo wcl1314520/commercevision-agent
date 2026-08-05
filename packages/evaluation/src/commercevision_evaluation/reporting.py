@@ -9,7 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .models import EvaluationMetrics, RetrievalEvaluationReport
-from .release_acceptance import Phase2ReleaseReport
+from .release_acceptance import Phase2ReleaseReport, Phase3ReleaseReport
 
 
 def retrieval_report_json(report: RetrievalEvaluationReport) -> str:
@@ -52,6 +52,76 @@ def phase2_release_report_markdown(report: Phase2ReleaseReport) -> str:
             f"- Workspaces: `{len(report.public_demo_workspace_ids)}`",
             f"- Dedicated buckets: `{len(report.public_demo_bucket_names)}`",
             f"- Authorized datasets: `{len(report.public_demo_dataset_ids)}`",
+            "",
+            "## Evidence integrity",
+            "",
+            "| Path | SHA-256 |",
+            "|---|---|",
+        ]
+    )
+    unique_evidence = {(item.path, item.sha256) for item in report.evidence}
+    lines.extend(f"| `{path}` | `{digest}` |" for path, digest in sorted(unique_evidence))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def phase3_release_report_json(report: Phase3ReleaseReport) -> str:
+    """Serialize aggregate Phase 3 proof without deployment or Prompt identities."""
+
+    payload = {
+        "schema_version": report.schema_version,
+        "release_id": report.release_id,
+        "phase": report.phase,
+        "manifest_sha256": report.manifest_sha256,
+        "passed": report.passed,
+        "requirement_ids": report.requirement_ids,
+        "fault_components": report.fault_components,
+        "recovery_invariant_ids": report.recovery_invariant_ids,
+        "ci_gate_ids": report.ci_gate_ids,
+        "public_demo": {
+            "workspace_count": len(report.public_demo_workspace_ids),
+            "bucket_count": len(report.public_demo_bucket_names),
+            "dataset_count": len(report.public_demo_dataset_ids),
+            "prompt_revision_count": len(report.public_demo_prompt_revision_ids),
+            "cursor_signing_scope_count": len(report.public_demo_cursor_signing_scopes),
+        },
+        "evidence": tuple(
+            {"path": path, "sha256": digest}
+            for path, digest in sorted({(item.path, item.sha256) for item in report.evidence})
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def phase3_release_report_markdown(report: Phase3ReleaseReport) -> str:
+    """Render concise Phase 3 proof with counts instead of deployment identities."""
+
+    status = "PASS" if report.passed else "FAIL"
+    lines = [
+        "# Phase 3 release acceptance report",
+        "",
+        f"- Gate: **{status}**",
+        f"- Release: `{report.release_id}`",
+        f"- Phase: `{report.phase}`",
+        f"- Manifest SHA-256: `{report.manifest_sha256}`",
+        f"- Evidence records: `{len(report.evidence)}`",
+        "",
+    ]
+    for heading, values in (
+        ("Requirements", report.requirement_ids),
+        ("Fault injection", report.fault_components),
+        ("Recovery invariants", report.recovery_invariant_ids),
+        ("CI gates", report.ci_gate_ids),
+    ):
+        lines.extend([f"## {heading}", "", *(f"- `{value}`" for value in values), ""])
+    lines.extend(
+        [
+            "## Public demo isolation",
+            "",
+            f"- Workspaces: `{len(report.public_demo_workspace_ids)}`",
+            f"- Dedicated buckets: `{len(report.public_demo_bucket_names)}`",
+            f"- Authorized datasets: `{len(report.public_demo_dataset_ids)}`",
+            f"- Pinned Prompt revisions: `{len(report.public_demo_prompt_revision_ids)}`",
+            f"- Cursor signing scopes: `{len(report.public_demo_cursor_signing_scopes)}`",
             "",
             "## Evidence integrity",
             "",
@@ -202,3 +272,17 @@ def write_phase2_release_report(
         raise ValueError("release report output paths must be distinct")
     _atomic_write(json_output, phase2_release_report_json(report))
     _atomic_write(markdown_output, phase2_release_report_markdown(report))
+
+
+def write_phase3_release_report(
+    report: Phase3ReleaseReport,
+    *,
+    json_path: str | Path,
+    markdown_path: str | Path,
+) -> None:
+    json_output = Path(json_path).resolve()
+    markdown_output = Path(markdown_path).resolve()
+    if json_output == markdown_output:
+        raise ValueError("release report output paths must be distinct")
+    _atomic_write(json_output, phase3_release_report_json(report))
+    _atomic_write(markdown_output, phase3_release_report_markdown(report))

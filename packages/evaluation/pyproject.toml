@@ -1,12 +1,13 @@
 [project]
 name = "commercevision-evaluation"
-version = "0.1.0"
+version = "0.3.0"
 description = "Evaluator, dataset, and replay boundary"
 requires-python = ">=3.13,<3.14"
 dependencies = []
 
 [project.scripts]
 commercevision-phase2-acceptance = "commercevision_evaluation.release_cli:main"
+commercevision-phase3-acceptance = "commercevision_evaluation.phase3_release_cli:main"
 commercevision-retrieval-eval = "commercevision_evaluation.cli:main"
 commercevision-planner-eval = "commercevision_evaluation.planner_cli:main"
 

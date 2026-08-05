@@ -156,6 +156,16 @@ CI 先运行发布关键 Mypy 零诊断、全域 Mypy 基线、Python/Node Licen
 Playwright、检索评测、容器构建、Secret Scan 和 SBOM。详细命令见
 [Phase 2 发布验收](../05-deployment/phase2-release-acceptance.md)。
 
+## Phase 3 发布验收
+
+Phase 3 在 Phase 2 基线上增加 Creative Plan/HITL 的浏览器、真实 MySQL、LangGraph restart、SSE reconnect、
+Planner Eval、迁移与授权安全矩阵。`commercevision-phase3-acceptance` 只读取版本化 manifest 中的精确证据
+anchor，并验证 Worker/RabbitMQ/MySQL/Checkpointer/SSE/Evaluation 故障、Plan/Approval 唯一性、stale
+authorization、未授权 Tool Intent、retention 和最终收敛不变量。
+
+公开 Demo 的 Workspace、Prompt revision、cursor signing scope、quota 与 dataset 必须和 private 配置集合不相交；
+完整命令及同一 SHA 发布规则见 [Phase 3 发布验收](../05-deployment/phase3-release-acceptance.md)。
+
 ## 安全测试
 
 - Prompt Injection。

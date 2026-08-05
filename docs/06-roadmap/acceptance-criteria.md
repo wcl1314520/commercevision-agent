@@ -20,6 +20,20 @@
 
 可执行证据见 [Phase 2 发布验收](../05-deployment/phase2-release-acceptance.md)。
 
+## Phase 3 里程碑验收
+
+- [x] Creative Plan provenance/history、不可变修订、approve/reject、stale conflict、SSE reconnect、Policy denial
+  与 retention expiry 的浏览器路径通过。
+- [x] Worker/RabbitMQ/MySQL/Checkpointer/SSE/Evaluation 故障不会产生重复 Plan/Approval、stale authorization、
+  未授权 Tool Intent 或 retention 延长，并最终收敛。
+- [x] 空库和 Phase 2→3 迁移、非破坏 downgrade/re-upgrade、Alembic drift 与 `DATETIME(6)` 通过。
+- [x] Prompt Injection 不能增加工具、权限、Provider、资源或预算；Planner Eval 的全部安全计数为零。
+- [x] Public Demo 的 Planning Workspace、Prompt revision、cursor scope、quota 和 dataset 与 private 配置隔离。
+- [x] API metadata 报告 `phase-3`，Python/Web/OpenAPI/真实 MySQL/LangGraph/SSE/E2E/Eval/安全/供应链门禁
+  在同一最终 Git SHA 全绿。
+
+可执行证据见 [Phase 3 发布验收](../05-deployment/phase3-release-acceptance.md)。
+
 ## 产品
 
 - [ ] 美妆、食品、汽车配件、服装均有合法固定测试集。

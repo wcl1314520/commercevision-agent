@@ -1,6 +1,6 @@
 [project]
 name = "commercevision-observability"
-version = "0.1.0"
+version = "0.3.0"
 description = "Logging and telemetry conventions"
 requires-python = ">=3.13,<3.14"
 dependencies = [

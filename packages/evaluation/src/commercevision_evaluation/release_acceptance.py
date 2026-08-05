@@ -1,4 +1,4 @@
-"""Strict, read-only audit of Phase 2 release evidence."""
+"""Strict, read-only audit of versioned release evidence."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Any
 
 _SCHEMA_VERSION = "commercevision.phase2-release-acceptance.v1"
+_PHASE3_SCHEMA_VERSION = "commercevision.phase3-release-acceptance.v1"
 _MAX_MANIFEST_BYTES = 1_048_576
 _MAX_EVIDENCE_BYTES = 8 * 1_048_576
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -63,6 +64,50 @@ _REQUIRED_CI_GATES = (
     "licenses",
     "sbom",
 )
+_PHASE3_REQUIRED_REQUIREMENTS = (
+    "browser-e2e",
+    "fault-injection",
+    "recovery-convergence",
+    "migration-paths",
+    "authorization-safety",
+    "planner-security",
+    "quality-security-supply-chain",
+    "public-demo-isolation",
+    "documentation-alignment",
+    "metadata-phase",
+)
+_PHASE3_REQUIRED_FAULTS = (
+    "worker-commit",
+    "rabbitmq",
+    "mysql",
+    "checkpointer",
+    "sse",
+    "evaluation",
+)
+_PHASE3_REQUIRED_INVARIANTS = (
+    "unique-plan-version",
+    "unique-approval",
+    "no-stale-authorization",
+    "zero-unauthorized-intent",
+    "no-retention-extension",
+    "eventual-convergence",
+)
+_PHASE3_REQUIRED_CI_GATES = (
+    "python",
+    "web",
+    "openapi",
+    "real-mysql",
+    "langgraph",
+    "sse",
+    "e2e",
+    "evaluation",
+    "security",
+    "secrets",
+    "dependencies",
+    "containers",
+    "licenses",
+    "sbom",
+)
 _QUOTA_BOUNDS = MappingProxyType(
     {
         "requests_per_minute": (1, 600),
@@ -98,6 +143,27 @@ class Phase2ReleaseReport:
     public_demo_workspace_ids: tuple[str, ...]
     public_demo_bucket_names: tuple[str, ...]
     public_demo_dataset_ids: tuple[str, ...]
+    evidence: tuple[ReleaseEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Phase3ReleaseReport:
+    """Aggregate Phase 3 proof without private deployment identities."""
+
+    schema_version: str
+    release_id: str
+    phase: str
+    manifest_sha256: str
+    passed: bool
+    requirement_ids: tuple[str, ...]
+    fault_components: tuple[str, ...]
+    recovery_invariant_ids: tuple[str, ...]
+    ci_gate_ids: tuple[str, ...]
+    public_demo_workspace_ids: tuple[str, ...]
+    public_demo_bucket_names: tuple[str, ...]
+    public_demo_dataset_ids: tuple[str, ...]
+    public_demo_prompt_revision_ids: tuple[str, ...]
+    public_demo_cursor_signing_scopes: tuple[str, ...]
     evidence: tuple[ReleaseEvidence, ...]
 
 
@@ -197,6 +263,7 @@ def _required_entries(
     list_field: str,
     id_field: str,
     required: tuple[str, ...],
+    phase: str = "Phase 2",
 ) -> tuple[dict[str, Any], ...]:
     by_id: dict[str, dict[str, Any]] = {}
     for index, raw_entry in enumerate(_array(value, field=list_field)):
@@ -206,7 +273,7 @@ def _required_entries(
             raise ValueError(f"{list_field} contains duplicate {id_field}")
         by_id[identifier] = entry
     if set(by_id) != set(required):
-        raise ValueError(f"{list_field} must cover the exact Phase 2 set")
+        raise ValueError(f"{list_field} must cover the exact {phase} set")
     return tuple(by_id[identifier] for identifier in required)
 
 
@@ -238,30 +305,49 @@ def _load_evidence(
     return ReleaseEvidence(path=relative, anchor=anchor, sha256=digest)
 
 
-def _validate_boundaries(manifest: dict[str, Any], root: Path) -> tuple[tuple[str, ...], ...]:
+def _validate_boundaries(
+    manifest: dict[str, Any],
+    root: Path,
+    *,
+    planning: bool = False,
+) -> tuple[tuple[str, ...], ...]:
     private = _object(manifest["private_boundaries"], field="private_boundaries")
+    private_fields = {"workspace_ids", "bucket_names", "credential_scopes", "dataset_paths"}
+    if planning:
+        private_fields.update({"prompt_revision_ids", "cursor_signing_scopes"})
     _exact_keys(
         private,
-        {"workspace_ids", "bucket_names", "credential_scopes", "dataset_paths"},
+        private_fields,
         field="private_boundaries",
     )
     demo = _object(manifest["public_demo"], field="public_demo")
+    demo_fields = {
+        "workspace_ids",
+        "admin_workspace_ids",
+        "bucket_names",
+        "object_prefix",
+        "credential_scopes",
+        "quotas",
+        "datasets",
+    }
+    if planning:
+        demo_fields.update({"prompt_revision_ids", "cursor_signing_scopes"})
     _exact_keys(
         demo,
-        {
-            "workspace_ids",
-            "admin_workspace_ids",
-            "bucket_names",
-            "object_prefix",
-            "credential_scopes",
-            "quotas",
-            "datasets",
-        },
+        demo_fields,
         field="public_demo",
     )
+    private_boundary_names = [
+        "workspace_ids",
+        "bucket_names",
+        "credential_scopes",
+        "dataset_paths",
+    ]
+    if planning:
+        private_boundary_names.extend(["prompt_revision_ids", "cursor_signing_scopes"])
     private_sets = {
         name: set(_unique_tokens(private[name], field=f"private_boundaries.{name}"))
-        for name in ("workspace_ids", "bucket_names", "credential_scopes", "dataset_paths")
+        for name in private_boundary_names
     }
     workspaces = _unique_tokens(demo["workspace_ids"], field="public_demo.workspace_ids")
     admins = _unique_tokens(
@@ -288,6 +374,23 @@ def _validate_boundaries(manifest: dict[str, Any], root: Path) -> tuple[tuple[st
         "bucket_names": set(buckets),
         "credential_scopes": set(credential_scopes),
     }
+    prompt_revision_ids: tuple[str, ...] = ()
+    cursor_signing_scopes: tuple[str, ...] = ()
+    if planning:
+        prompt_revision_ids = _unique_tokens(
+            demo["prompt_revision_ids"], field="public_demo.prompt_revision_ids"
+        )
+        cursor_signing_scopes = _unique_tokens(
+            demo["cursor_signing_scopes"], field="public_demo.cursor_signing_scopes"
+        )
+        if any(not value.startswith("secret://") for value in cursor_signing_scopes):
+            raise ValueError("public-demo cursor signing scopes must be opaque secret references")
+        public_sets.update(
+            {
+                "prompt_revision_ids": set(prompt_revision_ids),
+                "cursor_signing_scopes": set(cursor_signing_scopes),
+            }
+        )
     for name, values in public_sets.items():
         if values & private_sets[name]:
             raise ValueError(f"public-demo {name} overlaps private configuration")
@@ -329,7 +432,54 @@ def _validate_boundaries(manifest: dict[str, Any], root: Path) -> tuple[tuple[st
         raise ValueError("public-demo datasets must have unique identities")
     if dataset_paths & private_sets["dataset_paths"]:
         raise ValueError("public-demo dataset_paths overlaps private configuration")
-    return workspaces, buckets, tuple(dataset_ids)
+    return (
+        workspaces,
+        buckets,
+        tuple(dataset_ids),
+        prompt_revision_ids,
+        cursor_signing_scopes,
+    )
+
+
+def _collect_evidence(
+    *,
+    root: Path,
+    requirements: tuple[dict[str, Any], ...],
+    faults: tuple[dict[str, Any], ...],
+    invariants: tuple[dict[str, Any], ...],
+    gates: tuple[dict[str, Any], ...],
+) -> tuple[ReleaseEvidence, ...]:
+    cache: dict[Path, tuple[str, str]] = {}
+    evidence: list[ReleaseEvidence] = []
+    for index, requirement in enumerate(requirements):
+        _exact_keys(requirement, {"id", "evidence"}, field=f"requirements[{index}]")
+        evidence.extend(
+            _load_evidence(
+                item,
+                root=root,
+                field=f"requirements[{index}].evidence[{evidence_index}]",
+                cache=cache,
+            )
+            for evidence_index, item in enumerate(
+                _array(requirement["evidence"], field=f"requirements[{index}].evidence")
+            )
+        )
+    for field, entries, id_field in (
+        ("fault_injection", faults, "component"),
+        ("recovery_invariants", invariants, "id"),
+        ("ci_gates", gates, "id"),
+    ):
+        for index, entry in enumerate(entries):
+            _exact_keys(entry, {id_field, "evidence"}, field=f"{field}[{index}]")
+            evidence.append(
+                _load_evidence(
+                    entry["evidence"],
+                    root=root,
+                    field=f"{field}[{index}].evidence",
+                    cache=cache,
+                )
+            )
+    return tuple(evidence)
 
 
 def audit_phase2_release(
@@ -362,7 +512,7 @@ def audit_phase2_release(
     if value["schema_version"] != _SCHEMA_VERSION or value["phase"] != "phase-2":
         raise ValueError("release manifest schema and phase must identify Phase 2")
     release_id = _token(value["release_id"], field="release_id")
-    workspaces, buckets, dataset_ids = _validate_boundaries(value, root)
+    workspaces, buckets, dataset_ids, _, _ = _validate_boundaries(value, root)
     requirements = _required_entries(
         value["requirements"],
         list_field="requirements",
@@ -388,36 +538,13 @@ def audit_phase2_release(
         required=_REQUIRED_CI_GATES,
     )
 
-    cache: dict[Path, tuple[str, str]] = {}
-    evidence: list[ReleaseEvidence] = []
-    for index, requirement in enumerate(requirements):
-        _exact_keys(requirement, {"id", "evidence"}, field=f"requirements[{index}]")
-        evidence.extend(
-            _load_evidence(
-                item,
-                root=root,
-                field=f"requirements[{index}].evidence[{evidence_index}]",
-                cache=cache,
-            )
-            for evidence_index, item in enumerate(
-                _array(requirement["evidence"], field=f"requirements[{index}].evidence")
-            )
-        )
-    for field, entries, id_field in (
-        ("fault_injection", faults, "component"),
-        ("recovery_invariants", invariants, "id"),
-        ("ci_gates", gates, "id"),
-    ):
-        for index, entry in enumerate(entries):
-            _exact_keys(entry, {id_field, "evidence"}, field=f"{field}[{index}]")
-            evidence.append(
-                _load_evidence(
-                    entry["evidence"],
-                    root=root,
-                    field=f"{field}[{index}].evidence",
-                    cache=cache,
-                )
-            )
+    evidence = _collect_evidence(
+        root=root,
+        requirements=requirements,
+        faults=faults,
+        invariants=invariants,
+        gates=gates,
+    )
 
     return Phase2ReleaseReport(
         schema_version=_SCHEMA_VERSION,
@@ -432,5 +559,94 @@ def audit_phase2_release(
         public_demo_workspace_ids=workspaces,
         public_demo_bucket_names=buckets,
         public_demo_dataset_ids=dataset_ids,
-        evidence=tuple(evidence),
+        evidence=evidence,
+    )
+
+
+def audit_phase3_release(
+    manifest_path: str | Path,
+    *,
+    repository_root: str | Path,
+) -> Phase3ReleaseReport:
+    """Validate fixed Phase 3 evidence without executing manifest-controlled content."""
+
+    root = Path(repository_root).resolve()
+    if not root.is_dir():
+        raise ValueError("repository root must be an existing directory")
+    manifest = _manifest_path(root, manifest_path)
+    value, payload = _read_json(manifest)
+    _exact_keys(
+        value,
+        {
+            "schema_version",
+            "release_id",
+            "phase",
+            "private_boundaries",
+            "public_demo",
+            "requirements",
+            "fault_injection",
+            "recovery_invariants",
+            "ci_gates",
+        },
+        field="release manifest",
+    )
+    if value["schema_version"] != _PHASE3_SCHEMA_VERSION or value["phase"] != "phase-3":
+        raise ValueError("release manifest schema and phase must identify Phase 3")
+    release_id = _token(value["release_id"], field="release_id")
+    workspaces, buckets, dataset_ids, prompt_revision_ids, cursor_signing_scopes = (
+        _validate_boundaries(value, root, planning=True)
+    )
+    requirements = _required_entries(
+        value["requirements"],
+        list_field="requirements",
+        id_field="id",
+        required=_PHASE3_REQUIRED_REQUIREMENTS,
+        phase="Phase 3",
+    )
+    faults = _required_entries(
+        value["fault_injection"],
+        list_field="fault_injection",
+        id_field="component",
+        required=_PHASE3_REQUIRED_FAULTS,
+        phase="Phase 3",
+    )
+    invariants = _required_entries(
+        value["recovery_invariants"],
+        list_field="recovery_invariants",
+        id_field="id",
+        required=_PHASE3_REQUIRED_INVARIANTS,
+        phase="Phase 3",
+    )
+    gates = _required_entries(
+        value["ci_gates"],
+        list_field="ci_gates",
+        id_field="id",
+        required=_PHASE3_REQUIRED_CI_GATES,
+        phase="Phase 3",
+    )
+
+    evidence = _collect_evidence(
+        root=root,
+        requirements=requirements,
+        faults=faults,
+        invariants=invariants,
+        gates=gates,
+    )
+
+    return Phase3ReleaseReport(
+        schema_version=_PHASE3_SCHEMA_VERSION,
+        release_id=release_id,
+        phase="phase-3",
+        manifest_sha256=hashlib.sha256(payload).hexdigest(),
+        passed=True,
+        requirement_ids=_PHASE3_REQUIRED_REQUIREMENTS,
+        fault_components=_PHASE3_REQUIRED_FAULTS,
+        recovery_invariant_ids=_PHASE3_REQUIRED_INVARIANTS,
+        ci_gate_ids=_PHASE3_REQUIRED_CI_GATES,
+        public_demo_workspace_ids=workspaces,
+        public_demo_bucket_names=buckets,
+        public_demo_dataset_ids=dataset_ids,
+        public_demo_prompt_revision_ids=prompt_revision_ids,
+        public_demo_cursor_signing_scopes=cursor_signing_scopes,
+        evidence=evidence,
     )

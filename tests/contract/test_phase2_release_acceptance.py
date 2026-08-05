@@ -72,6 +72,7 @@ def test_public_demo_profile_is_dedicated_and_fail_closed() -> None:
 
     assert values["CV_WEB_ALLOWED_WORKSPACE_IDS"] == "catalog-demo"
     assert values["CV_WEB_ADMIN_WORKSPACE_IDS"] == ""
+    assert values["CV_TRUSTED_PRINCIPAL_CURRENT_KEY_ID"] == "public-demo-phase2-current"
     assert {
         values["CV_OBJECT_STORE_QUARANTINE_BUCKET"],
         values["CV_OBJECT_STORE_TASK_BUCKET"],

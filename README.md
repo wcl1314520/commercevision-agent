@@ -100,7 +100,7 @@ Vault 使用标准相对 Markdown 链接，GitHub 和 Obsidian 可以读取同�
 
 ## 当前状态
 
-`Phase 2 / 0.2.0` 已完成实现并纳入本地与 CI 发布验收：
+`Phase 3 / 0.3.0` 已完成实现并纳入本地与 CI 发布验收：
 
 - Python workspace、Next.js App 和共享 Contract 边界已建立。
 - FastAPI、Celery Worker、Scheduler、MCP Server 均有独立入口和健康检查。
@@ -116,10 +116,14 @@ Vault 使用标准相对 Markdown 链接，GitHub 和 Obsidian 可以读取同�
 - 商品、直传、校验、权利登记、ProductBrief 人工确认和 Brand Profile 发布已形成可恢复工作台。
 - 多模态索引、Rights-first 混合检索、受控预览、检索解释、增量更新与 Milvus 重建已落地。
 - Phase 2 发布审计统一校验浏览器路径、故障恢复、迁移、公共 Demo 隔离、License、类型和供应链证据。
+- Planning Context、Prompt Registry、Creative Plan 不可变版本、exact Approval、Tool Policy、LangGraph
+  resume、SSE 恢复游标、审批 Workbench 与 Planner Eval 已形成完整 Phase 3 控制面。
+- Phase 3 发布审计冻结 Plan/HITL 故障恢复、授权不变量、public-demo Prompt/cursor/dataset 隔离和同一 SHA
+  的 Python/Web/真实 MySQL/E2E/安全供应链证据。
 
-当前不包含 Phase 3 之后的 Creative Plan 审批、生图 Provider、自动视觉评测/修复和 Amazon 导出；这些能力按 Phase 3-6 路线继续实现。
+当前不包含 Phase 4 之后的生图 Provider、自动视觉评测/修复和 Amazon 导出；这些能力按 Phase 4-6 路线继续实现。
 
-Phase 2 的可重复验收命令、证据清单和已知类型债务见 [Phase 2 发布验收](docs/05-deployment/phase2-release-acceptance.md)。
+Phase 3 的可重复验收命令、证据清单和隔离边界见 [Phase 3 发布验收](docs/05-deployment/phase3-release-acceptance.md)。
 
 ## 来源项目
 

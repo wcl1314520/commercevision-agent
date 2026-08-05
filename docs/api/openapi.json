@@ -3,7 +3,7 @@
   "info": {
     "title": "CommerceVision Control API",
     "summary": "Control plane for durable ecommerce visual workflows",
-    "version": "0.1.0"
+    "version": "0.3.0"
   },
   "paths": {
     "/health/live": {

@@ -1,6 +1,6 @@
 [project]
 name = "commercevision-tool-runtime"
-version = "0.1.0"
+version = "0.3.0"
 description = "Tool registry, policy, and execution boundary"
 requires-python = ">=3.13,<3.14"
 dependencies = [

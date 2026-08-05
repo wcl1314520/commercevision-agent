@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     )
 
     service_name: str = "commercevision"
-    version: str = "0.1.0"
+    version: str = "0.3.0"
     environment: Literal["local", "ci", "staging", "demo", "production"] = "local"
     log_level: str = "INFO"
     readiness_probe_external: bool = False

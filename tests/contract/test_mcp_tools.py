@@ -248,7 +248,7 @@ def test_mcp_readiness_reports_dependencies_independently_without_error_details(
     assert response.json() == {
         "status": "degraded",
         "service": "mcp-server",
-        "version": "0.1.0",
+        "version": "0.3.0",
         "checks": {"mysql": "ok", "object_storage": "failed"},
     }
     assert "credential" not in response.text

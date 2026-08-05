@@ -154,7 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             service=runtime_settings.service_name,
             version=runtime_settings.version,
             environment=runtime_settings.environment,
-            phase="phase-2",
+            phase="phase-3",
         )
 
     api.include_router(upload_router)

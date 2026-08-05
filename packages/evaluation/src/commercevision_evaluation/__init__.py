@@ -15,13 +15,22 @@ from .planner_manifest import (
     PlannerEvaluationSuite,
     load_planner_evaluation_manifest,
 )
-from .release_acceptance import Phase2ReleaseReport, ReleaseEvidence, audit_phase2_release
+from .release_acceptance import (
+    Phase2ReleaseReport,
+    Phase3ReleaseReport,
+    ReleaseEvidence,
+    audit_phase2_release,
+    audit_phase3_release,
+)
 from .reporting import (
     phase2_release_report_json,
     phase2_release_report_markdown,
+    phase3_release_report_json,
+    phase3_release_report_markdown,
     retrieval_report_json,
     retrieval_report_markdown,
     write_phase2_release_report,
+    write_phase3_release_report,
     write_retrieval_report,
 )
 from .retrieval import evaluate_retrieval
@@ -30,12 +39,16 @@ __all__ = [
     "RetrievalEvaluationReport",
     "RetrievalEvaluationSuite",
     "Phase2ReleaseReport",
+    "Phase3ReleaseReport",
     "PlannerEvaluationSuite",
     "PlannerEvaluationReport",
     "ReleaseEvidence",
     "audit_phase2_release",
+    "audit_phase3_release",
     "phase2_release_report_json",
     "phase2_release_report_markdown",
+    "phase3_release_report_json",
+    "phase3_release_report_markdown",
     "evaluate_retrieval",
     "load_retrieval_evaluation",
     "load_planner_evaluation_manifest",
@@ -48,5 +61,6 @@ __all__ = [
     "retrieval_report_json",
     "retrieval_report_markdown",
     "write_phase2_release_report",
+    "write_phase3_release_report",
     "write_retrieval_report",
 ]

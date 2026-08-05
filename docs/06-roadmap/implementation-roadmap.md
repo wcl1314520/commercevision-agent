@@ -126,11 +126,14 @@
 
 ### 退出标准
 
-- 未审批方案无法执行。
-- Prompt Injection 不能增加工具或权限。
-- 计划可追溯到检索引用和 Prompt 版本。
-- 旧页面审批不能覆盖新版本。
-- 计划 Fixture 和 Agent Eval 通过。
+- [x] 未审批方案无法执行。
+- [x] Prompt Injection 不能增加工具或权限。
+- [x] 计划可追溯到检索引用和 Prompt 版本。
+- [x] 旧页面审批不能覆盖新版本。
+- [x] 计划 Fixture 和 Agent Eval 通过。
+
+Phase 3 的浏览器、故障恢复、迁移、public-demo 隔离与同一 SHA 门禁见
+[Phase 3 发布验收](../05-deployment/phase3-release-acceptance.md)。
 
 ## Phase 4：图片生成、编辑与模型路由
 

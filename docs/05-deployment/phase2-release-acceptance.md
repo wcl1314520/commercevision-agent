@@ -71,6 +71,10 @@ workspace；使用四个 `public-demo-*` bucket、独立对象前缀和 OIDC cre
 Validation 数据外传，并只声明有明确许可的 `retrieval-daily-v1` 数据集。示例 ARN 必须在部署时由平台配置
 替换；不得把 private profile 或静态密钥复制到该文件。
 
+Profile 固定独立的 `public-demo-phase2-current` key ID；HMAC secret 必须由部署平台通过
+`CV_TRUSTED_PRINCIPAL_CURRENT_HMAC_SECRET` 注入。缺失或保留 Compose 本地默认密钥时，production API
+启动失败，不允许降级为开发信任边界。
+
 配置在构建前验证：
 
 ```powershell

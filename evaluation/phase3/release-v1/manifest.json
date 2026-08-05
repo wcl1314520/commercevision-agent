@@ -1,0 +1,488 @@
+{
+  "schema_version": "commercevision.phase3-release-acceptance.v1",
+  "release_id": "phase3-v1",
+  "phase": "phase-3",
+  "private_boundaries": {
+    "workspace_ids": ["private-production"],
+    "bucket_names": ["quarantine-assets", "task-assets", "foundation-assets", "provider-results"],
+    "credential_scopes": [
+      "secret://commercevision/private/object-storage",
+      "secret://commercevision/private/providers"
+    ],
+    "dataset_paths": ["evaluation/planner/hidden-release/manifest.json"],
+    "prompt_revision_ids": ["private-planner-r7"],
+    "cursor_signing_scopes": ["secret://commercevision/private/cursors"]
+  },
+  "public_demo": {
+    "workspace_ids": ["catalog-demo"],
+    "admin_workspace_ids": [],
+    "bucket_names": [
+      "public-demo-quarantine-assets",
+      "public-demo-task-assets",
+      "public-demo-foundation-assets",
+      "public-demo-provider-results"
+    ],
+    "object_prefix": "phase3/planner-ci-v1/",
+    "credential_scopes": [
+      "secret://commercevision/public-demo/object-storage",
+      "secret://commercevision/public-demo/providers"
+    ],
+    "prompt_revision_ids": ["public-demo-planner-r1"],
+    "cursor_signing_scopes": ["secret://commercevision/public-demo/cursors"],
+    "quotas": {
+      "requests_per_minute": 30,
+      "concurrent_operations": 2,
+      "provider_calls_per_day": 100,
+      "storage_bytes": 536870912
+    },
+    "datasets": [
+      {
+        "dataset_id": "planner-ci-v1",
+        "version": "v1",
+        "license": "CC0-1.0",
+        "path": "evaluation/planner/ci-v1/manifest.json",
+        "public_demo_allowed": true
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "id": "browser-e2e",
+      "evidence": [
+        {
+          "path": "apps/web/e2e/creative-plan-workbench.spec.ts",
+          "anchor": "test(\"creates an immutable revision and approves the exact visible version\""
+        },
+        {
+          "path": "apps/web/e2e/creative-plan-workbench.spec.ts",
+          "anchor": "test(\"preserves draft text across refresh and never replays a conflicted decision\""
+        },
+        {
+          "path": "apps/web/e2e/creative-plan-workbench.spec.ts",
+          "anchor": "test(\"resumes SSE from the last delivered cursor and fails closed on policy denial\""
+        },
+        {
+          "path": "apps/web/e2e/creative-plan-workbench.spec.ts",
+          "anchor": "test(\"renders retention expiry without exposing an approval surface\""
+        }
+      ]
+    },
+    {
+      "id": "fault-injection",
+      "evidence": [
+        {
+          "path": "tests/unit/test_product_brief_completion_fence.py",
+          "anchor": "def test_plan_write_replays_the_same_step_key_after_completion_crash("
+        },
+        {
+          "path": "tests/integration/test_api_operations.py",
+          "anchor": "def test_transport_replay_resumes_after_marker_commit_without_duplicate_execution("
+        },
+        {
+          "path": "tests/integration/test_phase3_release_faults.py",
+          "anchor": "def test_mysql_pool_reconnects_after_an_invalidated_phase3_connection("
+        },
+        {
+          "path": "tests/unit/test_agent_graph_entry.py",
+          "anchor": "async def test_async_human_resume_survives_runtime_restart("
+        },
+        {
+          "path": "tests/unit/test_workflow_sse.py",
+          "anchor": "async def test_workflow_sse_disconnect_stops_without_another_database_poll("
+        },
+        {
+          "path": "tests/unit/test_phase3_release_acceptance_unit.py",
+          "anchor": "def test_evaluation_report_interruption_never_publishes_a_partial_file("
+        },
+        {
+          "path": "tests/integration/test_product_brief_hitl_mysql.py",
+          "anchor": "def test_user_edited_plan_resumes_from_the_original_checkpoint_wait("
+        }
+      ]
+    },
+    {
+      "id": "recovery-convergence",
+      "evidence": [
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_duplicate_delivery_and_revision_preserve_ordered_history("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_stale_plan_approval_has_no_side_effects("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_tool_authorization_denies_injection_revoked_rights_and_quota("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_revision_never_extends_frozen_plan_retention("
+        },
+        {
+          "path": "tests/integration/test_product_brief_hitl_mysql.py",
+          "anchor": "def test_rejected_plan_restarts_into_one_later_plan_version("
+        },
+        {
+          "path": "tests/integration/test_product_brief_hitl_mysql.py",
+          "anchor": "def test_user_edited_plan_resumes_from_the_original_checkpoint_wait("
+        }
+      ]
+    },
+    {
+      "id": "migration-paths",
+      "evidence": [
+        {
+          "path": "tests/integration/test_migration_roundtrip_mysql.py",
+          "anchor": "def test_complete_migration_chain_round_trips_on_mysql("
+        },
+        {
+          "path": "tests/integration/test_prompt_registry_migration_mysql.py",
+          "anchor": "def test_prompt_registry_schema_preserves_immutable_revisions_and_exact_pointer("
+        },
+        {
+          "path": "tests/integration/test_planning_context_migration_mysql.py",
+          "anchor": "def test_schema_is_tenant_first_microsecond_precise_and_immutable_until_retention("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_migration_mysql.py",
+          "anchor": "def test_schema_is_tenant_first_binary_exact_microsecond_and_reversible_when_empty("
+        },
+        {
+          "path": "tests/integration/test_reliability_mysql.py",
+          "anchor": "def test_all_runtime_datetime_columns_use_microsecond_precision("
+        }
+      ]
+    },
+    {
+      "id": "authorization-safety",
+      "evidence": [
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_stale_plan_approval_has_no_side_effects("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_rejected_plan_requires_a_later_version_before_approval("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_foreign_fabricated_and_expired_plan_approval_has_no_side_effects("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_http_plan_approval_rejects_a_stale_page_and_replays_the_exact_current_decision("
+        },
+        {
+          "path": "tests/integration/test_creative_plan_mysql.py",
+          "anchor": "def test_real_mysql_plan_revision_and_approval_race_has_one_authoritative_winner("
+        },
+        {
+          "path": "tests/unit/test_tool_authorization_application.py",
+          "anchor": "def test_application_stale_approval_stops_before_entitlements_or_authorization("
+        }
+      ]
+    },
+    {
+      "id": "planner-security",
+      "evidence": [
+        {
+          "path": "tests/contract/test_planner_evaluation_release_gate.py",
+          "anchor": "def test_committed_observations_match_current_provider_free_fixture_planner("
+        },
+        {
+          "path": "tests/contract/test_planner_evaluation_release_gate.py",
+          "anchor": "def test_user_edit_injection_cannot_register_or_execute_a_tool("
+        },
+        {
+          "path": "tests/unit/test_tool_authorization_application.py",
+          "anchor": "def test_application_derives_authority_and_keeps_prompt_injection_as_data("
+        },
+        {
+          "path": "tests/unit/test_tool_authorization_application.py",
+          "anchor": "def test_application_narrows_shared_quota_across_plan_intents("
+        }
+      ]
+    },
+    {
+      "id": "quality-security-supply-chain",
+      "evidence": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Python checks"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Web checks"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Container builds"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "anchor": "name: Security and SBOM"
+        }
+      ]
+    },
+    {
+      "id": "public-demo-isolation",
+      "evidence": [
+        {
+          "path": "infra/public-demo/phase3.env.example",
+          "anchor": "CV_WEB_ALLOWED_WORKSPACE_IDS=catalog-demo"
+        },
+        {
+          "path": "infra/public-demo/phase3.env.example",
+          "anchor": "CV_TOOL_INTENT_QUOTA_UNITS=8"
+        },
+        {
+          "path": "tests/unit/test_phase3_release_acceptance_unit.py",
+          "anchor": "def test_phase3_release_audit_rejects_public_private_overlap("
+        },
+        {
+          "path": "tests/integration/test_prompt_registry_migration_mysql.py",
+          "anchor": "def test_prompt_registry_schema_preserves_immutable_revisions_and_exact_pointer("
+        }
+      ]
+    },
+    {
+      "id": "documentation-alignment",
+      "evidence": [
+        {
+          "path": "docs/01-architecture/system-architecture.md",
+          "anchor": "Creative Plan"
+        },
+        {
+          "path": "docs/02-data/mysql-schema.md",
+          "anchor": "### `creative_plans`"
+        },
+        {
+          "path": "docs/03-ai/evaluation-and-replay.md",
+          "anchor": "## Phase 3 Planner"
+        },
+        {
+          "path": "docs/04-engineering/testing-strategy.md",
+          "anchor": "Phase 3"
+        },
+        {
+          "path": "docs/05-deployment/phase3-release-acceptance.md",
+          "anchor": "# Phase 3 发布验收"
+        },
+        {
+          "path": "docs/runbooks/planning-observability.md",
+          "anchor": "# Phase 3 Planning Observability Runbook"
+        },
+        {
+          "path": "docs/06-roadmap/implementation-roadmap.md",
+          "anchor": "## Phase 3：Planning 与 Human-in-the-loop"
+        },
+        {
+          "path": "README.md",
+          "anchor": "`Phase 3 / 0.3.0` 已完成实现并纳入本地与 CI 发布验收"
+        }
+      ]
+    },
+    {
+      "id": "metadata-phase",
+      "evidence": [
+        {
+          "path": "services/api/src/commercevision_api/main.py",
+          "anchor": "phase=\"phase-3\""
+        },
+        {
+          "path": "tests/unit/test_api_health.py",
+          "anchor": "def test_metadata_reports_phase3_after_release_acceptance("
+        }
+      ]
+    }
+  ],
+  "fault_injection": [
+    {
+      "component": "worker-commit",
+      "evidence": {
+        "path": "tests/unit/test_product_brief_completion_fence.py",
+        "anchor": "def test_plan_write_replays_the_same_step_key_after_completion_crash("
+      }
+    },
+    {
+      "component": "rabbitmq",
+      "evidence": {
+        "path": "tests/integration/test_api_operations.py",
+        "anchor": "def test_transport_replay_resumes_after_marker_commit_without_duplicate_execution("
+      }
+    },
+    {
+      "component": "mysql",
+      "evidence": {
+        "path": "tests/integration/test_phase3_release_faults.py",
+        "anchor": "def test_mysql_pool_reconnects_after_an_invalidated_phase3_connection("
+      }
+    },
+    {
+      "component": "checkpointer",
+      "evidence": {
+        "path": "tests/unit/test_agent_graph_entry.py",
+        "anchor": "async def test_async_human_resume_survives_runtime_restart("
+      }
+    },
+    {
+      "component": "sse",
+      "evidence": {
+        "path": "tests/unit/test_workflow_sse.py",
+        "anchor": "async def test_workflow_sse_disconnect_stops_without_another_database_poll("
+      }
+    },
+    {
+      "component": "evaluation",
+      "evidence": {
+        "path": "tests/unit/test_phase3_release_acceptance_unit.py",
+        "anchor": "def test_evaluation_report_interruption_never_publishes_a_partial_file("
+      }
+    }
+  ],
+  "recovery_invariants": [
+    {
+      "id": "unique-plan-version",
+      "evidence": {
+        "path": "tests/integration/test_creative_plan_mysql.py",
+        "anchor": "def test_real_mysql_duplicate_delivery_and_revision_preserve_ordered_history("
+      }
+    },
+    {
+      "id": "unique-approval",
+      "evidence": {
+        "path": "tests/integration/test_creative_plan_mysql.py",
+        "anchor": "def test_http_plan_approval_rejects_a_stale_page_and_replays_the_exact_current_decision("
+      }
+    },
+    {
+      "id": "no-stale-authorization",
+      "evidence": {
+        "path": "tests/integration/test_creative_plan_mysql.py",
+        "anchor": "def test_real_mysql_tool_authorization_rejects_stale_approval_before_policy("
+      }
+    },
+    {
+      "id": "zero-unauthorized-intent",
+      "evidence": {
+        "path": "tests/contract/test_planner_evaluation_release_gate.py",
+        "anchor": "def test_user_edit_injection_cannot_register_or_execute_a_tool("
+      }
+    },
+    {
+      "id": "no-retention-extension",
+      "evidence": {
+        "path": "tests/integration/test_creative_plan_mysql.py",
+        "anchor": "def test_real_mysql_revision_never_extends_frozen_plan_retention("
+      }
+    },
+    {
+      "id": "eventual-convergence",
+      "evidence": {
+        "path": "tests/integration/test_product_brief_hitl_mysql.py",
+        "anchor": "def test_rejected_plan_restarts_into_one_later_plan_version("
+      }
+    }
+  ],
+  "ci_gates": [
+    {
+      "id": "python",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "- run: uv run pytest"
+      }
+    },
+    {
+      "id": "web",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "- run: pnpm web:unit-test"
+      }
+    },
+    {
+      "id": "openapi",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "scripts/export_openapi.py"
+      }
+    },
+    {
+      "id": "real-mysql",
+      "evidence": {
+        "path": "tests/integration/test_phase3_release_faults.py",
+        "anchor": "def test_mysql_pool_reconnects_after_an_invalidated_phase3_connection("
+      }
+    },
+    {
+      "id": "langgraph",
+      "evidence": {
+        "path": "tests/unit/test_agent_graph_entry.py",
+        "anchor": "async def test_async_human_resume_survives_runtime_restart("
+      }
+    },
+    {
+      "id": "sse",
+      "evidence": {
+        "path": "tests/integration/test_workflow_sse_mysql.py",
+        "anchor": "def test_workflow_sse_keyset_pages_and_reconnect_storm_have_fixed_query_budgets("
+      }
+    },
+    {
+      "id": "e2e",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "- run: pnpm web:e2e"
+      }
+    },
+    {
+      "id": "evaluation",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "Run Planner evaluation gate"
+      }
+    },
+    {
+      "id": "security",
+      "evidence": {
+        "path": "tests/contract/test_planner_evaluation_release_gate.py",
+        "anchor": "def test_user_edit_injection_cannot_register_or_execute_a_tool("
+      }
+    },
+    {
+      "id": "secrets",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "gitleaks/gitleaks-action@v2"
+      }
+    },
+    {
+      "id": "dependencies",
+      "evidence": {
+        "path": "scripts/audit_python.py",
+        "anchor": "pip-audit"
+      }
+    },
+    {
+      "id": "containers",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "docker compose -f infra/compose/docker-compose.yml build"
+      }
+    },
+    {
+      "id": "licenses",
+      "evidence": {
+        "path": "scripts/audit_licenses.py",
+        "anchor": "def main() -> int:"
+      }
+    },
+    {
+      "id": "sbom",
+      "evidence": {
+        "path": ".github/workflows/ci.yml",
+        "anchor": "anchore/sbom-action@v0"
+      }
+    }
+  ]
+}

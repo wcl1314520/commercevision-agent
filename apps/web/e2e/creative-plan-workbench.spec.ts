@@ -164,9 +164,15 @@ type MockState = {
   conflictNextDecision: boolean;
   revisionRequests: { body: Record<string, unknown>; idempotencyKey: string }[];
   decisionRequests: { body: Record<string, unknown>; idempotencyKey: string }[];
+  streamLastEventIds: (string | undefined)[];
 };
 
-async function installApi(page: Page): Promise<MockState> {
+type MockOptions = {
+  readFailureStatus?: 403 | 410;
+  reconnectFailureStatus?: 403 | 410;
+};
+
+async function installApi(page: Page, options: MockOptions = {}): Promise<MockState> {
   const state: MockState = {
     currentVersion: 2,
     scene: "Clean studio surface",
@@ -176,6 +182,7 @@ async function installApi(page: Page): Promise<MockState> {
     conflictNextDecision: false,
     revisionRequests: [],
     decisionRequests: [],
+    streamLastEventIds: [],
   };
   await page.route("**/api/web-capabilities", async (route) => {
     await route.fulfill({ json: { administrator: false } });
@@ -201,6 +208,32 @@ async function installApi(page: Page): Promise<MockState> {
     }
     if (path === `/api/v1/workflows/${WORKFLOW_ID}/events`) {
       expect(request.headers()["x-workspace-id"]).toBe("catalog-demo");
+      state.streamLastEventIds.push(request.headers()["last-event-id"]);
+      if (options.reconnectFailureStatus && state.streamLastEventIds.length > 1) {
+        await route.fulfill({
+          status: options.reconnectFailureStatus,
+          json: errorEnvelope(options.reconnectFailureStatus),
+        });
+        return;
+      }
+      if (options.reconnectFailureStatus) {
+        const event = {
+          event_id: "019f8a00-0000-7000-8000-000000000130",
+          event_type: "workflow.human_input_received",
+          schema_version: 1,
+          aggregate_type: "workflow",
+          aggregate_id: WORKFLOW_ID,
+          aggregate_version: 7,
+          occurred_at: "2026-08-05T08:00:00Z",
+          trace_id: "trace-creative-plan",
+          payload: { approval_type: "CREATIVE_PLAN" },
+        };
+        await route.fulfill({
+          contentType: "text/event-stream; charset=utf-8",
+          body: `retry: 100\nid: cursor-phase3-e2e\nevent: workflow.event\ndata: ${JSON.stringify(event)}\n\n`,
+        });
+        return;
+      }
       await route.fulfill({
         contentType: "text/event-stream; charset=utf-8",
         body: "retry: 30000\n\n",
@@ -208,6 +241,13 @@ async function installApi(page: Page): Promise<MockState> {
       return;
     }
     if (request.method() === "GET" && path === `/api/v1/workflows/${WORKFLOW_ID}`) {
+      if (options.readFailureStatus) {
+        await route.fulfill({
+          status: options.readFailureStatus,
+          json: errorEnvelope(options.readFailureStatus),
+        });
+        return;
+      }
       await route.fulfill({
         json: workflow({
           version: state.workflowVersion,
@@ -402,4 +442,29 @@ test("preserves draft text across refresh and never replays a conflicted decisio
     page.getByRole("heading", { name: "当前权威审查快照" }),
   ).toBeHidden();
   await expect(page.getByText("输入精确 Workflow 与 Creative Plan 标识")).toBeVisible();
+});
+
+test("resumes SSE from the last delivered cursor and fails closed on policy denial", async ({
+  page,
+}) => {
+  const state = await installApi(page, { reconnectFailureStatus: 403 });
+  await openPlan(page);
+
+  await expect(
+    page.locator(".warning-banner").getByText("事件流访问被拒绝", { exact: true }),
+  ).toBeVisible();
+  expect(state.streamLastEventIds).toEqual([undefined, "cursor-phase3-e2e"]);
+  await expect(page.getByText("实时通知不可用；页面不会猜测状态，请手动刷新权威事实。")).toBeVisible();
+});
+
+test("renders retention expiry without exposing an approval surface", async ({ page }) => {
+  await installApi(page, { readFailureStatus: 410 });
+  await page.goto("/");
+  await page.getByLabel("Workflow ID").fill(WORKFLOW_ID);
+  await page.getByLabel("Creative Plan ID").fill(PLAN_ID);
+  await page.getByRole("button", { name: "读取审查事实" }).click();
+
+  await expect(page.locator(".error-banner[role='alert']")).toContainText("保留期已结束");
+  await expect(page.getByRole("button", { name: /批准方案/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /驳回方案/ })).toHaveCount(0);
 });
