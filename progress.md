@@ -1888,3 +1888,15 @@
   Phase 2/3 分别固定独立非本地 key ID，HMAC secret 仍只允许部署平台外部注入。渲染配置确认 Phase 3 API/Worker
   均为 `production`，缺失 secret 时保留的本地默认值会被 production API 启动校验拒绝；两版 profile 契约
   `9 passed`，Compose config 全绿。
+
+# 2026-08-06 Phase 3 正式完成
+
+- Ticket 14 实现提交 `17afc58c01d5c59477092f5facbdf045ff9d6994` 的精确 GitHub Actions
+  `31053250005` 四路全绿：Python `2059 passed, 3 skipped, 4 warnings in 890.94s`；Web 全套、全部服务容器、
+  Gitleaks 与 SPDX SBOM 均成功。
+- `phase3-release-acceptance` artifact ID `8949282196` 已上传；本地同输入聚合 JSON SHA-256 为
+  `eee232151fb253b783b49ffa630b51f63c2dfe0b2cef7af00a6540ac0f03a509`，Planner report JSON SHA-256 为
+  `733a399576c676e4344618332408d954f6673b4712577d24227c74ece4f0cc38`，迁移 head 为 `d9a6e4b2c517`。
+- 唯一非失败 annotation 是 GitHub hosted runner 将仍声明 Node.js 20 的 `actions/checkout@v4`、
+  `actions/setup-node@v4`、`pnpm/action-setup@v4`、`actions/upload-artifact@v4` 和 Gitleaks action 强制运行在
+  Node.js 24；没有门禁失败或豁免。Ticket 14 最后一项已勾选，Phase 3 正式 `complete`。
