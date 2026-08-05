@@ -205,6 +205,8 @@
 - Ticket 07 durable Fixture Planner 已完成本地纵向实现：真实 Planning Context、production Prompt、确定性双品类
   Creative Plan、MySQL 权威提交、Step 崩溃重放和 ProductBrief commit-time recheck 已闭合；Ticket 06/07 在精确
   GitHub Actions 全绿前保持 `in_progress`，Ticket 08 不启动。
+- Ticket 06/07 首个 CI `30990797615` 识别出 8 个旧 ProductBrief 恢复测试缺少真实 Planner Prompt 前置；
+  已以显式 production Prompt seed 最小修复并通过 10 个精确场景，等待修复提交的四路 CI 全绿。
 
 ## 成功标准
 

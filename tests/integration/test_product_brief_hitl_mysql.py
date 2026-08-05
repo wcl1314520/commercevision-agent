@@ -2128,8 +2128,10 @@ def test_http_worker_human_revision_and_exact_confirmation(
 def test_product_brief_confirmation_event_continues_agent_from_retrieval(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     workflow_id, product_id, asset_version_id = _seed_authorized_source(integration_database)
     executor = ProductBriefAnalysisExecutor(
         uow_factory=lambda: SqlAlchemyProductBriefUnitOfWork(integration_database.session_factory),
@@ -2224,8 +2226,10 @@ def test_product_brief_confirmation_event_continues_agent_from_retrieval(
 def test_public_commerce_workflow_restarts_through_product_brief_human_wait(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     _, product_id, asset_version_id = _seed_authorized_source(integration_database)
     artifact_sink = MemoryArtifactSink()
     executor = ProductBriefAnalysisExecutor(
@@ -2381,8 +2385,10 @@ def test_public_commerce_workflow_restarts_through_product_brief_human_wait(
 def test_public_commerce_workflow_restarts_from_policy_confirmed_product_brief(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     _, product_id, asset_version_id = _seed_authorized_source(integration_database)
     artifact_sink = MemoryArtifactSink()
     executor = ProductBriefAnalysisExecutor(
@@ -3065,8 +3071,10 @@ def _assert_stale_continuation_was_processed_without_side_effects(
 def test_confirmed_product_brief_recovers_before_initial_step_claim(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     (
         continuation_event,
         workflow_id,
@@ -3535,9 +3543,11 @@ def test_product_brief_revision_rejects_workflow_authority_drift(
 def test_claimed_v1_is_cancelled_when_reanalysis_supersedes_before_recovery(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
     stale_detection: str,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     (
         v1_event,
         workflow_id,
@@ -3699,8 +3709,10 @@ def test_claimed_v1_is_cancelled_when_reanalysis_supersedes_before_recovery(
 def test_expired_active_product_brief_step_recovers_with_exact_authority(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     (
         continuation_event,
         workflow_id,
@@ -3867,8 +3879,10 @@ def test_expired_active_product_brief_step_recovers_with_exact_authority(
 def test_stale_product_brief_workflow_recovers_original_checkpoint_generation(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     (
         continuation_event,
         workflow_id,
@@ -4261,8 +4275,10 @@ def test_product_brief_recovery_fail_closes_future_retention_deadline_mismatch(
 def test_inflight_v1_completion_cannot_overwrite_confirmed_v2_continuation(
     integration_database,
     integration_settings,
+    seed_fixture_planner_prompt,
 ) -> None:
     settings = _settings(integration_settings)
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
     (
         v1_event,
         workflow_id,

@@ -763,3 +763,6 @@
   Worker composition 的显式 test-only Planner 注入保留覆盖，不在生产路径恢复 `fixture://` authority。
 - Creative Plan provenance 的 Context hash 一致仍不足以证明提交瞬间 ProductBrief 有效；Plan append 的同一事务
   必须锁定并重验 ProductBrief 仍是 current confirmed exact version、payload hash 与 retention 覆盖 Workflow。
+- 把生产 Worker composition 从 test-only Planner 升级为真实 Planner 后，所有断言 ProductBrief→Plan 成功的
+  integration test 都必须显式发布 production Prompt；否则生产代码应按设计永久失败并把缺失 Prompt 写入 Durable
+  Step。用隐式全局 seed 或恢复 legacy adapter 会掩盖真实依赖，目标测试显式 seed 才保持测试隔离与依赖可见性。

@@ -1663,3 +1663,9 @@
   strict Mypy 和正式 432-diagnostic Mypy baseline 均全绿。
 - 本机依赖 Celery runtime readiness 的 3 项旧 Phase 1 套件因 Milvus 不可用失败；直接 Worker restart/resume
   测试与真实 ProductBrief Planner/HITL 流程均通过。未削弱生产 Milvus readiness，远程 CI 仍需给出权威结论。
+- Ticket 06/07 首个精确 CI `30990797615` 的 Web、Container 与 Security/SBOM 全绿；Python 完整
+  `1932 passed, 3 skipped`，但 8 个既有 ProductBrief→Plan 恢复测试因切换到真实 Planner 后未发布必需的
+  production Prompt 而失败。数据库持久化事实精确记录为 `NotFoundError: production Prompt Revision was not found`。
+- 仅为这 8 个生产 Planner 场景补齐既有 `seed_fixture_planner_prompt` 前置，不恢复 `fixture://` 权威、
+  不注入 legacy Planner，也不放宽生产失败关闭。10 个参数化恢复场景复验 `10 passed`，Ruff 与
+  `git diff --check` 全绿；等待修复提交的精确 CI，Ticket 08 继续锁定。
