@@ -5,7 +5,7 @@ to a new plan version, approving/rejecting the visible version, and recovering t
 
 **Blocked by:** 05 — Creative Plan HTTP; 06 — Exact plan approval fence; 10 — Workflow SSE.
 
-**Status:** ready-for-agent
+**Status:** in_progress
 
 - [ ] The page shows exact plan/Workflow versions, ProductBrief/Brand/Prompt/Context provenance, citations, Tool Intents, and approval history.
 - [ ] Editing creates a new immutable version with reason and never mutates or hides prior versions.

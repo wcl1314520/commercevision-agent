@@ -5,7 +5,7 @@ stable ordering, bounded catch-up, heartbeat, and resumable opaque cursor semant
 
 **Blocked by:** 05 — Creative Plan HTTP; 06 — Exact plan approval fence.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Events are read from persisted facts in stable order and never from process-local authorization state.
 - [x] Cursor is opaque, signed or otherwise tamper-evident, workspace/Workflow scoped, bounded, and expires with retained data.

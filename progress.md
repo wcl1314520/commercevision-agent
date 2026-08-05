@@ -1764,3 +1764,12 @@
   投影；可靠性以短事务、backpressure、disconnect/heartbeat/time/page budgets；维护性以独立
   `WorkflowEventStreamService` 和 transport-only SSE module；运维性以专用覆盖索引、OpenAPI、配置/Compose、
   431-diagnostic Mypy baseline 与确定性查询预算闭合。
+- 首个精确 CI `31017417342` 在完整集成套件暴露 18 个既有调用方仍依赖
+  `WorkflowApplicationService.events()`；恢复仅供内部编排调用的兼容 query，并保持公开 resumable delivery
+  独立归属 `WorkflowEventStreamService`。本地 18 个精确回归中 15 个通过，另 3 个仅因本机 Milvus 未启动
+  触发 Worker 健康退出；Ticket 10 聚焦测试 `18 passed`、首个真实 MySQL 回归 `2 passed`、Ruff 与目标 strict
+  Mypy 全绿。
+- 实现提交 `95e2a80` 与兼容修复 `367b77b` 已由精确 GitHub Actions `31019937626` 四路全绿验证：
+  Python 完整 `2015 passed, 3 skipped in 884.68s`，Web、Container builds、Gitleaks 与 SBOM 均成功。
+  Ticket 10 正式 `complete`；Ticket 11 `Creative Plan editor and approval Workbench` 已按 blockers-first 解锁，
+  当前只允许状态提交取得精确 CI，全绿后开始首个 Web TDD 纵向切片。

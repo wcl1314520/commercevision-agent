@@ -223,7 +223,9 @@
   blockers-first 解锁，进入 persisted Workflow SSE + opaque resume cursor 的首个 TDD 纵向切片。
 - Ticket 10 persisted Outbox keyset、每事件 scoped HMAC cursor、contract-safe SSE、短事务轮询、
   disconnect/heartbeat/session budget、tenant-first 覆盖索引与重连查询预算已完成本地纵向实现；
-  当前进入最终门禁与五轴终审，精确 CI 全绿前 Ticket 11 保持锁定。
+  实现提交 `95e2a80` 与兼容修复 `367b77b` 已由精确 GitHub Actions `31019937626` 四路全绿验证：
+  Python `2015 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功，Ticket 10 正式完成；
+  Ticket 11 已按 blockers-first 解锁并进入 Creative Plan editor/approval Workbench 的首个 TDD 纵向切片。
 
 ## 成功标准
 
