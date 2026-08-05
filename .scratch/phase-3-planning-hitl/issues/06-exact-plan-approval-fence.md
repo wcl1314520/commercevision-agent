@@ -5,7 +5,7 @@ to the authoritative current plan version and becomes the only authorization fac
 
 **Blocked by:** 04 — Creative Plan MySQL authority; 05 — Creative Plan HTTP contract.
 
-**Status:** ready-for-agent
+**Status:** in_progress
 
 - [ ] The shared application Interface loads Workflow and current Creative Plan under the same transaction before accepting a decision.
 - [ ] Workspace, Workflow, plan identity, plan version, expected Workflow version, and current head must all match exactly.

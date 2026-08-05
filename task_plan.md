@@ -197,6 +197,9 @@
   当前只允许提交、推送并等待精确 GitHub Actions，全绿前 Ticket 05 保持未启动
 - Ticket 04 实现提交 `d213f59` 已由精确 GitHub Actions `30976515426` 四路全绿验证并正式完成；
   Ticket 05 已按 blockers-first 解锁，进入 Creative Plan REST read/versioned editing 的首个 TDD 纵切
+- Ticket 05 实现提交 `c45a8b2` 已由精确 GitHub Actions `30981372490` 四路全绿验证并正式完成；
+  Ticket 06 已按 blockers-first 解锁，进入 exact Creative Plan approval/execution fence 的 TDD 纵切；
+  本状态提交取得精确 CI 全绿前不开始 Ticket 06 实现代码
 
 ## 成功标准
 

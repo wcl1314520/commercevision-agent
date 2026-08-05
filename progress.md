@@ -1647,3 +1647,8 @@
   总数仍为 432、所有新增/修改 Creative Plan 生产模块严格零错误后，用仓库正式脚本刷新基线指纹并复验。
   五轴终审未发现剩余 Critical/Required；Ticket 05 在精确 GitHub Actions 全绿前保持 `in_progress`，不启动
   Ticket 06。
+- Ticket 05 实现提交 `c45a8b2b4dc7cd21bd5f7c91b60bdd55d42ec4b7` 的精确 GitHub Actions
+  `30981372490` 四路全绿：Python checks（真实 MySQL、完整 pytest、Mypy/License/Eval/OpenAPI）、Web checks
+  （lint/type/unit/proxy/build/Playwright/audit）、Container builds 与 Security/SBOM 全部成功。Ticket 05
+  正式完成，Ticket 06 `Exact Creative Plan approval and execution fence` 进入 `in_progress`；状态提交精确
+  CI 全绿前不开始 Ticket 06 RED。
