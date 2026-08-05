@@ -247,6 +247,9 @@
   Runbook、告警阈值与本地 Compose OTLP/Prometheus 契约均已闭合。完整 unit+contract
   `1460 passed, 1 skipped`，Ruff、431-diagnostic Mypy baseline、许可证/漏洞、Compose 与 diff 门禁全绿；
   当前只允许形成实现提交并等待该精确 GitHub Actions 四路全绿，Ticket 14 保持锁定。
+- Ticket 13 实现提交 `7bf8a89` 已由精确 GitHub Actions `31045186630` 四路全绿验证：Python
+  `2043 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功。Ticket 13 正式完成，
+  Ticket 14 已按 blockers-first 解锁并进入 Phase 3 chaos/E2E/release acceptance。
 
 ## 成功标准
 

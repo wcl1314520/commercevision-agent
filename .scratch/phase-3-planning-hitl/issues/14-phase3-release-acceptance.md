@@ -5,7 +5,7 @@ real-infrastructure recovery, migration, security, evaluation, Compose, and supp
 
 **Blocked by:** 01–13 — all preceding Phase 3 Tickets.
 
-**Status:** ready-for-agent
+**Status:** in_progress
 
 - [ ] Playwright covers plan creation, provenance review, edit, version history, approve, reject/revise, stale conflict, refresh, SSE reconnect, policy denial, and retention expiry.
 - [ ] Fault injection covers Worker interruption around version/approval commits, RabbitMQ, MySQL reconnect, Checkpointer restart, SSE disconnect, and evaluation interruption.
