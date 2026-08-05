@@ -173,7 +173,11 @@ from .routing import (
     build_event_routing_registry,
 )
 from .upload_maintenance import UploadSessionMaintenanceService
-from .workflows import CreativePlanExecutionClaim, WorkflowApplicationService
+from .workflows import (
+    CreativePlanExecutionClaim,
+    CreativePlanResumeClaim,
+    WorkflowApplicationService,
+)
 
 __all__ = [
     "DurableNodeLifecycle",
@@ -317,4 +321,5 @@ __all__ = [
     "build_milvus_upsert_request",
     "WorkflowApplicationService",
     "CreativePlanExecutionClaim",
+    "CreativePlanResumeClaim",
 ]

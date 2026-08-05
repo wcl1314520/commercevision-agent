@@ -51,6 +51,9 @@ class CreativePlanNodePort(Protocol):
         product_brief_version_number: int | None,
         actor_id: str,
         expected_workflow_version: int,
+        plan_iteration: int,
+        prior_plan_version_id: str | None,
+        prior_plan_version: int | None,
         trace_id: str,
         idempotency_key: str,
     ) -> CreativePlanNodeResultLike: ...

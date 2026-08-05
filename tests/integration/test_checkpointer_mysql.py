@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
+from commercevision_agent_core import FixtureAgentRuntime, FixtureAgentState
+from commercevision_domain import ApprovalDecision, ApprovalType
 from commercevision_persistence import MySQLCheckpointSaver
 from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 pytestmark = pytest.mark.integration
 
@@ -138,3 +143,73 @@ async def test_mysql_checkpointer_async_contract(integration_database) -> None:
     result = await saver.aget_tuple(config)
     assert result is not None
     assert result.checkpoint["channel_values"]["value"] == "async"
+
+
+@pytest.mark.asyncio
+async def test_mysql_checkpointer_async_plan_interrupt_survives_runtime_restart(
+    integration_database,
+) -> None:
+    saver = MySQLCheckpointSaver(integration_database.session_factory)
+    resumed: list[str] = []
+
+    def build_graph() -> Any:
+        def wait_for_plan(raw_state: FixtureAgentState) -> dict[str, str]:
+            state = FixtureAgentState.model_validate(raw_state)
+            decision = interrupt(
+                {
+                    "workflow_id": state.workflow_id,
+                    "expected_workflow_version": state.workflow_version,
+                    "subject_id": state.creative_plan_ref,
+                    "subject_version": state.creative_plan_version,
+                }
+            )["decision"]
+            resumed.append(str(decision))
+            return {"plan_decision": str(decision), "current_node": "completed"}
+
+        graph = StateGraph(FixtureAgentState)
+        graph.add_node("wait_for_plan", wait_for_plan)
+        graph.add_edge(START, "wait_for_plan")
+        graph.add_edge("wait_for_plan", END)
+        return graph.compile(checkpointer=saver)
+
+    workflow_id = "mysql-async-plan-interrupt"
+    plan_id = "plan-mysql-async-v1"
+    first_runtime = FixtureAgentRuntime(build_graph(), saver)
+    interrupted = await first_runtime.arun(
+        initial_state=FixtureAgentState(
+            workflow_id=workflow_id,
+            workflow_version=7,
+            workspace_id="mysql-checkpointer",
+            actor_id="mysql-checkpointer-test",
+            trace_id="mysql-async-interrupt-trace",
+            creative_plan_ref=plan_id,
+            creative_plan_version_id="plan-version-mysql-async-v1",
+            creative_plan_version=1,
+        )
+    )
+    assert "__interrupt__" in interrupted
+
+    restarted_runtime = FixtureAgentRuntime(build_graph(), saver)
+    result = await restarted_runtime.arun(
+        initial_state=FixtureAgentState(
+            workflow_id=workflow_id,
+            workflow_version=8,
+            workspace_id="mysql-checkpointer",
+            actor_id="mysql-checkpointer-test",
+            trace_id="mysql-async-resume-trace",
+            current_node="approve_plan",
+        ),
+        resume_payload={
+            "workflow_id": workflow_id,
+            "approval_id": "approval-mysql-async-v1",
+            "approval_type": ApprovalType.CREATIVE_PLAN.value,
+            "decision": ApprovalDecision.APPROVE.value,
+            "expected_workflow_version": 7,
+            "resulting_workflow_version": 8,
+            "subject_id": plan_id,
+            "subject_version": 1,
+        },
+    )
+
+    assert result["plan_decision"] == ApprovalDecision.APPROVE.value
+    assert resumed == [ApprovalDecision.APPROVE.value]

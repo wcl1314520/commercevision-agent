@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Protocol
 from uuid import UUID, uuid5
 
 from commercevision_contracts import CreativePlanCreateRequestV1
@@ -13,6 +13,8 @@ from commercevision_domain import (
     CreativePlanDirection,
     CreativePlanPayload,
     CreativePlanProvenance,
+    CreativePlanSource,
+    CreativePlanVersion,
     ImageRole,
     NotFoundError,
     PlanningContextSnapshot,
@@ -78,6 +80,9 @@ class DurableFixturePlannerCommand:
     expected_workflow_version: int
     trace_id: str
     idempotency_key: str
+    plan_iteration: int = 0
+    prior_plan_version_id: str | None = None
+    prior_plan_version: int | None = None
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
@@ -87,11 +92,26 @@ class DurableFixturePlannerCommand:
         ):
             if canonicalize_uuid(value) != value:
                 raise ValueError(f"Fixture Planner {field} is invalid")
+        has_prior_id = self.prior_plan_version_id is not None
+        has_prior_version = self.prior_plan_version is not None
+        if has_prior_id != has_prior_version or has_prior_id != (self.plan_iteration > 0):
+            raise ValueError("Fixture Planner prior Plan authority is inconsistent")
+        if (
+            self.prior_plan_version_id is not None
+            and canonicalize_uuid(self.prior_plan_version_id) != self.prior_plan_version_id
+        ):
+            raise ValueError("Fixture Planner prior Plan Version id is invalid")
         if (
             type(self.product_brief_version_number) is not int
             or self.product_brief_version_number < 1
             or type(self.expected_workflow_version) is not int
             or self.expected_workflow_version < 1
+            or type(self.plan_iteration) is not int
+            or not 0 <= self.plan_iteration <= 10
+            or (
+                self.prior_plan_version is not None
+                and (type(self.prior_plan_version) is not int or self.prior_plan_version < 1)
+            )
         ):
             raise ValueError("Fixture Planner expected versions are invalid")
         if not self.actor_id or not self.trace_id or len(self.idempotency_key) < 8:
@@ -168,6 +188,14 @@ class CreativePlanWriterPort(Protocol):
         idempotency_key: str,
     ) -> CreativePlanWriteResult: ...
 
+    def append_version(
+        self,
+        *,
+        version: CreativePlanVersion,
+        expected_workflow_version: int,
+        expected_head_version: int,
+    ) -> CreativePlanWriteResult: ...
+
 
 class DurableFixturePlanner:
     """Compose authoritative inputs; the final Plan append rechecks them at commit."""
@@ -204,6 +232,7 @@ class DurableFixturePlanner:
         creative_plan_id = str(
             uuid5(_PLAN_NAMESPACE, f"{command.workspace_id}\0{command.workflow_id}")
         )
+        current: CreativePlanWriteResult | None = None
         try:
             stored = self._plans.get_current(
                 workspace_id=command.workspace_id,
@@ -211,15 +240,42 @@ class DurableFixturePlanner:
                 creative_plan_id=creative_plan_id,
             )
         except NotFoundError:
-            pass
+            if command.plan_iteration != 0:
+                raise ConcurrencyError("Fixture Planner revision authority is missing") from None
         else:
-            self._validate_replay(
-                stored,
-                authority=authority,
-                command=command,
-                creative_plan_id=creative_plan_id,
-            )
-            return self._to_result(stored)
+            if command.prior_plan_version_id is None:
+                self._validate_replay(
+                    stored,
+                    authority=authority,
+                    command=command,
+                    creative_plan_id=creative_plan_id,
+                    expected_version=1,
+                    expected_supersedes_version_id=None,
+                )
+                return self._to_result(stored)
+            prior_version = command.prior_plan_version
+            if prior_version is None:
+                raise ValueError("Fixture Planner prior Plan authority is incomplete")
+            if (
+                stored.version.id == command.prior_plan_version_id
+                and stored.version.version_number == prior_version
+            ):
+                current = stored
+            elif (
+                stored.version.supersedes_version_id == command.prior_plan_version_id
+                and stored.version.version_number == prior_version + 1
+            ):
+                self._validate_replay(
+                    stored,
+                    authority=authority,
+                    command=command,
+                    creative_plan_id=creative_plan_id,
+                    expected_version=prior_version + 1,
+                    expected_supersedes_version_id=command.prior_plan_version_id,
+                )
+                return self._to_result(stored)
+            else:
+                raise ConcurrencyError("Fixture Planner revision authority changed")
         context = self._contexts.build(
             PlanningContextBuildRequest(
                 workspace_id=command.workspace_id,
@@ -246,36 +302,47 @@ class DurableFixturePlanner:
             )
         )
         provenance = draft.provenance
-        stored = self._plans.create_plan(
-            workspace_id=command.workspace_id,
-            actor_id=command.actor_id,
-            request=CreativePlanCreateRequestV1.model_validate(
-                {
-                    "workflow_id": command.workflow_id,
-                    "creative_plan_id": creative_plan_id,
-                    "payload": draft.payload.to_canonical_data(),
-                    "provenance": {
-                        "product_brief_id": provenance.product_brief_id,
-                        "product_brief_version": provenance.product_brief_version,
-                        "product_brief_sha256": provenance.product_brief_sha256,
-                        "brand_profile_id": provenance.brand_profile_id,
-                        "brand_profile_version": provenance.brand_profile_version,
-                        "brand_profile_sha256": provenance.brand_profile_sha256,
-                        "retrieval_run_id": provenance.retrieval_run_id,
-                        "retrieval_citation_ids": list(provenance.retrieval_citation_ids),
-                        "context_policy_version": provenance.context_policy_version,
-                        "context_sha256": provenance.context_sha256,
-                        "prompt_id": provenance.prompt_id,
-                        "prompt_revision": provenance.prompt_revision,
-                        "prompt_sha256": provenance.prompt_sha256,
-                    },
-                    "expected_workflow_version": command.expected_workflow_version,
-                    "expected_head_version": 0,
-                }
-            ),
-            trace_id=command.trace_id,
-            idempotency_key=command.idempotency_key,
-        )
+        if current is None:
+            stored = self._plans.create_plan(
+                workspace_id=command.workspace_id,
+                actor_id=command.actor_id,
+                request=CreativePlanCreateRequestV1.model_validate(
+                    {
+                        "workflow_id": command.workflow_id,
+                        "creative_plan_id": creative_plan_id,
+                        "payload": draft.payload.to_canonical_data(),
+                        "provenance": {
+                            "product_brief_id": provenance.product_brief_id,
+                            "product_brief_version": provenance.product_brief_version,
+                            "product_brief_sha256": provenance.product_brief_sha256,
+                            "brand_profile_id": provenance.brand_profile_id,
+                            "brand_profile_version": provenance.brand_profile_version,
+                            "brand_profile_sha256": provenance.brand_profile_sha256,
+                            "retrieval_run_id": provenance.retrieval_run_id,
+                            "retrieval_citation_ids": list(provenance.retrieval_citation_ids),
+                            "context_policy_version": provenance.context_policy_version,
+                            "context_sha256": provenance.context_sha256,
+                            "prompt_id": provenance.prompt_id,
+                            "prompt_revision": provenance.prompt_revision,
+                            "prompt_sha256": provenance.prompt_sha256,
+                        },
+                        "expected_workflow_version": command.expected_workflow_version,
+                        "expected_head_version": 0,
+                    }
+                ),
+                trace_id=command.trace_id,
+                idempotency_key=command.idempotency_key,
+            )
+        else:
+            stored = self._plans.append_version(
+                version=current.version.revise_by_agent(
+                    payload=draft.payload,
+                    provenance=draft.provenance,
+                    actor_id=command.actor_id,
+                ),
+                expected_workflow_version=command.expected_workflow_version,
+                expected_head_version=current.head.version,
+            )
         return self._to_result(stored)
 
     @staticmethod
@@ -297,6 +364,8 @@ class DurableFixturePlanner:
         authority: FixturePlanningAuthority,
         command: DurableFixturePlannerCommand,
         creative_plan_id: str,
+        expected_version: int,
+        expected_supersedes_version_id: str | None,
     ) -> None:
         version = stored.version
         provenance = version.provenance
@@ -305,9 +374,12 @@ class DurableFixturePlanner:
             or stored.head.workflow_id != command.workflow_id
             or stored.head.creative_plan_id != creative_plan_id
             or stored.head.current_version_id != version.id
-            or stored.head.current_version_number != 1
-            or stored.head.version != 1
-            or version.version_number != 1
+            or stored.head.current_version_number != expected_version
+            or stored.head.version != expected_version
+            or version.version_number != expected_version
+            or version.supersedes_version_id != expected_supersedes_version_id
+            or version.source is not CreativePlanSource.AGENT
+            or version.actor_id != command.actor_id
             or version.provenance.product_brief_id != authority.product_brief.source_id
             or provenance.product_brief_version != command.product_brief_version_number
             or provenance.product_brief_sha256 != authority.product_brief.content_sha256
@@ -331,6 +403,9 @@ class DurableFixturePlannerNode:
         product_brief_version_number: int | None,
         actor_id: str,
         expected_workflow_version: int,
+        plan_iteration: int,
+        prior_plan_version_id: str | None,
+        prior_plan_version: int | None,
         trace_id: str,
         idempotency_key: str,
     ) -> DurableFixturePlanResult:
@@ -346,6 +421,9 @@ class DurableFixturePlannerNode:
                 expected_workflow_version=expected_workflow_version,
                 trace_id=trace_id,
                 idempotency_key=idempotency_key,
+                plan_iteration=plan_iteration,
+                prior_plan_version_id=prior_plan_version_id,
+                prior_plan_version=prior_plan_version,
             )
         )
 
@@ -432,9 +510,10 @@ class DeterministicFixturePlanner:
 
     @staticmethod
     def _version(source: PlanningContextSource, label: str) -> int:
-        if source.version_number is None:
+        version = source.version_number
+        if isinstance(version, bool) or not isinstance(version, int):
             raise ValueError(f"Fixture Planner {label} version is unavailable")
-        return cast(int, source.version_number)
+        return version
 
     @staticmethod
     def _validate_prompt(prompt: PromptRevision, *, workspace_id: str, category: str) -> None:

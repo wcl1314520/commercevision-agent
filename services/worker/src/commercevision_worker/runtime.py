@@ -13,6 +13,7 @@ from typing import Any, cast
 from commercevision_agent_core import (
     FixtureAgentRuntime,
     FixtureAgentState,
+    ResumeCheckpointConflictError,
     build_fixture_graph,
 )
 from commercevision_agent_core.ports import CreativePlanNodePort
@@ -43,6 +44,7 @@ from commercevision_application import (
     PromptRegistryApplicationService,
     StaleProductBriefContinuation,
     UploadObjectCleaner,
+    WorkflowApplicationService,
     build_event_routing_registry,
 )
 from commercevision_application.creative_plan_ports import CreativePlanUnitOfWorkPort
@@ -112,6 +114,7 @@ from commercevision_domain import (
     canonicalize_uuid,
 )
 from commercevision_domain.messaging import OutboxEvent
+from commercevision_domain.workflow.errors import ApprovalConflictError
 from commercevision_object_storage import (
     build_object_storage,
     close_object_storage,
@@ -226,6 +229,7 @@ class WorkerRuntime:
     collection_rebuild_runner: CollectionRebuildRunner | None = None
     brand_profile_invalidation: BrandProfileInvalidationPort | None = None
     lifecycle: DurableNodeLifecycle | None = None
+    workflow_service: WorkflowApplicationService | None = None
     telemetry: Phase2Telemetry = field(default_factory=Phase2Telemetry)
 
     @classmethod
@@ -517,6 +521,7 @@ class WorkerRuntime:
             image_vector_index=image_vector_index,
             collection_rebuild_runner=collection_rebuild_runner,
             lifecycle=lifecycle,
+            workflow_service=WorkflowApplicationService(uow_factory=cast(Any, uow_factory)),
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
@@ -866,6 +871,7 @@ class WorkerRuntime:
         resume_payload: dict[str, Any] | None = None
         continuation: ProductBriefContinuation | None = None
         product_brief_recovery: tuple[str, int] | None = None
+        trusted_creative_plan_version_id: str | None = None
         preclaimed_step_id: str | None = None
         preclaimed_lease_token: str | None = None
         payload_workflow_id: str
@@ -874,16 +880,35 @@ class WorkerRuntime:
             if not isinstance(validated, WorkflowResumeRequestedPayload):
                 raise TypeError("workflow resume contract returned an unexpected payload")
             payload_workflow_id = validated.workflow_id
-            if validated.approval_type == ApprovalType.PRODUCT_BRIEF:
+            if validated.resulting_workflow_version != event.envelope.aggregate_version:
+                raise EventRoutingError(
+                    "Workflow approval version does not match its Outbox envelope",
+                    reason="workflow_resume_mismatch",
+                )
+            if validated.approval_type == ApprovalType.CREATIVE_PLAN:
+                workflows = self.workflow_service or WorkflowApplicationService(
+                    uow_factory=cast(
+                        Any,
+                        lambda: SqlAlchemyUnitOfWork(self.database.session_factory),
+                    )
+                )
+                try:
+                    plan_claim = workflows.validate_creative_plan_resume_claim(
+                        workspace_id=event.workspace_id or "",
+                        payload=validated,
+                    )
+                except (ApprovalConflictError, NotFoundError, ValueError) as exc:
+                    raise EventRoutingError(
+                        "Creative Plan continuation does not match MySQL approval authority",
+                        reason="creative_plan_resume_mismatch",
+                    ) from exc
+                trusted_creative_plan_version_id = plan_claim.plan.id
+                resume_payload = validated.model_dump(mode="json")
+            elif validated.approval_type == ApprovalType.PRODUCT_BRIEF:
                 if validated.decision.value != "APPROVE":
                     raise EventRoutingError(
                         "ProductBrief continuation requires an APPROVE decision",
                         reason="product_brief_approval_mismatch",
-                    )
-                if validated.resulting_workflow_version != event.envelope.aggregate_version:
-                    raise EventRoutingError(
-                        "ProductBrief approval version does not match its Outbox envelope",
-                        reason="product_brief_resume_mismatch",
                     )
                 continuation = ProductBriefContinuation(
                     workspace_id=event.workspace_id or "",
@@ -1030,6 +1055,7 @@ class WorkerRuntime:
             self.agent.run(
                 initial_state=initial_state,
                 resume_payload=resume_payload,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
                 preclaimed_step_id=preclaimed_step_id,
                 preclaimed_lease_token=preclaimed_lease_token,
             )
@@ -1045,6 +1071,11 @@ class WorkerRuntime:
             return
         except ProductBriefContinuationAuthorityError as exc:
             raise EventRoutingError(str(exc), reason=exc.reason) from exc
+        except ResumeCheckpointConflictError as exc:
+            raise EventRoutingError(
+                "Workflow continuation does not match one durable checkpoint generation",
+                reason="workflow_resume_checkpoint_mismatch",
+            ) from exc
         except Exception:
             if self._workflow_outcome_was_durably_recorded(event):
                 return

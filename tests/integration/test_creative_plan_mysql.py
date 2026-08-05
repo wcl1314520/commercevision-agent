@@ -18,6 +18,7 @@ from commercevision_contracts import (
     CreativePlanCreateRequestV1,
     CreativePlanRevisionRequestV1,
 )
+from commercevision_contracts.events import WorkflowResumeRequestedPayload
 from commercevision_domain import (
     ApprovalDecision,
     ApprovalType,
@@ -1273,6 +1274,104 @@ def test_real_mysql_stale_plan_approval_has_no_side_effects(integration_database
         assert session.scalar(select(func.count()).select_from(OutboxEventModel)) == 1
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("approval_id", "019b0000-0000-7000-8000-000000000799"),
+        ("decision", ApprovalDecision.REJECT),
+        ("expected_workflow_version", 7),
+        ("resulting_workflow_version", 10),
+        ("subject_id", "019b0000-0000-7000-8000-000000000799"),
+        ("subject_version", 2),
+    ],
+)
+def test_real_mysql_plan_resume_revalidates_every_approval_fact(
+    integration_database,
+    field: str,
+    replacement: object,
+) -> None:
+    fixture, _, current = _seed_review_plan(
+        integration_database,
+        with_revision=False,
+    )
+    workflows = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    approved = workflows.approve(
+        workflow_id=WORKFLOW_ID,
+        workspace_id=fixture.workspace_id,
+        actor_id="creative-reviewer",
+        approval_type=ApprovalType.CREATIVE_PLAN,
+        request=ApprovalRequest(
+            expected_workflow_version=8,
+            subject_id=PLAN_ID,
+            subject_version=current.version.version_number,
+            decision=ApprovalDecision.APPROVE,
+        ),
+        idempotency_key="exact-plan-resume-approval-001",
+        trace_id="trace-exact-plan-resume",
+    )
+    event = workflows.events(
+        workflow_id=WORKFLOW_ID,
+        workspace_id=fixture.workspace_id,
+    )[-1]
+    payload = WorkflowResumeRequestedPayload.model_validate(event.payload)
+
+    claim = workflows.validate_creative_plan_resume_claim(
+        workspace_id=fixture.workspace_id,
+        payload=payload,
+    )
+
+    assert claim.workflow_version == approved.version
+    assert claim.plan == current.version
+    assert claim.approval.id == approved.approvals[0].id
+    with pytest.raises(ApprovalConflictError, match="exact Creative Plan approval"):
+        workflows.validate_creative_plan_resume_claim(
+            workspace_id=fixture.workspace_id,
+            payload=payload.model_copy(update={field: replacement}),
+        )
+
+
+def test_real_mysql_retention_expiry_prevents_plan_resume(integration_database) -> None:
+    fixture, _, current = _seed_review_plan(
+        integration_database,
+        with_revision=False,
+    )
+    workflows = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    workflows.approve(
+        workflow_id=WORKFLOW_ID,
+        workspace_id=fixture.workspace_id,
+        actor_id="creative-reviewer",
+        approval_type=ApprovalType.CREATIVE_PLAN,
+        request=ApprovalRequest(
+            expected_workflow_version=8,
+            subject_id=PLAN_ID,
+            subject_version=current.version.version_number,
+            decision=ApprovalDecision.APPROVE,
+        ),
+        idempotency_key="retention-plan-resume-approval-001",
+        trace_id="trace-retention-plan-resume",
+    )
+    payload = WorkflowResumeRequestedPayload.model_validate(
+        workflows.events(
+            workflow_id=WORKFLOW_ID,
+            workspace_id=fixture.workspace_id,
+        )[-1].payload
+    )
+    with integration_database.session_factory.begin() as session:
+        workflow = session.get(WorkflowModel, WORKFLOW_ID)
+        assert workflow is not None
+        workflow.retention_status = "EXPIRING"
+
+    with pytest.raises(ApprovalConflictError, match="exact Creative Plan approval"):
+        workflows.validate_creative_plan_resume_claim(
+            workspace_id=fixture.workspace_id,
+            payload=payload,
+        )
+
+
 def test_real_mysql_rejected_plan_requires_a_later_version_before_approval(
     integration_database,
 ) -> None:
@@ -1333,6 +1432,67 @@ def test_real_mysql_rejected_plan_requires_a_later_version_before_approval(
             ),
             idempotency_key="rejected-plan-approval-001",
             trace_id="trace-rejected-plan-approval",
+        )
+
+    with integration_database.session_factory() as session:
+        assert before == {
+            "approvals": session.scalar(select(func.count()).select_from(ApprovalModel)),
+            "audits": session.scalar(select(func.count()).select_from(AuditEventModel)),
+            "idempotency": session.scalar(select(func.count()).select_from(IdempotencyKeyModel)),
+            "outbox": session.scalar(select(func.count()).select_from(OutboxEventModel)),
+        }
+
+
+def test_real_mysql_plan_rejection_limit_is_bounded_before_side_effects(
+    integration_database,
+) -> None:
+    fixture, _, current = _seed_review_plan(
+        integration_database,
+        with_revision=False,
+    )
+    with integration_database.session_factory.begin() as session:
+        for index in range(10):
+            session.add(
+                ApprovalModel(
+                    id=f"019b0000-0000-7000-8000-{index + 900:012d}",
+                    workflow_id=WORKFLOW_ID,
+                    approval_type=ApprovalType.CREATIVE_PLAN.value,
+                    subject_id=PLAN_ID,
+                    subject_version=index + 100,
+                    decision=ApprovalDecision.REJECT.value,
+                    reason_code="PLAN_NEEDS_REVISION",
+                    comment_ref=None,
+                    approved_by="creative-reviewer",
+                    expected_workflow_version=index + 100,
+                    created_at=NOW + timedelta(seconds=index),
+                )
+            )
+    workflows = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    with integration_database.session_factory() as session:
+        before = {
+            "approvals": session.scalar(select(func.count()).select_from(ApprovalModel)),
+            "audits": session.scalar(select(func.count()).select_from(AuditEventModel)),
+            "idempotency": session.scalar(select(func.count()).select_from(IdempotencyKeyModel)),
+            "outbox": session.scalar(select(func.count()).select_from(OutboxEventModel)),
+        }
+
+    with pytest.raises(ApprovalConflictError, match="rejection limit"):
+        workflows.approve(
+            workflow_id=WORKFLOW_ID,
+            workspace_id=fixture.workspace_id,
+            actor_id="creative-reviewer",
+            approval_type=ApprovalType.CREATIVE_PLAN,
+            request=ApprovalRequest(
+                expected_workflow_version=8,
+                subject_id=PLAN_ID,
+                subject_version=current.version.version_number,
+                decision=ApprovalDecision.REJECT,
+                reason_code="PLAN_NEEDS_REVISION",
+            ),
+            idempotency_key="bounded-plan-rejection-001",
+            trace_id="trace-bounded-plan-rejection",
         )
 
     with integration_database.session_factory() as session:

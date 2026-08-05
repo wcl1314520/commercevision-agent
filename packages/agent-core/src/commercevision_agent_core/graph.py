@@ -48,6 +48,10 @@ _CHECKPOINT_NAMESPACE_SEPARATOR = "|"
 _THREAD_WIDE_HISTORY_KEY = "__commercevision_thread_wide_checkpoint_history"
 
 
+class ResumeCheckpointConflictError(ValueError):
+    """The resume facts cannot select one exact durable checkpoint generation."""
+
+
 @dataclass(frozen=True, slots=True)
 class _ProductBriefContinuation:
     workspace_id: str
@@ -563,6 +567,9 @@ class FixtureNodes:
                 product_brief_version_number=state.product_brief_version_number,
                 actor_id=state.actor_id,
                 expected_workflow_version=claim.workflow_version,
+                plan_iteration=state.plan_iteration,
+                prior_plan_version_id=state.creative_plan_version_id,
+                prior_plan_version=state.creative_plan_version,
                 trace_id=state.trace_id,
                 idempotency_key=f"fixture-plan:{claim.step_id}",
             )
@@ -606,6 +613,12 @@ class FixtureNodes:
 
     def approve_plan(self, raw_state: FixtureAgentState) -> StateUpdate:
         state = _state_values(raw_state)
+        if (
+            state.creative_plan_ref is None
+            or state.creative_plan_version_id is None
+            or state.creative_plan_version is None
+        ):
+            raise ValueError("plan approval requires an exact Creative Plan version")
         wait = self.lifecycle.begin_human_wait(
             workflow_id=state.workflow_id,
             expected_workflow_version=state.workflow_version,
@@ -624,7 +637,8 @@ class FixtureNodes:
                     "workflow_id": state.workflow_id,
                     "expected_workflow_version": wait.workflow_version,
                     "subject_id": state.creative_plan_ref,
-                    "subject_version": state.plan_iteration + 1,
+                    "subject_version_id": state.creative_plan_version_id,
+                    "subject_version": state.creative_plan_version,
                     "allowed_actions": [
                         ApprovalDecision.APPROVE.value,
                         ApprovalDecision.REJECT.value,
@@ -657,7 +671,6 @@ class FixtureNodes:
         return {
             "plan_iteration": state.plan_iteration + 1,
             "plan_decision": None,
-            "creative_plan_ref": None,
             "current_node": "create_plan",
         }
 
@@ -1036,27 +1049,117 @@ class FixtureAgentRuntime:
         *,
         initial_state: FixtureAgentState,
         resume_payload: dict[str, Any] | None = None,
+        trusted_creative_plan_version_id: str | None = None,
         preclaimed_step_id: str | None = None,
         preclaimed_lease_token: str | None = None,
     ) -> dict[str, Any]:
-        if preclaimed_step_id is None and preclaimed_lease_token is not None:
-            raise ValueError("preclaimed lease token requires a step identity")
-        preclaimed_authority = (
-            _PreclaimedNodeAuthority(
-                step_id=preclaimed_step_id,
-                lease_token=preclaimed_lease_token,
-            )
-            if preclaimed_step_id is not None
-            else None
+        self._validate_trusted_plan_resume(
+            resume_payload=resume_payload,
+            trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+        )
+        preclaimed_authority = self._preclaimed_authority(
+            step_id=preclaimed_step_id,
+            lease_token=preclaimed_lease_token,
         )
         checkpoint_namespace = (
             self._resume_checkpoint_namespace(
                 initial_state=initial_state,
                 resume_payload=resume_payload,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
             )
             if resume_payload is not None
             else _checkpoint_namespace(initial_state)
         )
+        config, lookup_config = self._runtime_configs(
+            initial_state=initial_state,
+            checkpoint_namespace=checkpoint_namespace,
+        )
+        existing = self._checkpointer.get_tuple(lookup_config)
+        input_value = self._runtime_input(
+            initial_state=initial_state,
+            resume_payload=resume_payload,
+            trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+            existing=existing,
+        )
+        self._validate_initial_preclaim(
+            initial_state=initial_state,
+            preclaimed_authority=preclaimed_authority,
+            existing=existing,
+        )
+        authority_token = _PRECLAIMED_NODE_AUTHORITY.set(preclaimed_authority)
+        try:
+            result = self._graph.invoke(input_value, config=config)
+        finally:
+            _PRECLAIMED_NODE_AUTHORITY.reset(authority_token)
+        return cast(dict[str, Any], result)
+
+    async def arun(
+        self,
+        *,
+        initial_state: FixtureAgentState,
+        resume_payload: dict[str, Any] | None = None,
+        trusted_creative_plan_version_id: str | None = None,
+        preclaimed_step_id: str | None = None,
+        preclaimed_lease_token: str | None = None,
+    ) -> dict[str, Any]:
+        self._validate_trusted_plan_resume(
+            resume_payload=resume_payload,
+            trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+        )
+        preclaimed_authority = self._preclaimed_authority(
+            step_id=preclaimed_step_id,
+            lease_token=preclaimed_lease_token,
+        )
+        checkpoint_namespace = (
+            await self._aresume_checkpoint_namespace(
+                initial_state=initial_state,
+                resume_payload=resume_payload,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+            )
+            if resume_payload is not None
+            else _checkpoint_namespace(initial_state)
+        )
+        config, lookup_config = self._runtime_configs(
+            initial_state=initial_state,
+            checkpoint_namespace=checkpoint_namespace,
+        )
+        existing = await self._checkpointer.aget_tuple(lookup_config)
+        input_value = self._runtime_input(
+            initial_state=initial_state,
+            resume_payload=resume_payload,
+            trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+            existing=existing,
+        )
+        self._validate_initial_preclaim(
+            initial_state=initial_state,
+            preclaimed_authority=preclaimed_authority,
+            existing=existing,
+        )
+        authority_token = _PRECLAIMED_NODE_AUTHORITY.set(preclaimed_authority)
+        try:
+            result = await self._graph.ainvoke(input_value, config=config)
+        finally:
+            _PRECLAIMED_NODE_AUTHORITY.reset(authority_token)
+        return cast(dict[str, Any], result)
+
+    @staticmethod
+    def _preclaimed_authority(
+        *,
+        step_id: str | None,
+        lease_token: str | None,
+    ) -> _PreclaimedNodeAuthority | None:
+        if step_id is None:
+            if lease_token is not None:
+                raise ValueError("preclaimed lease token requires a step identity")
+            return None
+        return _PreclaimedNodeAuthority(step_id=step_id, lease_token=lease_token)
+
+    @staticmethod
+    def _runtime_configs(
+        *,
+        initial_state: FixtureAgentState,
+        checkpoint_namespace: str,
+    ) -> tuple[RunnableConfig, RunnableConfig]:
         configurable: dict[str, Any] = {
             "thread_id": initial_state.workflow_id,
             "checkpoint_ns": "",
@@ -1083,39 +1186,55 @@ class FixtureAgentRuntime:
                 },
             },
         )
-        existing = self._checkpointer.get_tuple(lookup_config)
+        return config, lookup_config
+
+    @classmethod
+    def _runtime_input(
+        cls,
+        *,
+        initial_state: FixtureAgentState,
+        resume_payload: dict[str, Any] | None,
+        trusted_creative_plan_version_id: str | None,
+        existing: CheckpointTuple | None,
+    ) -> FixtureAgentState | Command[Any] | None:
         if resume_payload is not None:
-            input_value: FixtureAgentState | Command[Any] | None = Command(resume=resume_payload)
-        elif existing is None:
-            input_value = initial_state
-        else:
-            input_value = None
-        if initial_state.initial_entry_reason == "PRODUCT_BRIEF_CONFIRMED":
-            if (
-                preclaimed_authority is None
-                or initial_state.initial_step_id != preclaimed_authority.step_id
-            ):
-                raise ValueError("confirmed ProductBrief runtime preclaim is inconsistent")
-            if existing is None and preclaimed_authority.lease_token is None:
-                raise ValueError("new ProductBrief checkpoint generation requires a live lease")
-        authority_token = _PRECLAIMED_NODE_AUTHORITY.set(preclaimed_authority)
-        try:
-            result = self._graph.invoke(input_value, config=config)
-        finally:
-            _PRECLAIMED_NODE_AUTHORITY.reset(authority_token)
-        return cast(dict[str, Any], result)
+            return cls._resume_command(
+                resume_payload=resume_payload,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+            )
+        return initial_state if existing is None else None
+
+    @staticmethod
+    def _validate_initial_preclaim(
+        *,
+        initial_state: FixtureAgentState,
+        preclaimed_authority: _PreclaimedNodeAuthority | None,
+        existing: CheckpointTuple | None,
+    ) -> None:
+        if initial_state.initial_entry_reason != "PRODUCT_BRIEF_CONFIRMED":
+            return
+        if (
+            preclaimed_authority is None
+            or initial_state.initial_step_id != preclaimed_authority.step_id
+        ):
+            raise ValueError("confirmed ProductBrief runtime preclaim is inconsistent")
+        if existing is None and preclaimed_authority.lease_token is None:
+            raise ValueError("new ProductBrief checkpoint generation requires a live lease")
 
     def _resume_checkpoint_namespace(
         self,
         *,
         initial_state: FixtureAgentState,
         resume_payload: dict[str, Any],
+        trusted_creative_plan_version_id: str | None = None,
     ) -> str:
         payload = ResumePayload.model_validate(resume_payload)
         if payload.workflow_id != initial_state.workflow_id:
-            raise ValueError("resume payload belongs to a different workflow")
+            raise ResumeCheckpointConflictError("resume payload belongs to a different workflow")
         if payload.resulting_workflow_version != initial_state.workflow_version:
-            raise ValueError("resume payload does not match the current workflow version")
+            raise ResumeCheckpointConflictError(
+                "resume payload does not match the current workflow version"
+            )
 
         latest_namespaces: set[str] = set()
         matching_namespaces: list[str] = []
@@ -1132,13 +1251,58 @@ class FixtureAgentRuntime:
                 saved=saved,
                 initial_state=initial_state,
                 payload=payload,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
             ):
                 matching_namespaces.append(namespace)
 
         if not matching_namespaces:
-            raise ValueError("resume payload has no matching durable checkpoint")
+            raise ResumeCheckpointConflictError("resume payload has no matching durable checkpoint")
         if len(matching_namespaces) > 1:
-            raise ValueError("resume payload matches multiple checkpoint generations")
+            raise ResumeCheckpointConflictError(
+                "resume payload matches multiple checkpoint generations"
+            )
+        return matching_namespaces[0]
+
+    async def _aresume_checkpoint_namespace(
+        self,
+        *,
+        initial_state: FixtureAgentState,
+        resume_payload: dict[str, Any],
+        trusted_creative_plan_version_id: str | None = None,
+    ) -> str:
+        payload = ResumePayload.model_validate(resume_payload)
+        if payload.workflow_id != initial_state.workflow_id:
+            raise ResumeCheckpointConflictError("resume payload belongs to a different workflow")
+        if payload.resulting_workflow_version != initial_state.workflow_version:
+            raise ResumeCheckpointConflictError(
+                "resume payload does not match the current workflow version"
+            )
+
+        latest_namespaces: set[str] = set()
+        matching_namespaces: list[str] = []
+        thread_config = cast(
+            RunnableConfig,
+            {"configurable": {"thread_id": initial_state.workflow_id}},
+        )
+        async for saved in self._checkpointer.alist(thread_config):
+            namespace = str(saved.config["configurable"].get("checkpoint_ns", ""))
+            if namespace in latest_namespaces or not self._is_root_checkpoint_namespace(namespace):
+                continue
+            latest_namespaces.add(namespace)
+            if self._checkpoint_matches_resume(
+                saved=saved,
+                initial_state=initial_state,
+                payload=payload,
+                trusted_creative_plan_version_id=trusted_creative_plan_version_id,
+            ):
+                matching_namespaces.append(namespace)
+
+        if not matching_namespaces:
+            raise ResumeCheckpointConflictError("resume payload has no matching durable checkpoint")
+        if len(matching_namespaces) > 1:
+            raise ResumeCheckpointConflictError(
+                "resume payload matches multiple checkpoint generations"
+            )
         return matching_namespaces[0]
 
     @staticmethod
@@ -1154,6 +1318,7 @@ class FixtureAgentRuntime:
         saved: CheckpointTuple,
         initial_state: FixtureAgentState,
         payload: ResumePayload,
+        trusted_creative_plan_version_id: str | None = None,
     ) -> bool:
         values = saved.checkpoint.get("channel_values", {})
         if (
@@ -1163,9 +1328,15 @@ class FixtureAgentRuntime:
         ):
             return False
         if payload.approval_type == ApprovalType.CREATIVE_PLAN:
-            return (
-                values.get("creative_plan_ref") == payload.subject_id
-                and values.get("plan_iteration") == payload.subject_version - 1
+            saved_version = values.get("creative_plan_version")
+            return values.get("creative_plan_ref") == payload.subject_id and (
+                saved_version == payload.subject_version
+                or (
+                    trusted_creative_plan_version_id is not None
+                    and isinstance(saved_version, int)
+                    and not isinstance(saved_version, bool)
+                    and saved_version < payload.subject_version
+                )
             )
         if payload.approval_type == ApprovalType.RESULTS:
             return (
@@ -1175,4 +1346,37 @@ class FixtureAgentRuntime:
         return (
             values.get("product_brief_version_id") == payload.subject_id
             and values.get("product_brief_version_number") == payload.subject_version
+        )
+
+    @staticmethod
+    def _validate_trusted_plan_resume(
+        *,
+        resume_payload: dict[str, Any] | None,
+        trusted_creative_plan_version_id: str | None,
+    ) -> None:
+        if trusted_creative_plan_version_id is None:
+            return
+        if not trusted_creative_plan_version_id:
+            raise ValueError("trusted Creative Plan version identity cannot be empty")
+        if resume_payload is None:
+            raise ValueError("trusted Creative Plan version requires a resume payload")
+        payload = ResumePayload.model_validate(resume_payload)
+        if payload.approval_type is not ApprovalType.CREATIVE_PLAN:
+            raise ValueError("trusted Creative Plan version requires a Plan approval")
+
+    @staticmethod
+    def _resume_command(
+        *,
+        resume_payload: dict[str, Any],
+        trusted_creative_plan_version_id: str | None,
+    ) -> Command[Any]:
+        if trusted_creative_plan_version_id is None:
+            return Command(resume=resume_payload)
+        payload = ResumePayload.model_validate(resume_payload)
+        return Command(
+            resume=resume_payload,
+            update={
+                "creative_plan_version_id": trusted_creative_plan_version_id,
+                "creative_plan_version": payload.subject_version,
+            },
         )

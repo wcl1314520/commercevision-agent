@@ -27,6 +27,8 @@ class FixtureAgentState(BaseModel):
     initial_step_id: str | None = None
     retrieved_asset_refs: list[str] = Field(default_factory=list)
     creative_plan_ref: str | None = None
+    creative_plan_version_id: str | None = None
+    creative_plan_version: int | None = Field(default=None, ge=1)
     plan_iteration: int = Field(default=0, ge=0, le=10)
     plan_decision: str | None = None
     generation_iteration: int = Field(default=0, ge=0, le=10)
@@ -76,4 +78,13 @@ class FixtureAgentState(BaseModel):
             )
         ):
             raise ValueError("workflow-created entry cannot carry ProductBrief authority")
+        plan_identity = (
+            self.creative_plan_ref,
+            self.creative_plan_version_id,
+            self.creative_plan_version,
+        )
+        if any(value is not None for value in plan_identity) and not all(
+            value is not None for value in plan_identity
+        ):
+            raise ValueError("Creative Plan continuation identity must be complete")
         return self

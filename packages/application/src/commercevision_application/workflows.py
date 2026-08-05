@@ -48,10 +48,22 @@ from commercevision_domain.workflow.errors import (
 from .ports import UnitOfWorkFactory, UnitOfWorkPort
 from .projections import workflow_response
 
+_MAX_CREATIVE_PLAN_REJECTIONS = 10
+
 
 @dataclass(frozen=True, slots=True)
 class CreativePlanExecutionClaim:
     """MySQL-revalidated authority for one approved Creative Plan version."""
+
+    workflow_version: int
+    plan: CreativePlanVersion
+    approval: Approval
+    retain_until: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CreativePlanResumeClaim:
+    """MySQL-revalidated continuation for one exact Plan Approval."""
 
     workflow_version: int
     plan: CreativePlanVersion
@@ -445,16 +457,28 @@ class WorkflowApplicationService:
             raise CreativePlanApprovalSubjectConflictError(
                 "approval subject is not the authoritative current Creative Plan"
             )
+        approvals = uow.approvals.list_for_workflow(workflow.id)
         if decision is ApprovalDecision.APPROVE and any(
             approval.approval_type is ApprovalType.CREATIVE_PLAN
             and approval.subject_id == subject_id
             and approval.subject_version == subject_version
             and approval.decision is ApprovalDecision.REJECT
-            for approval in uow.approvals.list_for_workflow(workflow.id)
+            for approval in approvals
         ):
             raise CreativePlanApprovalRejectedVersionError(
                 "rejected Creative Plan requires a later Creative Plan version"
             )
+        if (
+            decision is ApprovalDecision.REJECT
+            and sum(
+                approval.approval_type is ApprovalType.CREATIVE_PLAN
+                and approval.subject_id == subject_id
+                and approval.decision is ApprovalDecision.REJECT
+                for approval in approvals
+            )
+            >= _MAX_CREATIVE_PLAN_REJECTIONS
+        ):
+            raise ApprovalConflictError("Creative Plan rejection limit has been reached")
         head, version = current
         if (
             version.version_number != subject_version
@@ -484,6 +508,61 @@ class WorkflowApplicationService:
     ) -> CreativePlanExecutionClaim:
         """Load execution authority from current MySQL facts, never checkpoint state."""
 
+        claim = self._validate_creative_plan_approval_claim(
+            workspace_id=workspace_id,
+            workflow_id=workflow_id,
+            creative_plan_id=creative_plan_id,
+            creative_plan_version=creative_plan_version,
+            approval_id=approval_id,
+            expected_workflow_version=None,
+            resulting_workflow_version=None,
+            decision=ApprovalDecision.APPROVE,
+            conflict_message="execution claim does not match the exact approved Creative Plan",
+        )
+        return CreativePlanExecutionClaim(
+            workflow_version=claim.workflow_version,
+            plan=claim.plan,
+            approval=claim.approval,
+            retain_until=claim.retain_until,
+        )
+
+    def validate_creative_plan_resume_claim(
+        self,
+        *,
+        workspace_id: str,
+        payload: WorkflowResumeRequestedPayload,
+    ) -> CreativePlanResumeClaim:
+        """Revalidate an untrusted graph continuation against current MySQL facts."""
+
+        if payload.approval_type is not ApprovalType.CREATIVE_PLAN:
+            raise ApprovalConflictError(
+                "resume claim does not match the exact Creative Plan approval"
+            )
+        return self._validate_creative_plan_approval_claim(
+            workspace_id=workspace_id,
+            workflow_id=payload.workflow_id,
+            creative_plan_id=payload.subject_id,
+            creative_plan_version=payload.subject_version,
+            approval_id=payload.approval_id,
+            expected_workflow_version=payload.expected_workflow_version,
+            resulting_workflow_version=payload.resulting_workflow_version,
+            decision=payload.decision,
+            conflict_message="resume claim does not match the exact Creative Plan approval",
+        )
+
+    def _validate_creative_plan_approval_claim(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        creative_plan_id: str,
+        creative_plan_version: int,
+        approval_id: str,
+        expected_workflow_version: int | None,
+        resulting_workflow_version: int | None,
+        decision: ApprovalDecision,
+        conflict_message: str,
+    ) -> CreativePlanResumeClaim:
         validate_workspace_id(workspace_id)
         with self._uow_factory() as uow:
             workflow = uow.workflows.get(
@@ -501,16 +580,32 @@ class WorkflowApplicationService:
             )
             approval = uow.approvals.get(approval_id, workflow_id=workflow_id)
             if current is None or approval is None:
-                raise ApprovalConflictError(
-                    "execution claim does not match the exact approved Creative Plan"
-                )
+                raise ApprovalConflictError(conflict_message)
             head, plan = current
+            expected_version = (
+                approval.expected_workflow_version
+                if expected_workflow_version is None
+                else expected_workflow_version
+            )
+            resulting_version = (
+                workflow.version
+                if resulting_workflow_version is None
+                else resulting_workflow_version
+            )
+            expected_status = (
+                WorkflowStatus.GENERATING
+                if decision is ApprovalDecision.APPROVE
+                else WorkflowStatus.PLANNING
+            )
             if (
-                workflow.status is not WorkflowStatus.GENERATING
+                workflow.status is not expected_status
                 or workflow.retention_status is not RetentionStatus.ACTIVE
-                or workflow.version != approval.expected_workflow_version + 1
+                or workflow.current_node != "approve_plan"
+                or workflow.version != resulting_version
+                or resulting_version != expected_version + 1
+                or approval.expected_workflow_version != expected_version
                 or approval.approval_type is not ApprovalType.CREATIVE_PLAN
-                or approval.decision is not ApprovalDecision.APPROVE
+                or approval.decision is not decision
                 or approval.subject_id != creative_plan_id
                 or approval.subject_version != creative_plan_version
                 or plan.version_number != creative_plan_version
@@ -519,10 +614,8 @@ class WorkflowApplicationService:
                 or now >= workflow.expires_at
                 or now >= head.retain_until
             ):
-                raise ApprovalConflictError(
-                    "execution claim does not match the exact approved Creative Plan"
-                )
-            return CreativePlanExecutionClaim(
+                raise ApprovalConflictError(conflict_message)
+            return CreativePlanResumeClaim(
                 workflow_version=workflow.version,
                 plan=plan,
                 approval=approval,

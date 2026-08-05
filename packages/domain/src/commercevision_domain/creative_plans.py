@@ -555,6 +555,28 @@ class CreativePlanVersion:
             now=now,
         )
 
+    def revise_by_agent(
+        self,
+        *,
+        payload: CreativePlanPayload,
+        provenance: CreativePlanProvenance,
+        actor_id: str,
+        now: datetime | None = None,
+    ) -> CreativePlanVersion:
+        return type(self).create(
+            workspace_id=self.workspace_id,
+            workflow_id=self.workflow_id,
+            creative_plan_id=self.creative_plan_id,
+            version_number=self.version_number + 1,
+            supersedes_version_id=self.id,
+            source=CreativePlanSource.AGENT,
+            payload=payload,
+            provenance=provenance,
+            actor_id=actor_id,
+            revision_reason=None,
+            now=now,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CreativePlanHead:

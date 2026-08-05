@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -11,13 +12,17 @@ from commercevision_application import (
     PlanningContextApplicationService,
     PlanningContextExactReference,
     PromptRegistryApplicationService,
+    WorkflowApplicationService,
 )
 from commercevision_contracts import (
+    ApprovalRequest,
     PromptRevisionCreateRequestV1,
     PromptRevisionTransitionRequestV1,
     PromptTemplateVariableV1,
 )
 from commercevision_domain import (
+    ApprovalDecision,
+    ApprovalType,
     NotFoundError,
     PlanningContextPolicy,
     PlanningContextSourceKind,
@@ -29,6 +34,7 @@ from commercevision_persistence import (
     SqlAlchemyCreativePlanUnitOfWork,
     SqlAlchemyPlanningContextSnapshotStore,
     SqlAlchemyPromptRegistryUnitOfWork,
+    SqlAlchemyUnitOfWork,
 )
 from sqlalchemy import text
 
@@ -419,3 +425,72 @@ def test_durable_fixture_planner_writes_one_replay_safe_authoritative_version(
     assert "must-not-leak" not in public_event_data
     assert "Premium vanity studio" not in public_event_data
     assert '"directions"' not in public_event_data
+
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE workflows SET status = 'AWAITING_PLAN_APPROVAL', "
+                "current_node = 'approve_plan', version = 8 "
+                "WHERE workspace_id = :workspace AND id = :workflow"
+            ),
+            {"workspace": WORKSPACE_ID, "workflow": workflow_id},
+        )
+    workflows = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    rejected = workflows.approve(
+        workflow_id=workflow_id,
+        workspace_id=WORKSPACE_ID,
+        actor_id="creative-reviewer",
+        approval_type=ApprovalType.CREATIVE_PLAN,
+        request=ApprovalRequest(
+            expected_workflow_version=8,
+            subject_id=first.creative_plan_id,
+            subject_version=first.version_number,
+            decision=ApprovalDecision.REJECT,
+            reason_code="PLAN_NEEDS_REVISION",
+        ),
+        idempotency_key="reject-durable-fixture-plan-001",
+        trace_id="trace-reject-durable-fixture-plan",
+    )
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE workflows SET current_node = 'create_plan', version = :version "
+                "WHERE workspace_id = :workspace AND id = :workflow"
+            ),
+            {
+                "version": rejected.version + 1,
+                "workspace": WORKSPACE_ID,
+                "workflow": workflow_id,
+            },
+        )
+    revision_command = replace(
+        command,
+        plan_iteration=1,
+        prior_plan_version_id=first.version_id,
+        prior_plan_version=first.version_number,
+        expected_workflow_version=rejected.version + 1,
+        idempotency_key="durable-fixture-plan-step-002",
+    )
+
+    second = planner.create_plan(revision_command)
+    replayed_second = planner.create_plan(revision_command)
+
+    assert replayed_second == second
+    assert second.creative_plan_id == first.creative_plan_id
+    assert second.version_number == 2
+    with integration_database.engine.connect() as connection:
+        versions = (
+            connection.execute(
+                text(
+                    "SELECT version_number, supersedes_version_id, source "
+                    "FROM creative_plan_versions ORDER BY version_number"
+                )
+            )
+            .mappings()
+            .all()
+        )
+    assert [version["version_number"] for version in versions] == [1, 2]
+    assert versions[1]["supersedes_version_id"] == first.version_id
+    assert versions[1]["source"] == "AGENT"

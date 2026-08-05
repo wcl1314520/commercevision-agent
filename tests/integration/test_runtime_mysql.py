@@ -22,7 +22,11 @@ from commercevision_persistence import (
     SqlAlchemyUnitOfWork,
     is_unit_of_work_active,
 )
-from commercevision_persistence.models import InboxMessageModel, OutboxEventModel
+from commercevision_persistence.models import (
+    DeadLetterMessageModel,
+    InboxMessageModel,
+    OutboxEventModel,
+)
 from commercevision_scheduler import runtime as scheduler_runtime
 from commercevision_tool_runtime import (
     FixtureImageTool,
@@ -32,7 +36,7 @@ from commercevision_tool_runtime import (
 )
 from commercevision_tool_runtime.policy import ToolPolicy
 from commercevision_worker.runtime import WorkerRuntime
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 pytestmark = pytest.mark.integration
 worker_module = import_module("commercevision_worker.celery_app")
@@ -830,6 +834,107 @@ def test_worker_restart_duplicate_delivery_and_human_resume(
     assert completed.result_data["export_ref"].startswith("fixture://exports/")
     assert plan_response.id == created.id
     assert result_response.id == created.id
+
+
+@pytest.mark.parametrize(
+    ("corruption", "expected_reason"),
+    [
+        ("approval", "creative_plan_resume_mismatch"),
+        ("checkpoint", "workflow_resume_checkpoint_mismatch"),
+    ],
+)
+def test_plan_resume_rejects_foreign_authority_or_missing_checkpoint(
+    integration_database,
+    integration_settings,
+    legacy_phase1_planner_node,
+    corruption: str,
+    expected_reason: str,
+) -> None:
+    service = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    created = service.create(
+        request=WorkflowCreateRequest(input_data={"fixture_config": {"count": 1}}),
+        workspace_id=f"integration-plan-resume-{corruption}",
+        actor_id="integration-user",
+        idempotency_key=f"plan-resume-{corruption}-create-0001",
+        trace_id=f"plan-resume-{corruption}-trace",
+    )
+    initial_event = service.events(
+        workflow_id=created.id,
+        workspace_id=created.workspace_id,
+    )[0]
+    first_worker = WorkerRuntime.build(
+        integration_settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
+    try:
+        assert first_worker.process_event(initial_event.event_id) == "processed"
+    finally:
+        first_worker.close()
+    waiting = service.get(workflow_id=created.id, workspace_id=created.workspace_id)
+    plan_step = next(step for step in waiting.steps if step.step_type.value == "CREATE_PLAN")
+    service.approve(
+        workflow_id=created.id,
+        workspace_id=created.workspace_id,
+        actor_id="integration-user",
+        approval_type=ApprovalType.CREATIVE_PLAN,
+        request=ApprovalRequest(
+            expected_workflow_version=waiting.version,
+            subject_id=plan_step.output_data["creative_plan_ref"],
+            subject_version=plan_step.output_data["creative_plan_version"],
+            decision=ApprovalDecision.APPROVE,
+        ),
+        idempotency_key=f"plan-resume-{corruption}-approve-0001",
+        trace_id=f"plan-resume-{corruption}-trace",
+    )
+    resume_event = next(
+        event
+        for event in service.events(
+            workflow_id=created.id,
+            workspace_id=created.workspace_id,
+        )
+        if event.event_type == EventType.WORKFLOW_RESUME_REQUESTED
+    )
+    if corruption == "approval":
+        with integration_database.session_factory.begin() as session:
+            persisted = session.get(OutboxEventModel, resume_event.event_id)
+            assert persisted is not None
+            persisted.payload_json = {
+                **persisted.payload_json,
+                "approval_id": "019b0000-0000-7000-8000-000000000799",
+            }
+    else:
+        with integration_database.engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM agent_checkpoint_writes WHERE thread_id = :workflow_id"),
+                {"workflow_id": created.id},
+            )
+            connection.execute(
+                text("DELETE FROM agent_checkpoints WHERE thread_id = :workflow_id"),
+                {"workflow_id": created.id},
+            )
+
+    restarted = WorkerRuntime.build(
+        integration_settings,
+        creative_plan_node=legacy_phase1_planner_node,
+    )
+    try:
+        assert restarted.process_event(resume_event.event_id) == "dead-lettered"
+    finally:
+        restarted.close()
+
+    current = service.get(workflow_id=created.id, workspace_id=created.workspace_id)
+    assert current.status.value == "GENERATING"
+    assert current.attempts == []
+    with integration_database.session_factory() as session:
+        dead_letter = session.scalar(
+            select(DeadLetterMessageModel).where(
+                DeadLetterMessageModel.message_id == resume_event.event_id
+            )
+        )
+    assert dead_letter is not None
+    assert dead_letter.reason == expected_reason
 
 
 def test_tool_execution_never_runs_inside_uow(integration_database) -> None:

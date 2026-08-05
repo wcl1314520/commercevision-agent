@@ -318,6 +318,27 @@ def test_human_revision_keeps_identity_lineage_and_prior_provenance() -> None:
     assert revision.revision_reason == "Give the package safer edge clearance"
 
 
+def test_agent_revision_advances_lineage_without_human_revision_metadata() -> None:
+    first = _agent_version()
+    revised_payload = CreativePlanPayload(
+        directions=(replace(first.payload.directions[0], scene="Second deterministic scene"),)
+    )
+
+    revision = first.revise_by_agent(
+        payload=revised_payload,
+        provenance=first.provenance,
+        actor_id="fixture-planner",
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert revision.source is CreativePlanSource.AGENT
+    assert revision.version_number == 2
+    assert revision.supersedes_version_id == first.id
+    assert revision.creative_plan_id == first.creative_plan_id
+    assert revision.payload == revised_payload
+    assert revision.revision_reason is None
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [

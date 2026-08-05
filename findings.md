@@ -766,3 +766,12 @@
 - 把生产 Worker composition 从 test-only Planner 升级为真实 Planner 后，所有断言 ProductBrief→Plan 成功的
   integration test 都必须显式发布 production Prompt；否则生产代码应按设计永久失败并把缺失 Prompt 写入 Durable
   Step。用隐式全局 seed 或恢复 legacy adapter 会掩盖真实依赖，目标测试显式 seed 才保持测试隔离与依赖可见性。
+- Plan Approval 的 checkpoint 版本不能替代 MySQL current Plan：用户可在 interrupt 后追加 USER v2，而 checkpoint
+  合法停在 v1。Worker 必须先从 MySQL 复核 exact Approval 与 current head，再通过运行时私有参数交付 v2 version ID；
+  checkpoint 选择只负责定位同一 Workflow/Plan wait，`Command.update` 才把已复核的 exact version 写入继续状态。
+- Reject loop 的业务上限与 Graph `plan_iteration <= 10` 必须同源：允许第 10 次 reject 后创建 v11，再在第 11 次
+  reject 的审批事务副作用前稳定冲突；计数绑定稳定 Creative Plan ID 的 append-only rejected approvals，不能只看
+  当前 version，也不能依赖可丢失 checkpoint 计数。
+- Resume payload 是不可信消息事实：即使 Contract 校验通过，仍需核对 Outbox aggregate version、Approval ID/type/
+  decision/subject/version、Workflow expected/resulting version/status/node、current Plan head 和 retention。checkpoint
+  不存在或匹配多个 generation 是独立稳定冲突，不能降级为新图入口或重跑副作用节点。

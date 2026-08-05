@@ -215,11 +215,29 @@ def test_durable_fixture_planner_composes_exact_authority_into_one_plan_write() 
             )
             return self.stored
 
+        def append_version(self, **kwargs):
+            calls["revision"] = kwargs
+            calls["revision_count"] = int(calls.get("revision_count", 0)) + 1
+            version = kwargs["version"]
+            assert self.stored is not None
+            self.stored = CreativePlanWriteResult(
+                head=replace(
+                    self.stored.head,
+                    current_version_id=version.id,
+                    current_version_number=version.version_number,
+                    version=self.stored.head.version + 1,
+                    updated_at=version.created_at,
+                ),
+                version=version,
+            )
+            return self.stored
+
+    plans = Plans()
     planner = DurableFixturePlanner(
         authority=Authority(),
         contexts=Contexts(),
         prompts=Prompts(),
-        plans=Plans(),
+        plans=plans,
     )
     command = DurableFixturePlannerCommand(
         workspace_id="planning-domain",
@@ -265,3 +283,42 @@ def test_durable_fixture_planner_composes_exact_authority_into_one_plan_write() 
     assert calls["plan"]["idempotency_key"] == "fixture-plan-step-001"
     assert calls["prompt_count"] == 1
     assert calls["plan_count"] == 1
+
+    revised = planner.create_plan(
+        replace(
+            command,
+            plan_iteration=1,
+            prior_plan_version_id=result.version_id,
+            prior_plan_version=1,
+            expected_workflow_version=9,
+            idempotency_key="fixture-plan-step-002",
+        )
+    )
+
+    assert revised.version_number == 2
+    assert revised.creative_plan_id == result.creative_plan_id
+    assert calls["revision_count"] == 1
+    assert calls["revision"]["expected_workflow_version"] == 9
+    assert calls["revision"]["expected_head_version"] == 1
+
+    assert plans.stored is not None
+    user_version = plans.stored.version.revise_by_user(
+        payload=plans.stored.version.payload,
+        actor_id="creative-reviewer",
+        reason="Review edits before rejection",
+        now=NOW + timedelta(seconds=1),
+    )
+    plans.append_version(version=user_version)
+    revised_after_user_edit = planner.create_plan(
+        replace(
+            command,
+            plan_iteration=2,
+            prior_plan_version_id=user_version.id,
+            prior_plan_version=3,
+            expected_workflow_version=11,
+            idempotency_key="fixture-plan-step-003",
+        )
+    )
+
+    assert revised_after_user_edit.version_number == 4
+    assert plans.stored.version.supersedes_version_id == user_version.id

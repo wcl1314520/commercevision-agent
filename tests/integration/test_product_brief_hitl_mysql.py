@@ -7,12 +7,14 @@ import json
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from commercevision_api.main import create_app
 from commercevision_application import (
+    CreativePlanApplicationService,
     DurableOperationWorker,
     OperationApplicationService,
     OperationCreateCommand,
@@ -32,7 +34,8 @@ from commercevision_application import (
     VisionDataTransferPolicy,
     WorkflowApplicationService,
 )
-from commercevision_contracts import Settings
+from commercevision_contracts import CreativePlanRevisionRequestV1, Settings
+from commercevision_contracts.events import EventType
 from commercevision_contracts.object_storage import ObjectVersionPage, PresignedRequest
 from commercevision_contracts.product_briefs import (
     PreparedProviderArtifact,
@@ -60,6 +63,7 @@ from commercevision_contracts.workflow import (
 from commercevision_domain import (
     ApprovalDecision,
     ApprovalType,
+    CreativePlanPayload,
     NormalizedOperationError,
     OperationKind,
     OperationState,
@@ -76,6 +80,7 @@ from commercevision_domain import (
 from commercevision_domain.messaging import EventEnvelope, OutboxEvent
 from commercevision_persistence import (
     MySQLCheckpointSaver,
+    SqlAlchemyCreativePlanUnitOfWork,
     SqlAlchemyOperationUnitOfWork,
     SqlAlchemyProductBriefUnitOfWork,
     SqlAlchemyUnitOfWork,
@@ -2666,6 +2671,218 @@ def _continuation_effect_snapshot(
             ),
             "dead_letters": connection.scalar(text("SELECT COUNT(*) FROM dead_letter_messages")),
         }
+
+
+def test_rejected_plan_restarts_into_one_later_plan_version(
+    integration_database,
+    integration_settings,
+    seed_fixture_planner_prompt,
+) -> None:
+    settings = _settings(integration_settings)
+    (
+        continuation_event,
+        workflow_id,
+        _product_brief_id,
+        _product_id,
+        _asset_version_id,
+        executor,
+    ) = _prepare_unconsumed_product_brief_continuation(
+        database=integration_database,
+        settings=settings,
+        confirmation_source="POLICY",
+    )
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
+    service = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    first_worker = WorkerRuntime.build(
+        settings,
+        operation_executors={OperationKind.PRODUCT_BRIEF_ANALYSIS: executor},
+    )
+    try:
+        assert first_worker.process_event(continuation_event.envelope.event_id) == "processed"
+    finally:
+        first_worker.close()
+    waiting_v1 = service.get(workflow_id=workflow_id, workspace_id=WORKSPACE_ID)
+    plan_v1 = next(
+        step for step in waiting_v1.steps if step.step_key == "create_plan:0"
+    ).output_data
+    assert plan_v1 is not None
+    rejected = service.approve(
+        workflow_id=workflow_id,
+        workspace_id=WORKSPACE_ID,
+        actor_id="creative-reviewer",
+        approval_type=ApprovalType.CREATIVE_PLAN,
+        request=ApprovalRequest(
+            expected_workflow_version=waiting_v1.version,
+            subject_id=plan_v1["creative_plan_ref"],
+            subject_version=plan_v1["creative_plan_version"],
+            decision=ApprovalDecision.REJECT,
+            reason_code="PLAN_NEEDS_REVISION",
+        ),
+        idempotency_key=f"reject-plan-v1-{workflow_id}",
+        trace_id="trace-reject-plan-v1",
+    )
+    resume_event = next(
+        event
+        for event in service.events(workflow_id=workflow_id, workspace_id=WORKSPACE_ID)
+        if event.event_type == EventType.WORKFLOW_RESUME_REQUESTED
+        and event.payload["approval_id"] == rejected.approvals[0].id
+    )
+
+    restarted_worker = WorkerRuntime.build(
+        settings,
+        operation_executors={OperationKind.PRODUCT_BRIEF_ANALYSIS: executor},
+    )
+    try:
+        assert restarted_worker.process_event(resume_event.event_id) == "processed"
+        assert restarted_worker.process_event(resume_event.event_id) == "duplicate"
+    finally:
+        restarted_worker.close()
+
+    waiting_v2 = service.get(workflow_id=workflow_id, workspace_id=WORKSPACE_ID)
+    plan_steps = [step for step in waiting_v2.steps if step.step_type is StepType.CREATE_PLAN]
+    assert waiting_v2.status is WorkflowStatus.AWAITING_PLAN_APPROVAL
+    assert waiting_v2.current_node == "approve_plan"
+    assert [step.step_key for step in plan_steps] == ["create_plan:0", "create_plan:1"]
+    assert [step.output_data["creative_plan_version"] for step in plan_steps] == [1, 2]
+    assert (
+        plan_steps[0].output_data["creative_plan_ref"]
+        == (plan_steps[1].output_data["creative_plan_ref"])
+    )
+    assert (
+        plan_steps[0].output_data["creative_plan_version_id"]
+        != (plan_steps[1].output_data["creative_plan_version_id"])
+    )
+    assert len(waiting_v2.approvals) == 1
+    assert waiting_v2.approvals[0].decision is ApprovalDecision.REJECT
+    assert waiting_v2.attempts == []
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [ApprovalDecision.APPROVE, ApprovalDecision.REJECT],
+    ids=["approve-v2", "reject-v2-create-v3"],
+)
+def test_user_edited_plan_resumes_from_the_original_checkpoint_wait(
+    integration_database,
+    integration_settings,
+    seed_fixture_planner_prompt,
+    decision: ApprovalDecision,
+) -> None:
+    settings = _settings(integration_settings)
+    (
+        continuation_event,
+        workflow_id,
+        _product_brief_id,
+        _product_id,
+        _asset_version_id,
+        executor,
+    ) = _prepare_unconsumed_product_brief_continuation(
+        database=integration_database,
+        settings=settings,
+        confirmation_source="POLICY",
+    )
+    seed_fixture_planner_prompt(integration_database, workspace_id=WORKSPACE_ID)
+    workflows = WorkflowApplicationService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory)
+    )
+    plans = CreativePlanApplicationService(
+        lambda: SqlAlchemyCreativePlanUnitOfWork(integration_database.session_factory)
+    )
+    first_worker = WorkerRuntime.build(
+        settings,
+        operation_executors={OperationKind.PRODUCT_BRIEF_ANALYSIS: executor},
+    )
+    try:
+        assert first_worker.process_event(continuation_event.envelope.event_id) == "processed"
+    finally:
+        first_worker.close()
+
+    waiting = workflows.get(workflow_id=workflow_id, workspace_id=WORKSPACE_ID)
+    plan_step = next(step for step in waiting.steps if step.step_key == "create_plan:0")
+    plan_id = plan_step.output_data["creative_plan_ref"]
+    plan_v1 = plans.get_current(
+        workspace_id=WORKSPACE_ID,
+        workflow_id=workflow_id,
+        creative_plan_id=plan_id,
+    )
+    edited_payload = CreativePlanPayload(
+        directions=(
+            replace(
+                plan_v1.version.payload.directions[0],
+                scene="User-approved edited fixture studio",
+            ),
+        )
+    )
+    plan_v2 = plans.revise_plan(
+        workspace_id=WORKSPACE_ID,
+        creative_plan_id=plan_id,
+        actor_id="creative-reviewer",
+        request=CreativePlanRevisionRequestV1.model_validate(
+            {
+                "workflow_id": workflow_id,
+                "payload": edited_payload.to_canonical_data(),
+                "revision_reason": "Use the reviewed scene",
+                "expected_workflow_version": waiting.version,
+                "expected_head_version": plan_v1.head.version,
+            }
+        ),
+        trace_id="trace-edit-plan-v2",
+        idempotency_key=f"edit-plan-v2-{workflow_id}",
+    )
+    decided = workflows.approve(
+        workflow_id=workflow_id,
+        workspace_id=WORKSPACE_ID,
+        actor_id="creative-reviewer",
+        approval_type=ApprovalType.CREATIVE_PLAN,
+        request=ApprovalRequest(
+            expected_workflow_version=waiting.version,
+            subject_id=plan_id,
+            subject_version=plan_v2.version.version_number,
+            decision=decision,
+            reason_code=("PLAN_NEEDS_REVISION" if decision is ApprovalDecision.REJECT else None),
+        ),
+        idempotency_key=f"{decision.value.lower()}-plan-v2-{workflow_id}",
+        trace_id=f"trace-{decision.value.lower()}-plan-v2",
+    )
+    resume_event = next(
+        event
+        for event in workflows.events(workflow_id=workflow_id, workspace_id=WORKSPACE_ID)
+        if event.event_type == EventType.WORKFLOW_RESUME_REQUESTED
+        and event.payload["approval_id"] == decided.approvals[0].id
+    )
+
+    restarted_worker = WorkerRuntime.build(
+        settings,
+        operation_executors={OperationKind.PRODUCT_BRIEF_ANALYSIS: executor},
+    )
+    try:
+        assert restarted_worker.process_event(resume_event.event_id) == "processed"
+        assert restarted_worker.process_event(resume_event.event_id) == "duplicate"
+    finally:
+        restarted_worker.close()
+
+    current_workflow = workflows.get(workflow_id=workflow_id, workspace_id=WORKSPACE_ID)
+    current_plan = plans.get_current(
+        workspace_id=WORKSPACE_ID,
+        workflow_id=workflow_id,
+        creative_plan_id=plan_id,
+    )
+    if decision is ApprovalDecision.APPROVE:
+        assert current_workflow.status is WorkflowStatus.AWAITING_RESULT_APPROVAL
+        assert len(current_workflow.attempts) == 1
+        assert current_plan.version.id == plan_v2.version.id
+    else:
+        plan_steps = [
+            step for step in current_workflow.steps if step.step_type is StepType.CREATE_PLAN
+        ]
+        assert current_workflow.status is WorkflowStatus.AWAITING_PLAN_APPROVAL
+        assert current_workflow.attempts == []
+        assert [step.output_data["creative_plan_version"] for step in plan_steps] == [1, 3]
+        assert current_plan.version.version_number == 3
+        assert current_plan.version.supersedes_version_id == plan_v2.version.id
+        assert current_plan.version.source.value == "AGENT"
 
 
 def _prepare_product_brief_generation_retry(

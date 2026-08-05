@@ -7,6 +7,7 @@ import pytest
 from commercevision_agent_core import (
     FixtureAgentRuntime,
     FixtureAgentState,
+    ResumeCheckpointConflictError,
     build_fixture_graph,
 )
 from commercevision_contracts.workflow import product_brief_checkpoint_generation
@@ -74,6 +75,7 @@ def _build_crash_probe_graph(
 def _build_human_wait_probe_graph(
     checkpointer: InMemorySaver,
     resumed_decisions: list[str],
+    resumed_plan_versions: list[tuple[str | None, int | None]] | None = None,
 ) -> object:
     def wait_for_approval(raw_state: FixtureAgentState) -> dict[str, str]:
         state = FixtureAgentState.model_validate(raw_state)
@@ -84,6 +86,10 @@ def _build_human_wait_probe_graph(
                 "subject_id": state.creative_plan_ref,
             }
         )
+        if resumed_plan_versions is not None:
+            resumed_plan_versions.append(
+                (state.creative_plan_version_id, state.creative_plan_version)
+            )
         resumed_decisions.append(str(resumed["decision"]))
         return {
             "current_node": "completed",
@@ -141,6 +147,57 @@ class _FixturePlanner:
                 "plan_decision": None,
             }
         )
+
+
+class _ExistingVersionFixturePlanner(_FixturePlanner):
+    def create_plan(self, **kwargs: Any) -> SimpleNamespace:
+        result = super().create_plan(**kwargs)
+        output = result.to_step_output()
+        output.update(
+            {
+                "creative_plan_version_id": "plan-version-existing-v7",
+                "creative_plan_version": 7,
+            }
+        )
+        return SimpleNamespace(to_step_output=lambda: output)
+
+
+def test_plan_interrupt_uses_the_exact_persisted_plan_version() -> None:
+    checkpointer = InMemorySaver()
+    graph = build_fixture_graph(
+        lifecycle=_CheckpointHistoryLifecycle(),  # type: ignore[arg-type]
+        planner=_ExistingVersionFixturePlanner(),  # type: ignore[arg-type]
+        tool_gateway=object(),  # type: ignore[arg-type]
+        checkpointer=checkpointer,
+        worker_id="exact-plan-interrupt-test",
+    )
+    runtime = FixtureAgentRuntime(graph, checkpointer)
+    initial = _product_brief_state(
+        workflow_id="exact-plan-interrupt",
+        version_id="product-brief-v1",
+        step_id="retrieval-step-v1",
+        lease_token="retrieval-lease-v1",
+    )
+
+    result = runtime.run(
+        initial_state=initial,
+        preclaimed_step_id="retrieval-step-v1",
+        preclaimed_lease_token="retrieval-lease-v1",
+    )
+
+    interrupt_payload = result["__interrupt__"][0].value
+    assert interrupt_payload == {
+        "interrupt_type": ApprovalType.CREATIVE_PLAN.value,
+        "workflow_id": initial.workflow_id,
+        "expected_workflow_version": 10,
+        "subject_id": f"plan-{initial.workflow_id}",
+        "subject_version_id": "plan-version-existing-v7",
+        "subject_version": 7,
+        "allowed_actions": [
+            ApprovalDecision.APPROVE.value,
+            ApprovalDecision.REJECT.value,
+        ],
+    }
 
 
 def _graph_with_two_product_brief_generations(workflow_id: str) -> Any:
@@ -387,7 +444,13 @@ def test_human_resume_finds_the_checkpoint_for_the_active_product_brief_generati
             version_id="product-brief-v1",
             step_id="retrieval-step-v1",
             lease_token="retrieval-lease-v1",
-        ).model_copy(update={"creative_plan_ref": subject_id}),
+        ).model_copy(
+            update={
+                "creative_plan_ref": subject_id,
+                "creative_plan_version_id": "creative-plan-version-v1",
+                "creative_plan_version": 1,
+            }
+        ),
         preclaimed_step_id="retrieval-step-v1",
         preclaimed_lease_token="retrieval-lease-v1",
     )
@@ -416,6 +479,152 @@ def test_human_resume_finds_the_checkpoint_for_the_active_product_brief_generati
 
     assert resumed_decisions == [ApprovalDecision.APPROVE.value]
     assert result["plan_decision"] == ApprovalDecision.APPROVE.value
+
+
+def test_mysql_authority_can_resume_an_edited_plan_version_from_the_original_wait() -> None:
+    checkpointer = InMemorySaver()
+    resumed_decisions: list[str] = []
+    resumed_plan_versions: list[tuple[str | None, int | None]] = []
+    runtime = FixtureAgentRuntime(
+        _build_human_wait_probe_graph(
+            checkpointer,
+            resumed_decisions,
+            resumed_plan_versions,
+        ),
+        checkpointer,
+    )
+    workflow_id = "checkpoint-edited-plan-resume"
+    subject_id = "fixture://creative-plan/checkpoint-edited-plan-resume"
+    interrupted = runtime.run(
+        initial_state=_product_brief_state(
+            workflow_id=workflow_id,
+            version_id="product-brief-v1",
+            step_id="retrieval-step-v1",
+            lease_token="retrieval-lease-v1",
+        ).model_copy(
+            update={
+                "creative_plan_ref": subject_id,
+                "creative_plan_version_id": "creative-plan-version-v1",
+                "creative_plan_version": 1,
+            }
+        ),
+        preclaimed_step_id="retrieval-step-v1",
+        preclaimed_lease_token="retrieval-lease-v1",
+    )
+    assert "__interrupt__" in interrupted
+
+    result = runtime.run(
+        initial_state=FixtureAgentState(
+            workflow_id=workflow_id,
+            workflow_version=8,
+            workspace_id="checkpoint-entry",
+            actor_id="checkpoint-entry-test",
+            trace_id="checkpoint-edited-plan-resume-trace",
+            current_node="approve_plan",
+        ),
+        resume_payload={
+            "workflow_id": workflow_id,
+            "approval_id": "approval-edited-plan-v2",
+            "approval_type": ApprovalType.CREATIVE_PLAN.value,
+            "decision": ApprovalDecision.APPROVE.value,
+            "expected_workflow_version": 7,
+            "resulting_workflow_version": 8,
+            "subject_id": subject_id,
+            "subject_version": 2,
+        },
+        trusted_creative_plan_version_id="creative-plan-version-v2",
+    )
+
+    assert result["plan_decision"] == ApprovalDecision.APPROVE.value
+    assert resumed_decisions == [ApprovalDecision.APPROVE.value]
+    assert resumed_plan_versions == [("creative-plan-version-v2", 2)]
+
+
+async def test_async_human_resume_survives_runtime_restart() -> None:
+    checkpointer = InMemorySaver()
+    resumed_decisions: list[str] = []
+    workflow_id = "checkpoint-async-human-wait"
+    subject_id = "fixture://creative-plan/checkpoint-async-human-wait/v1"
+    first_runtime = FixtureAgentRuntime(
+        _build_human_wait_probe_graph(checkpointer, resumed_decisions),
+        checkpointer,
+    )
+    initial = _product_brief_state(
+        workflow_id=workflow_id,
+        version_id="product-brief-v1",
+        step_id="retrieval-step-v1",
+        lease_token="retrieval-lease-v1",
+    ).model_copy(
+        update={
+            "creative_plan_ref": subject_id,
+            "creative_plan_version_id": "creative-plan-version-v1",
+            "creative_plan_version": 1,
+        }
+    )
+    interrupted = await first_runtime.arun(
+        initial_state=initial,
+        preclaimed_step_id="retrieval-step-v1",
+        preclaimed_lease_token="retrieval-lease-v1",
+    )
+    assert "__interrupt__" in interrupted
+
+    restarted_runtime = FixtureAgentRuntime(
+        _build_human_wait_probe_graph(checkpointer, resumed_decisions),
+        checkpointer,
+    )
+    result = await restarted_runtime.arun(
+        initial_state=FixtureAgentState(
+            workflow_id=workflow_id,
+            workflow_version=8,
+            workspace_id="checkpoint-entry",
+            actor_id="checkpoint-entry-test",
+            trace_id="checkpoint-async-resume-trace",
+            current_node="approve_plan",
+        ),
+        resume_payload={
+            "workflow_id": workflow_id,
+            "approval_id": "approval-async-0001",
+            "approval_type": ApprovalType.CREATIVE_PLAN.value,
+            "decision": ApprovalDecision.APPROVE.value,
+            "expected_workflow_version": 7,
+            "resulting_workflow_version": 8,
+            "subject_id": subject_id,
+            "subject_version": 1,
+        },
+    )
+
+    assert result["plan_decision"] == ApprovalDecision.APPROVE.value
+    assert resumed_decisions == [ApprovalDecision.APPROVE.value]
+
+
+def test_resume_without_a_matching_checkpoint_is_a_stable_conflict() -> None:
+    checkpointer = InMemorySaver()
+    runtime = FixtureAgentRuntime(
+        _build_human_wait_probe_graph(checkpointer, []),
+        checkpointer,
+    )
+
+    with pytest.raises(ResumeCheckpointConflictError, match="no matching durable checkpoint"):
+        runtime.run(
+            initial_state=FixtureAgentState(
+                workflow_id="checkpoint-missing-resume",
+                workflow_version=8,
+                workspace_id="checkpoint-entry",
+                actor_id="checkpoint-entry-test",
+                trace_id="checkpoint-missing-resume-trace",
+                current_node="approve_plan",
+            ),
+            resume_payload={
+                "workflow_id": "checkpoint-missing-resume",
+                "approval_id": "approval-missing-0001",
+                "approval_type": ApprovalType.CREATIVE_PLAN.value,
+                "decision": ApprovalDecision.APPROVE.value,
+                "expected_workflow_version": 7,
+                "resulting_workflow_version": 8,
+                "subject_id": "plan-missing-v1",
+                "subject_version": 1,
+            },
+        )
 
 
 @pytest.mark.parametrize("current_node", ["execute_tool", "export"])

@@ -1673,3 +1673,25 @@
   已由精确 GitHub Actions `30992819136` 四路全绿验证：Python checks（真实 MySQL/Milvus、完整 pytest、
   Mypy/License/Eval/OpenAPI）、Web checks、Container builds 与 Security/SBOM 全部成功。Ticket 06/07
   正式完成；状态提交门禁通过后解锁 Ticket 08。
+
+# 2026-08-05 Phase 3 Ticket 08 本地实现
+
+- Ticket 06/07 状态提交 `7d34f83` 的精确 GitHub Actions `30994263561` 四路全绿，Ticket 08 按
+  blockers-first 正式解锁；未重新规划或重做 Ticket 01–07。
+- LangGraph Plan interrupt 现在携带 exact `creative_plan_version_id/version` 与 Workflow version；resume
+  先由 Worker 对 Outbox aggregate version 和 MySQL Approval/Workflow/current Plan/retention 全量复核，再选择
+  唯一 checkpoint generation。篡改 Approval 与 checkpoint 丢失分别稳定 DLQ 为
+  `creative_plan_resume_mismatch` / `workflow_resume_checkpoint_mismatch`。
+- Reject 后 Planner 以同一稳定 Plan identity 追加下一 immutable AGENT version；Step/Plan 重放不重复，最多
+  10 次拒绝，边界在审批事务副作用前失败关闭。真实 Worker 重启证明 v1 reject 只生成 v2，重复事件为 duplicate。
+- 用户在 interrupt 后把 v1 编辑为 v2 时，Worker 把 MySQL 已复核的 exact version ID 作为非事件信任通道交给
+  Runtime；checkpoint 仍按稳定 Plan/Workflow wait 定位，并在 `Command.update` 后以 v2 状态继续，避免把
+  checkpoint 当业务事实。真实 ProductBrief→Planner→edit v2→approve/reject→Worker restart 纵切通过；
+  reject v2 使用 exact prior version 追加 AGENT v3，不再把 rejection iteration 错当 Plan version。
+- 同步/异步 InMemory 与真实 MySQL Checkpointer restart、retention expiry、审批六字段篡改、拒绝上限和
+  missing-checkpoint 矩阵均通过。当前证据：核心 unit `63 passed`、unit+contract
+  `1384 passed, 1 skipped`、Ticket 08 MySQL 矩阵 `17 passed`；全仓 Ruff、432 条 Mypy baseline 和
+  `git diff --check` 全绿。等待实现提交的精确 GitHub Actions，Ticket 09 未启动。
+- 最终 unit+contract 首轮唯一失败为未改动 ClamAV concurrency saturation 的 20ms Windows 调度边界，
+  期望 `TIMEOUT` 而得到 `UNAVAILABLE`；隔离复跑通过，随后完整二次运行明确汇总
+  `1384 passed, 1 skipped`。未修改生产超时或测试阈值，远程 Linux CI 继续作为发布权威证据。
