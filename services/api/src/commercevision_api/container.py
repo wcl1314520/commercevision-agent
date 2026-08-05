@@ -28,6 +28,8 @@ from commercevision_application import (
     ValidationDataTransferPolicy,
     VisionDataTransferPolicy,
     WorkflowApplicationService,
+    WorkflowEventCursorCodec,
+    WorkflowEventStreamService,
 )
 from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolicy
 from commercevision_application.asset_integrity import UploadIntegrityVerifier
@@ -145,6 +147,7 @@ class ApiContainer:
     product_brief_views: ProductBriefViewApplicationService
     dead_letters: DeadLetterOperatorService
     workflows: WorkflowApplicationService
+    workflow_events: WorkflowEventStreamService
     principal_resolver: SignedTrustedPrincipalResolver
     access_policy: PrincipalAccessPolicy
     object_storage_readiness: ObjectStorageReadiness
@@ -221,6 +224,14 @@ class ApiContainer:
             previous_secret=trust_key_ring.previous_secret,
             max_age_seconds=settings.creative_plan_cursor_max_age_seconds,
             future_skew_seconds=settings.creative_plan_cursor_future_skew_seconds,
+        )
+        workflow_event_cursor_codec = WorkflowEventCursorCodec(
+            current_key_id=trust_key_ring.current_key_id,
+            current_secret=trust_key_ring.current_secret,
+            previous_key_id=trust_key_ring.previous_key_id,
+            previous_secret=trust_key_ring.previous_secret,
+            max_age_seconds=settings.workflow_event_cursor_max_age_seconds,
+            future_skew_seconds=settings.workflow_event_cursor_future_skew_seconds,
         )
         object_storage = build_object_storage(settings)
         built_retrieval = build_retrieval(
@@ -325,6 +336,11 @@ class ApiContainer:
                 access_policy=access_policy,
             ),
             workflows=WorkflowApplicationService(uow_factory=uow_factory),
+            workflow_events=WorkflowEventStreamService(
+                uow_factory=uow_factory,
+                cursor_codec=workflow_event_cursor_codec,
+                page_size=settings.workflow_event_page_size,
+            ),
             principal_resolver=principal_resolver,
             access_policy=access_policy,
             object_storage_readiness=object_storage,

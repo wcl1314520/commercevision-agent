@@ -17,7 +17,6 @@ from commercevision_contracts.events import (
 )
 from commercevision_contracts.workflow import (
     ApprovalRequest,
-    EventResponse,
     WorkflowCreateRequest,
     WorkflowListResponse,
     WorkflowResponse,
@@ -621,27 +620,6 @@ class WorkflowApplicationService:
                 approval=approval,
                 retain_until=min(workflow.expires_at, head.retain_until),
             )
-
-    def events(self, *, workflow_id: str, workspace_id: str) -> list[EventResponse]:
-        with self._uow_factory() as uow:
-            workflow = uow.workflows.get(workflow_id, workspace_id=workspace_id)
-            if workflow is None:
-                raise NotFoundError(f"workflow {workflow_id} was not found")
-            events = uow.outbox.list_for_aggregate(workflow_id)
-        return [
-            EventResponse(
-                event_id=event.envelope.event_id,
-                event_type=event.envelope.event_type,
-                schema_version=event.envelope.schema_version,
-                aggregate_type=event.envelope.aggregate_type,
-                aggregate_id=event.envelope.aggregate_id,
-                aggregate_version=event.envelope.aggregate_version,
-                occurred_at=event.envelope.occurred_at,
-                trace_id=event.envelope.trace_id,
-                payload=event.envelope.payload,
-            )
-            for event in events
-        ]
 
     def _load_idempotent(
         self,

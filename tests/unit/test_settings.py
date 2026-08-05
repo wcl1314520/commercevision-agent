@@ -906,6 +906,32 @@ def test_creative_plan_cursor_lifetime_defaults_and_bounds_are_explicit() -> Non
             Settings(**invalid)
 
 
+def test_workflow_event_stream_budgets_are_bounded() -> None:
+    settings = Settings()
+
+    assert settings.workflow_event_cursor_max_age_seconds == 3600
+    assert settings.workflow_event_cursor_future_skew_seconds == 30
+    assert settings.workflow_event_page_size == 100
+    assert settings.workflow_event_poll_interval_seconds == 1.0
+    assert settings.workflow_event_heartbeat_seconds == 15.0
+    assert settings.workflow_event_retry_milliseconds == 3000
+    assert settings.workflow_event_max_session_seconds == 300.0
+    assert settings.workflow_event_max_pages_per_session == 100
+
+    for invalid in (
+        {"workflow_event_cursor_max_age_seconds": 59},
+        {"workflow_event_cursor_future_skew_seconds": 301},
+        {"workflow_event_page_size": 201},
+        {"workflow_event_poll_interval_seconds": 0},
+        {"workflow_event_heartbeat_seconds": 61},
+        {"workflow_event_retry_milliseconds": 30_001},
+        {"workflow_event_max_session_seconds": 3601},
+        {"workflow_event_max_pages_per_session": 1001},
+    ):
+        with pytest.raises(ValidationError):
+            Settings(**invalid)
+
+
 def test_empty_compose_previous_trusted_principal_pair_is_absent_but_not_partial() -> None:
     settings = Settings(
         trusted_principal_previous_key_id="",

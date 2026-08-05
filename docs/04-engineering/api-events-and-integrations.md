@@ -206,13 +206,18 @@ GET  /api/v1/exports/{exportId}/download
 SSE 用于 UI 任务进度：
 
 - 需要认证。
-- 事件带单调递增 `event_cursor`。
-- 客户端通过 `Last-Event-ID` 恢复。
-- Redis 可以用于实时 Fan-out。
-- Redis 丢失时从 MySQL 事件表补齐。
+- 客户端以 `Accept: text/event-stream` 协商 SSE；未声明时保留既有 JSON 读取兼容面。
+- 每条事件的 `id` 是 HMAC 防篡改的不透明游标，绑定 Workspace、Workflow、保留截止时间与
+  `(occurred_at, event_id)` 稳定排序边界；它不是数据库 Event ID。
+- 客户端通过 `Last-Event-ID` 严格恢复到最后已交付事件之后。未知、篡改、跨 Workspace/Workflow、
+  不存在、超长、过期或保留期变化的游标统一失败关闭。
+- 事件仅从 MySQL Outbox 持久事实按 tenant-first keyset 索引读取；任何未来 Fan-out 层都不是恢复事实源。
+- 每个 catch-up 页使用独立短事务，连接在网络传输前释放；页面、轮询、heartbeat、retry 和单次流会话
+  均有配置上限，到期后客户端以最后的 `id` 重连。
 - 轮询 `GET workflow` 作为降级。
 
-事件只包含状态和引用，不发送完整 Prompt、原图或供应商响应。
+事件在应用边界再次经过注册 Event Contract 投影，只包含状态和引用，不发送完整 Plan、Prompt、原图、
+任意额外 Outbox 字段或供应商响应。Heartbeat 使用 SSE comment，不改变客户端恢复游标。
 
 ## 领域事件
 

@@ -743,6 +743,56 @@ class OutboxRepository:
         )
         return [outbox_from_model(model) for model in models]
 
+    def list_for_workflow_stream(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        after: tuple[datetime, str] | None,
+        limit: int,
+    ) -> list[OutboxEvent]:
+        statement = select(OutboxEventModel).where(
+            OutboxEventModel.workspace_id == workspace_id,
+            OutboxEventModel.aggregate_type == "workflow",
+            OutboxEventModel.aggregate_id == workflow_id,
+        )
+        if after is not None:
+            occurred_at, event_id = after
+            statement = statement.where(
+                or_(
+                    OutboxEventModel.occurred_at > occurred_at,
+                    and_(
+                        OutboxEventModel.occurred_at == occurred_at,
+                        OutboxEventModel.id > event_id,
+                    ),
+                )
+            )
+        models = self.session.scalars(
+            statement.order_by(OutboxEventModel.occurred_at, OutboxEventModel.id).limit(limit)
+        )
+        return [outbox_from_model(model) for model in models]
+
+    def workflow_stream_boundary_exists(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        boundary: tuple[datetime, str],
+    ) -> bool:
+        occurred_at, event_id = boundary
+        persisted_id = self.session.scalar(
+            select(OutboxEventModel.id)
+            .where(
+                OutboxEventModel.workspace_id == workspace_id,
+                OutboxEventModel.aggregate_type == "workflow",
+                OutboxEventModel.aggregate_id == workflow_id,
+                OutboxEventModel.occurred_at == occurred_at,
+                OutboxEventModel.id == event_id,
+            )
+            .limit(1)
+        )
+        return persisted_id is not None
+
     def has_unpublished(
         self,
         *,

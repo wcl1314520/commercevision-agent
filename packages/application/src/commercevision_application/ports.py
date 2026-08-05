@@ -149,6 +149,21 @@ class OutboxRepositoryPort(Protocol):
         error_message: str,
     ) -> None: ...
     def list_for_aggregate(self, aggregate_id: str, *, limit: int = 200) -> list[OutboxEvent]: ...
+    def list_for_workflow_stream(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        after: tuple[datetime, str] | None,
+        limit: int,
+    ) -> list[OutboxEvent]: ...
+    def workflow_stream_boundary_exists(
+        self,
+        *,
+        workspace_id: str,
+        workflow_id: str,
+        boundary: tuple[datetime, str],
+    ) -> bool: ...
     def has_unpublished(
         self,
         *,

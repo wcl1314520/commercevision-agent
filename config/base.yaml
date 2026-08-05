@@ -211,6 +211,14 @@ trusted_principal_max_age_seconds: 300
 trusted_principal_future_skew_seconds: 30
 brand_profile_cursor_max_age_seconds: 86400
 brand_profile_cursor_future_skew_seconds: 30
+workflow_event_cursor_max_age_seconds: 3600
+workflow_event_cursor_future_skew_seconds: 30
+workflow_event_page_size: 100
+workflow_event_poll_interval_seconds: 1
+workflow_event_heartbeat_seconds: 15
+workflow_event_retry_milliseconds: 3000
+workflow_event_max_session_seconds: 300
+workflow_event_max_pages_per_session: 100
 worker_required_operation_kinds: []
 cors_origins:
   - http://localhost:13000

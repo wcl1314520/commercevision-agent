@@ -9408,11 +9408,29 @@
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
               "title": "X-Workspace-Id"
             }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Persisted Workflow events as JSON or a resumable SSE stream.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9421,6 +9439,11 @@
                     "$ref": "#/components/schemas/EventResponse"
                   },
                   "title": "Response Workflow Events Api V1 Workflows  Workflow Id  Events Get"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }

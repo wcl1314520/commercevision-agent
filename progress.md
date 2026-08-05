@@ -1738,3 +1738,29 @@
 - Ticket 09 实现提交 `a3986b0` 已由精确 GitHub Actions `31008124606` 四路全绿验证：Python 完整
   `1995 passed, 3 skipped in 1074.93s`；Web lint/typecheck/unit/E2E/build/audit、Container builds、
   Gitleaks 与 SBOM 均成功。Ticket 09 正式 `complete`；状态提交全绿前 Ticket 10 保持锁定。
+
+# 2026-08-05 Phase 3 Ticket 10 启动
+
+- Ticket 09 状态提交 `f0e6c6a` 的精确 GitHub Actions `31009924407` 四路全绿，Ticket 10 按
+  blockers-first 正式解锁；不重新规划或重复 Ticket 01–09。
+- 首个纵向切片固定为 persisted Workflow Outbox catch-up → tamper-evident Workflow/Workspace scoped cursor
+  → SSE wire frame。现有 JSON `/events` 只做进程外持久事实读取但缺少分页、恢复与 stream 边界；首个 RED
+  将从公开 SSE 响应与“严格位于最后已交付事件之后”的恢复语义建立。
+- Ticket 10 已完成独立 `WorkflowEventStreamService` 深模块：命令/审批服务不感知 SSE 或签名配置；服务以
+  `(workspace_id, aggregate_type, aggregate_id, occurred_at, id)` tenant-first 索引读取 MySQL Outbox，逐事件
+  签发绑定 Workspace、Workflow、保留截止时间和精确 keyset 边界的不透明 HMAC cursor。有效签名但不存在的
+  boundary 也会失败关闭，避免 future cursor 跳转。
+- HTTP 以 `Accept: text/event-stream` 协商 SSE、以 `Last-Event-ID` 恢复，同时保留既有 JSON 兼容面；无效
+  cursor 在响应开始前验证。每页独立短事务，网络 backpressure 期间不持有数据库/Worker 资源；retry、poll、
+  heartbeat 与最大 session 全部有界，断线/到期不创建后台任务。Event Contract 重新投影会删除持久 payload
+  中的 `raw_prompt` 等额外字段。
+- TDD/真实基础设施证据：cursor/stream/settings/HTTP unit 与真实 MySQL 共 `22 passed`；205 条事件按
+  `100/100/5/0` 无缺口分页，25 次 caught-up 重连固定 `100` 条 SQL，提交后的并发事件从最后 cursor 精确可见；
+  Alembic base→head roundtrip `1 passed`，schema drift 为零。全量 unit+contract `1432 passed, 1 skipped`；
+  Web proxy/unit `219 passed`、Playwright `90 passed`、build/type/lint/audit 全绿。工单验收项已全部勾选，
+  但在实现提交的精确 GitHub Actions 四路全绿前仍保持 `in_progress`，Ticket 11 不启动。
+- Ticket 10 五轴终审未发现剩余 Critical/Required：正确性以 persisted boundary existence + per-event cursor +
+  concurrent keyset resume；安全性以 tenant-first lookup、purpose-separated HMAC、统一无效游标与 Event Contract
+  投影；可靠性以短事务、backpressure、disconnect/heartbeat/time/page budgets；维护性以独立
+  `WorkflowEventStreamService` 和 transport-only SSE module；运维性以专用覆盖索引、OpenAPI、配置/Compose、
+  431-diagnostic Mypy baseline 与确定性查询预算闭合。

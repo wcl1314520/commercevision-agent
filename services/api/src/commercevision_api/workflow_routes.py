@@ -2,6 +2,7 @@
 
 from typing import Annotated
 
+from commercevision_application import WorkflowEventStreamService
 from commercevision_contracts.workflow import (
     ApprovalRequest,
     EventResponse,
@@ -11,8 +12,11 @@ from commercevision_contracts.workflow import (
     WorkflowResponse,
 )
 from commercevision_domain import ApprovalDecision, ApprovalType
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
+from .workflow_sse import WorkflowSsePolicy, stream_workflow_events
 from .workspace_identity import WorkspaceHeader
 
 router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
@@ -83,15 +87,59 @@ def cancel_workflow(
     )
 
 
-@router.get("/{workflow_id}/events", response_model=list[EventResponse])
-def workflow_events(
+@router.get(
+    "/{workflow_id}/events",
+    response_model=list[EventResponse],
+    responses={
+        200: {
+            "description": "Persisted Workflow events as JSON or a resumable SSE stream.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"type": "string"},
+                }
+            },
+        }
+    },
+)
+async def workflow_events(
     workflow_id: str,
     request: Request,
     workspace_id: WorkspaceHeader,
-) -> list[EventResponse]:
-    return request.app.state.container.workflows.events(
+    last_event_id: Annotated[
+        str | None,
+        Header(alias="Last-Event-ID", min_length=1, max_length=256),
+    ] = None,
+) -> list[EventResponse] | Response:
+    accept = request.headers.get("Accept", "")
+    service: WorkflowEventStreamService = request.app.state.container.workflow_events
+    if "text/event-stream" not in accept.lower():
+        return service.events(
+            workflow_id=workflow_id,
+            workspace_id=workspace_id,
+        )
+    cursor = last_event_id
+    first_page = await run_in_threadpool(
+        service.event_page,
         workflow_id=workflow_id,
         workspace_id=workspace_id,
+        cursor=cursor,
+    )
+    policy = WorkflowSsePolicy.from_settings(request.app.state.settings)
+    return StreamingResponse(
+        stream_workflow_events(
+            request=request,
+            service=service,
+            workspace_id=workspace_id,
+            workflow_id=workflow_id,
+            cursor=cursor,
+            first_page=first_page,
+            policy=policy,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

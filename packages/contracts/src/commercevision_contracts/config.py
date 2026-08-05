@@ -624,6 +624,14 @@ class Settings(BaseSettings):
         le=604_800,
     )
     creative_plan_cursor_future_skew_seconds: int = Field(default=30, ge=0, le=300)
+    workflow_event_cursor_max_age_seconds: int = Field(default=3600, ge=60, le=604_800)
+    workflow_event_cursor_future_skew_seconds: int = Field(default=30, ge=0, le=300)
+    workflow_event_page_size: int = Field(default=100, ge=1, le=200)
+    workflow_event_poll_interval_seconds: float = Field(default=1.0, ge=0.05, le=10)
+    workflow_event_heartbeat_seconds: float = Field(default=15.0, ge=1, le=60)
+    workflow_event_retry_milliseconds: int = Field(default=3000, ge=100, le=30_000)
+    workflow_event_max_session_seconds: float = Field(default=300.0, ge=15, le=3600)
+    workflow_event_max_pages_per_session: int = Field(default=100, ge=1, le=1000)
 
     @field_validator(
         "trusted_principal_previous_key_id",
