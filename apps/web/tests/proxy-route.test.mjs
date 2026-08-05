@@ -405,7 +405,7 @@ test("rights workbench routes cross only their exact signed proxy seams", async 
   assert.equal(upstreamRequests.length, cases.length);
 });
 
-test("never proxies internal Workflow or Operation contracts", async (context) => {
+test("never proxies Operation or non-Workbench Workflow contracts", async (context) => {
   const originalFetch = globalThis.fetch;
   let upstreamRequests = 0;
   globalThis.fetch = async () => {
@@ -447,11 +447,13 @@ test("never proxies internal Workflow or Operation contracts", async (context) =
     },
   );
   const deniedWorkflow = await GET(
-    new Request(`http://web.local/api/v1/workflows/${workflowId}`, {
+    new Request(`http://web.local/api/v1/workflows/${workflowId}/checkpoint`, {
       headers: { "x-workspace-id": "workspace-1" },
     }),
     {
-      params: Promise.resolve({ path: ["workflows", workflowId] }),
+      params: Promise.resolve({
+        path: ["workflows", workflowId, "checkpoint"],
+      }),
     },
   );
   assert.equal(deniedOperation.status, 404);
@@ -587,8 +589,12 @@ test("only exact ProductBrief and safe status paths cross the HTTP proxy seam", 
     },
   );
   const deniedInternalWorkflow = await GET(
-    new Request(`http://web.local/api/v1/workflows/${workflowId}`),
-    { params: Promise.resolve({ path: ["workflows", workflowId] }) },
+    new Request(`http://web.local/api/v1/workflows/${workflowId}/checkpoint`),
+    {
+      params: Promise.resolve({
+        path: ["workflows", workflowId, "checkpoint"],
+      }),
+    },
   );
   const deniedInternalOperation = await GET(
     new Request(`http://web.local/api/v1/operations/${operationId}`),
@@ -1447,4 +1453,214 @@ test("keeps the proxy deadline active while reading the upstream body", async (c
 
   assert.equal(response.status, 504);
   assert.equal((await response.json()).code, "UPSTREAM_TIMEOUT");
+});
+
+test("only exact Creative Plan Workbench routes cross the HTTP proxy seam", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const upstreamRequests = [];
+  globalThis.fetch = async (input, init) => {
+    upstreamRequests.push({
+      method: init.method,
+      url: String(input),
+    });
+    return Response.json({ ok: true });
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const planId = "019f8a00-0000-7000-8000-000000000121";
+  const workflowId = "019f8a00-0000-7000-8000-000000000122";
+  const headers = {
+    "content-type": "application/json",
+    "idempotency-key": "creative-plan-proxy-test",
+    "x-workspace-id": "workspace-1",
+  };
+  const cases = [
+    {
+      handler: GET,
+      method: "GET",
+      path: ["creative-plans", planId],
+      url: `http://web.local/api/v1/creative-plans/${planId}?workflow_id=${workflowId}`,
+      upstream: `http://api:8000/api/v1/creative-plans/${planId}?workflow_id=${workflowId}`,
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["creative-plans", planId, "versions"],
+      url: `http://web.local/api/v1/creative-plans/${planId}/versions?workflow_id=${workflowId}`,
+      upstream: `http://api:8000/api/v1/creative-plans/${planId}/versions?workflow_id=${workflowId}`,
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["creative-plans", planId, "versions", "2"],
+      url: `http://web.local/api/v1/creative-plans/${planId}/versions/2?workflow_id=${workflowId}`,
+      upstream: `http://api:8000/api/v1/creative-plans/${planId}/versions/2?workflow_id=${workflowId}`,
+    },
+    {
+      handler: POST,
+      method: "POST",
+      path: ["creative-plans", `${planId}:revise`],
+      url: `http://web.local/api/v1/creative-plans/${planId}:revise`,
+      upstream: `http://api:8000/api/v1/creative-plans/${planId}:revise`,
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["workflows", workflowId],
+      url: `http://web.local/api/v1/workflows/${workflowId}`,
+      upstream: `http://api:8000/api/v1/workflows/${workflowId}`,
+    },
+    {
+      handler: GET,
+      method: "GET",
+      path: ["workflows", workflowId, "events"],
+      url: `http://web.local/api/v1/workflows/${workflowId}/events`,
+      upstream: `http://api:8000/api/v1/workflows/${workflowId}/events`,
+    },
+    ...["approve", "reject"].map((action) => ({
+      handler: POST,
+      method: "POST",
+      path: ["workflows", workflowId, `creative-plan:${action}`],
+      url: `http://web.local/api/v1/workflows/${workflowId}/creative-plan:${action}`,
+      upstream: `http://api:8000/api/v1/workflows/${workflowId}/creative-plan:${action}`,
+    })),
+  ];
+
+  for (const item of cases) {
+    const response = await item.handler(
+      new Request(item.url, {
+        method: item.method,
+        headers,
+        body: item.method === "POST" ? "{}" : undefined,
+      }),
+      { params: Promise.resolve({ path: item.path }) },
+    );
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(
+    upstreamRequests.map(({ method, url }) => ({ method, url })),
+    cases.map(({ method, upstream }) => ({ method, url: upstream })),
+  );
+
+  const denied = [
+    [GET, "http://web.local/api/v1/creative-plans", ["creative-plans"]],
+    [POST, "http://web.local/api/v1/creative-plans", ["creative-plans"]],
+    [GET, "http://web.local/api/v1/workflows", ["workflows"]],
+    [
+      POST,
+      `http://web.local/api/v1/workflows/${workflowId}:cancel`,
+      ["workflows", `${workflowId}:cancel`],
+    ],
+    [
+      GET,
+      "http://web.local/api/v1/creative-plans/not-a-uuid",
+      ["creative-plans", "not-a-uuid"],
+    ],
+  ];
+  for (const [handler, url, path] of denied) {
+    const response = await handler(
+      new Request(url, { method: handler === POST ? "POST" : "GET" }),
+      { params: Promise.resolve({ path }) },
+    );
+    assert.equal(response.status, 404);
+  }
+  assert.equal(upstreamRequests.length, cases.length);
+});
+
+test("streams Workflow SSE without buffering and forwards its opaque resume cursor", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = process.env.CV_API_PROXY_TIMEOUT_MS;
+  const workflowId = "019f8a00-0000-7000-8000-000000000122";
+  const cursor = "v1.current.cGF5bG9hZA.c2lnbmF0dXJl";
+  const frame = `id: ${cursor}\nevent: workflow.created\ndata: {}\n\n`;
+  let upstreamHeaders;
+  process.env.CV_API_PROXY_TIMEOUT_MS = "25";
+  globalThis.fetch = async (_input, init) => {
+    upstreamHeaders = new Headers(init.headers);
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(frame));
+          init.signal.addEventListener(
+            "abort",
+            () => controller.error(init.signal.reason),
+            { once: true },
+          );
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "cache-control": "no-cache, no-transform",
+          "content-type": "text/event-stream; charset=utf-8",
+          "x-accel-buffering": "no",
+        },
+      },
+    );
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalTimeout === undefined) {
+      delete process.env.CV_API_PROXY_TIMEOUT_MS;
+    } else {
+      process.env.CV_API_PROXY_TIMEOUT_MS = originalTimeout;
+    }
+  });
+
+  const response = await GET(
+    new Request(`http://web.local/api/v1/workflows/${workflowId}/events`, {
+      headers: {
+        accept: "text/event-stream",
+        "last-event-id": cursor,
+        "x-workspace-id": "workspace-1",
+      },
+    }),
+    {
+      params: Promise.resolve({
+        path: ["workflows", workflowId, "events"],
+      }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/event-stream; charset=utf-8");
+  assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
+  assert.equal(response.headers.get("x-accel-buffering"), "no");
+  assert.equal(upstreamHeaders.get("accept"), "text/event-stream");
+  assert.equal(upstreamHeaders.get("last-event-id"), cursor);
+  assert.ok(upstreamHeaders.get("x-trusted-principal"));
+  const reader = response.body.getReader();
+  const first = await reader.read();
+  assert.equal(new TextDecoder().decode(first.value), frame);
+  await reader.cancel();
+});
+
+test("rejects an unsafe Workflow resume cursor before contacting upstream", async (context) => {
+  const originalFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls += 1;
+    return Response.json([]);
+  };
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const workflowId = "019f8a00-0000-7000-8000-000000000122";
+
+  const response = await GET(
+    new Request(`http://web.local/api/v1/workflows/${workflowId}/events`, {
+      headers: {
+        accept: "text/event-stream",
+        "last-event-id": "x".repeat(257),
+        "x-workspace-id": "workspace-1",
+      },
+    }),
+    { params: Promise.resolve({ path: ["workflows", workflowId, "events"] }) },
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "WORKFLOW_EVENT_CURSOR_INVALID");
+  assert.equal(upstreamCalls, 0);
 });

@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 SCHEMAS = (
+    "ApprovalDecision",
+    "ApprovalRequest",
+    "ApprovalResponse",
+    "ApprovalType",
     "AssetKind",
     "AssetDeleteRequestV1",
     "AssetDeleteResponseV1",
@@ -23,6 +27,7 @@ SCHEMAS = (
     "AssetValidationStageResponseV1",
     "AssetValidationStatusResponseV1",
     "AssetVersionResponseV1",
+    "AttemptStatus",
     "BrandColorV1",
     "BrandProfileCreateRequestV1",
     "BrandProfileDraftV1",
@@ -55,6 +60,7 @@ SCHEMAS = (
     "CreativePlanVersionListResponseV1",
     "CreativePlanVersionResponseV1",
     "ErrorResponse",
+    "EventResponse",
     "ImageRole",
     "JsonValue",
     "OperationState",
@@ -104,6 +110,7 @@ SCHEMAS = (
     "RetrievalScoreBreakdownV1",
     "RetrievalTemporaryReferenceV1",
     "RetentionClass",
+    "RetentionStatus",
     "RightsDecisionCode",
     "RightsHistoryResponseV1",
     "RightsMutationResponseV1",
@@ -116,6 +123,8 @@ SCHEMAS = (
     "SKUCreateRequestV1",
     "SKUResponseV1",
     "SKUUpdateRequestV1",
+    "StepStatus",
+    "StepType",
     "UploadFinalizeResponseV1",
     "UploadSessionCreateRequestV1",
     "UploadSessionCreateResponseV1",
@@ -126,7 +135,10 @@ SCHEMAS = (
     "ValidationStage",
     "ValidationVerdict",
     "VectorKind",
+    "WorkflowAttemptResponse",
+    "WorkflowResponse",
     "WorkflowStatus",
+    "WorkflowStepResponse",
 )
 
 ASSOCIATED_PRODUCT_BRIEF_FIELD_SCHEMAS = (

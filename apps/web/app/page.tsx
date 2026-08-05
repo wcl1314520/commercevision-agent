@@ -25,6 +25,7 @@ import type {
 import { AssetUploadWorkbench } from "./asset-upload-workbench";
 import { BrandProfileWorkbench } from "./brand-profile-workbench";
 import { CollectionRebuildAdmin } from "./collection-rebuild-admin";
+import { CreativePlanWorkbench } from "./creative-plan-workbench";
 import type { BrandProfileIdentityChangeGuard } from "../lib/brand-profile-editor-state";
 import { productBriefSourceFor } from "../lib/product-brief-workbench-state";
 import type { ProductBriefSourceSelection } from "../lib/product-brief-workbench-state";
@@ -948,6 +949,10 @@ export default function Home() {
                   category={selectedProduct.category_code}
                   key={`retrieval-${selectedProduct.id}-${selectedProduct.version}`}
                   productId={selectedProduct.id}
+                />
+
+                <CreativePlanWorkbench
+                  key={`creative-plan-${selectedProduct.id}`}
                 />
 
                 <section className="panel" aria-labelledby="sku-heading">

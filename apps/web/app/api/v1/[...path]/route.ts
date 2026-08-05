@@ -63,6 +63,27 @@ const COLLECTION_REBUILD_PATH = new RegExp(
 const COLLECTION_REBUILD_ACTION_PATH = new RegExp(
   `^/collections/rebuilds/${UUID_PATH_SEGMENT}:(validate|activate)$`,
 );
+const CREATIVE_PLAN_READ_PATH = new RegExp(
+  `^/creative-plans/${UUID_PATH_SEGMENT}$`,
+);
+const CREATIVE_PLAN_VERSIONS_PATH = new RegExp(
+  `^/creative-plans/${UUID_PATH_SEGMENT}/versions$`,
+);
+const CREATIVE_PLAN_VERSION_PATH = new RegExp(
+  `^/creative-plans/${UUID_PATH_SEGMENT}/versions/[1-9][0-9]*$`,
+);
+const CREATIVE_PLAN_REVISION_PATH = new RegExp(
+  `^/creative-plans/${UUID_PATH_SEGMENT}:revise$`,
+);
+const WORKFLOW_READ_PATH = new RegExp(
+  `^/workflows/${UUID_PATH_SEGMENT}$`,
+);
+const WORKFLOW_EVENTS_PATH = new RegExp(
+  `^/workflows/${UUID_PATH_SEGMENT}/events$`,
+);
+const WORKFLOW_PLAN_DECISION_PATH = new RegExp(
+  `^/workflows/${UUID_PATH_SEGMENT}/creative-plan:(approve|reject)$`,
+);
 const FORWARDED_HEADERS = [
   "accept",
   "content-type",
@@ -81,7 +102,7 @@ class UpstreamResponseTooLargeError extends Error {}
 
 function encodeApiPathSegment(segment: string): string {
   const action =
-    /^(.*):(abort|activate|analyze|block|check|confirm|finalize|preview|publish|replace|revise|revoke|validate)$/.exec(
+    /^(.*):(abort|activate|analyze|approve|block|check|confirm|finalize|preview|publish|reject|replace|revise|revoke|validate)$/.exec(
       segment,
     );
   if (action) {
@@ -245,6 +266,13 @@ function apiMethodAllowed(path: string, method: string): boolean {
   if (path === "/collections/rebuilds") return method === "POST";
   if (COLLECTION_REBUILD_PATH.test(path)) return method === "GET";
   if (COLLECTION_REBUILD_ACTION_PATH.test(path)) return method === "POST";
+  if (CREATIVE_PLAN_READ_PATH.test(path)) return method === "GET";
+  if (CREATIVE_PLAN_VERSIONS_PATH.test(path)) return method === "GET";
+  if (CREATIVE_PLAN_VERSION_PATH.test(path)) return method === "GET";
+  if (CREATIVE_PLAN_REVISION_PATH.test(path)) return method === "POST";
+  if (WORKFLOW_READ_PATH.test(path)) return method === "GET";
+  if (WORKFLOW_EVENTS_PATH.test(path)) return method === "GET";
+  if (WORKFLOW_PLAN_DECISION_PATH.test(path)) return method === "POST";
   return false;
 }
 
@@ -344,6 +372,19 @@ async function proxyApi(request: Request, context: RouteContext): Promise<Respon
   if (!apiMethodAllowed(path, request.method)) {
     return notAllowedResponse(request, path, request.method);
   }
+  if (WORKFLOW_EVENTS_PATH.test(path)) {
+    const cursor = request.headers.get("last-event-id");
+    if (cursor !== null && !/^[\x21-\x7e]{1,256}$/.test(cursor)) {
+      return errorResponse(
+        request,
+        400,
+        "WORKFLOW_EVENT_CURSOR_INVALID",
+        "Workflow event resume cursor is invalid",
+        "validation",
+        false,
+      );
+    }
+  }
 
   let target: URL;
   let timeoutMs: number;
@@ -401,6 +442,10 @@ async function proxyApi(request: Request, context: RouteContext): Promise<Respon
     const value = request.headers.get(header);
     if (value) headers.set(header, value);
   }
+  if (WORKFLOW_EVENTS_PATH.test(path)) {
+    const lastEventId = request.headers.get("last-event-id");
+    if (lastEventId) headers.set("last-event-id", lastEventId);
+  }
   headers.set("x-actor-id", principal.actorId);
   headers.set("x-trusted-principal", principal.token);
 
@@ -442,6 +487,32 @@ async function proxyApi(request: Request, context: RouteContext): Promise<Respon
       cache: "no-store",
       signal: upstreamSignal,
     });
+    if (
+      upstream.ok &&
+      WORKFLOW_EVENTS_PATH.test(path) &&
+      request.headers.get("accept")?.toLowerCase().includes("text/event-stream") &&
+      upstream.headers
+        .get("content-type")
+        ?.toLowerCase()
+        .startsWith("text/event-stream")
+    ) {
+      clearTimeout(timeout);
+      const streamHeaders = new Headers();
+      for (const header of [
+        "cache-control",
+        "content-type",
+        "x-accel-buffering",
+        "x-request-id",
+        "x-trace-id",
+      ]) {
+        const value = upstream.headers.get(header);
+        if (value) streamHeaders.set(header, value);
+      }
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: streamHeaders,
+      });
+    }
     const responseHeaders = new Headers();
     for (const header of ["content-type", "x-request-id", "x-trace-id"]) {
       const value = upstream.headers.get(header);
