@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from commercevision_domain import (
+    ConcurrencyError,
     CreativePlanCitationSelection,
     CreativePlanDirection,
+    CreativePlanHead,
     CreativePlanPayload,
     CreativePlanProvenance,
     CreativePlanSource,
@@ -401,3 +403,38 @@ def test_creative_plan_source_invariants_reject_invalid_revision_metadata() -> N
             revision_reason="This belongs only to a human revision",
             now=NOW,
         )
+
+
+def test_creative_plan_head_advances_one_exact_lineage_without_extending_retention() -> None:
+    first = _agent_version()
+    retain_until = NOW + timedelta(days=30)
+    head = CreativePlanHead.from_first_version(first, retain_until=retain_until)
+    second = first.revise_by_user(
+        payload=CreativePlanPayload(
+            directions=(replace(first.payload.directions[0], scene="Retail shelf"),)
+        ),
+        actor_id="reviewer-42",
+        reason="Use the approved retail setting",
+        now=NOW + timedelta(seconds=1),
+    )
+
+    advanced = head.advance(second, expected_version=1)
+
+    assert advanced.current_version_id == second.id
+    assert advanced.current_version_number == 2
+    assert advanced.version == 2
+    assert advanced.retain_until == retain_until
+    assert advanced.created_at == head.created_at
+    assert advanced.updated_at == second.created_at
+    with pytest.raises(ConcurrencyError, match="head version"):
+        head.advance(second, expected_version=0)
+
+
+def test_creative_plan_head_rejects_divergent_optimistic_and_current_versions() -> None:
+    head = CreativePlanHead.from_first_version(
+        _agent_version(),
+        retain_until=NOW + timedelta(days=30),
+    )
+
+    with pytest.raises(ValueError, match="head version"):
+        replace(head, version=2)

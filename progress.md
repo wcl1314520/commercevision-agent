@@ -1611,3 +1611,19 @@
   瞬态错误修改产品代码。
 - Ticket 03 正式完成，Ticket 04 `Creative Plan MySQL authority and optimistic head` 进入 `in_progress`；
   blockers-first 约束要求本状态提交先取得精确 CI 全绿，再开始 Ticket 04 的 RED 测试。
+- Ticket 04 已完成 domain/application/persistence/Alembic 纵向切片：immutable Creative Plan versions、
+  tenant-first `(workspace_id, id)` 主键与复合 FK、optimistic head CAS、exact provenance revalidation、
+  application read/current/history、审批期 USER revision 及 Workflow retention freeze 均已落地。
+- Ticket 04 真实 MySQL 证据覆盖首次写入、exact duplicate replay、并发 revision 单 winner/no orphan、
+  foreign workspace、missing provenance、nested canonical reconstruction、retention extension 不传播；迁移覆盖
+  empty downgrade/re-upgrade、drift、`DATETIME(6)`、immutable/retention triggers 和有事实时拒绝 downgrade。
+- Ticket 04 本地门禁：Creative Plan 聚焦套件在最终领域不变量前为 `53 passed`，新增 head version 一致性后
+  领域全量 `41 passed`；全量 unit+contract `1347 passed, 1 skipped`（随后仅新增上述单测），历史迁移回归
+  `5 passed`；全仓 Ruff、touched Mypy、432 baseline 零漂移、license/dependency audit、Alembic drift、
+  `git diff --check` 全绿。单进程全仓 pytest 因已知总时长超过 15 分钟工具窗口而被终止且无失败摘要，
+  不计为通过；精确提交的 Linux CI 完整 pytest 仍是 blockers-first 放行门。
+- 新增 head invariant 后再次执行 unit+contract 得到 `1347 passed, 1 failed, 1 skipped`；唯一失败是未改动的
+  Windows C2PA daemon 子进程 3 秒时序用例，隔离复跑 `1 passed`，与既有高负载抖动记录一致。未修改
+  C2PA 生产 deadline 或测试阈值，最终 Linux CI 仍需给出完整单进程汇总。
+- 最终 Ticket 04 领域/应用/真实 MySQL/迁移聚焦套件以当前代码明确汇总为 `54 passed`；五轴终审未发现
+  剩余 Critical/Required，用户自有 `.scratch/retrieval-explorer-mobile.png` 始终排除在变更范围外。

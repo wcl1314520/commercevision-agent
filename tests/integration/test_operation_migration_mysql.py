@@ -31,6 +31,8 @@ WORKSPACE_ID_TABLES = {
     "embedding_records",
     "collection_rebuilds",
     "collection_rebuild_placements",
+    "creative_plan_versions",
+    "creative_plans",
     "product_search_documents",
     "outbox_events",
     "planning_context_snapshots",

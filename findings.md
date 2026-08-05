@@ -738,3 +738,11 @@
   workspace、resource type 与 resource id，不能盲信通用幂等表中的 JSON。
 - Prompt 发布与 production selection 是两个事实：发布将 revision 置为 PRODUCTION 并可推进默认 pointer；显式
   rollback 只 CAS 更新 pointer。保留多个 PRODUCTION revision 才能在不篡改历史的前提下快速回退。
+- Creative Plan 的不可变版本与可变 head 必须拆表：版本表只追加并由 trigger 禁止更新，head 只允许
+  `version/current_version_number + 1` 的原子推进；任何 stale CAS 都在同一事务回滚新版本，不能留下 orphan。
+- Creative Plan 的 tenant-owned 主键本身也必须以 `workspace_id` 开头，不能只让二级唯一键/索引 tenant-first；
+  两张表最终均使用 `(workspace_id, id)` 复合主键，并由真实迁移检查锁定顺序与 binary-exact collation。
+- Workflow deadline 是计划保留期的上限和冻结事实：首次创建取 Workflow deadline，后续编辑只可保留原 deadline；
+  Workflow deadline 被延长不能延长计划，被缩短则 stale revision 失败关闭，不能悄悄改变既有 retention。
+- 等待计划审批期间只允许 `USER` revision；Agent 版本仍只允许在 `PLANNING/create_plan` 写入。这样 Web 编辑可
+  形成新 immutable version，同时不会让 Planner 在审批节点越权改写用户正在审阅的计划。

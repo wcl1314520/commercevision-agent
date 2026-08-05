@@ -192,6 +192,9 @@
   提交 `1db64eb` 已由精确 GitHub Actions `30970567724` attempt 2 四路全绿验证，Ticket 03 完成
 - Ticket 04 已按 blockers-first 解锁并进入 TDD；先锁定 MySQL authority/optimistic head 的公开行为，
   本状态提交取得精确 CI 全绿前不开始实现代码
+- Ticket 04 本地实现与审查已完成：tenant-first 复合主键/FK、immutable versions、CAS head、
+  exact provenance authority、审批期 USER revision、Workflow retention clamp、按版本读取与有序重建均已闭合；
+  当前只允许提交、推送并等待精确 GitHub Actions，全绿前 Ticket 05 保持未启动
 
 ## 成功标准
 

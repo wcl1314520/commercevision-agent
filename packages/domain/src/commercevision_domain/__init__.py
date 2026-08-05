@@ -50,6 +50,7 @@ from .catalog import SKU, DuplicateExternalIdentifierError, Product
 from .creative_plans import (
     CreativePlanCitationSelection,
     CreativePlanDirection,
+    CreativePlanHead,
     CreativePlanPayload,
     CreativePlanProvenance,
     CreativePlanSource,
@@ -207,6 +208,7 @@ __all__ = [
     "ControlledProductText",
     "CreativePlanCitationSelection",
     "CreativePlanDirection",
+    "CreativePlanHead",
     "CreativePlanPayload",
     "CreativePlanProvenance",
     "CreativePlanSource",

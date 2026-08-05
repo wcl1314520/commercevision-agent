@@ -12,6 +12,7 @@ from enum import StrEnum
 from unicodedata import category
 
 from commercevision_domain.ids import canonicalize_uuid, new_uuid7
+from commercevision_domain.workflow.errors import ConcurrencyError
 from commercevision_domain.workspace_identity import validate_workspace_id
 
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", re.ASCII)
@@ -552,4 +553,100 @@ class CreativePlanVersion:
             actor_id=actor_id,
             revision_reason=reason,
             now=now,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CreativePlanHead:
+    """Mutable-head fact represented as an immutable optimistic snapshot."""
+
+    workspace_id: str
+    workflow_id: str
+    creative_plan_id: str
+    current_version_id: str
+    current_version_number: int
+    version: int
+    retain_until: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        validate_workspace_id(self.workspace_id)
+        _validate_uuid(self.workflow_id, "Workflow id")
+        _validate_uuid(self.creative_plan_id, "Creative Plan id")
+        _validate_uuid(self.current_version_id, "Creative Plan current version id")
+        _validate_positive_integer(
+            self.current_version_number,
+            "Creative Plan current version",
+            maximum=1_000_000,
+        )
+        _validate_positive_integer(
+            self.version,
+            "Creative Plan head version",
+            maximum=1_000_000,
+        )
+        if self.version != self.current_version_number:
+            raise ValueError("Creative Plan head version diverges from its current version")
+        for value, field_name in (
+            (self.retain_until, "retention deadline"),
+            (self.created_at, "creation time"),
+            (self.updated_at, "update time"),
+        ):
+            if value.tzinfo is None or value.utcoffset() != timedelta(0):
+                raise ValueError(f"Creative Plan {field_name} must be timezone-aware UTC")
+        if self.updated_at < self.created_at:
+            raise ValueError("Creative Plan update time precedes its creation time")
+        if self.retain_until < self.created_at:
+            raise ValueError("Creative Plan retention ends before its creation time")
+
+    @classmethod
+    def from_first_version(
+        cls,
+        version: CreativePlanVersion,
+        *,
+        retain_until: datetime,
+    ) -> CreativePlanHead:
+        if version.version_number != 1 or version.supersedes_version_id is not None:
+            raise ValueError("Creative Plan head requires an initial version")
+        return cls(
+            workspace_id=version.workspace_id,
+            workflow_id=version.workflow_id,
+            creative_plan_id=version.creative_plan_id,
+            current_version_id=version.id,
+            current_version_number=version.version_number,
+            version=1,
+            retain_until=retain_until,
+            created_at=version.created_at,
+            updated_at=version.created_at,
+        )
+
+    def advance(
+        self,
+        version: CreativePlanVersion,
+        *,
+        expected_version: int,
+    ) -> CreativePlanHead:
+        if type(expected_version) is not int or expected_version != self.version:
+            raise ConcurrencyError(
+                f"Creative Plan head version is {self.version}, expected {expected_version}"
+            )
+        if (
+            version.workspace_id != self.workspace_id
+            or version.workflow_id != self.workflow_id
+            or version.creative_plan_id != self.creative_plan_id
+            or version.version_number != self.current_version_number + 1
+            or version.supersedes_version_id != self.current_version_id
+            or version.created_at < self.updated_at
+        ):
+            raise ConcurrencyError("Creative Plan version does not advance the current head")
+        return type(self)(
+            workspace_id=self.workspace_id,
+            workflow_id=self.workflow_id,
+            creative_plan_id=self.creative_plan_id,
+            current_version_id=version.id,
+            current_version_number=version.version_number,
+            version=self.version + 1,
+            retain_until=self.retain_until,
+            created_at=self.created_at,
+            updated_at=version.created_at,
         )

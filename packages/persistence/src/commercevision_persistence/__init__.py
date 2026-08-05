@@ -7,6 +7,7 @@ from .catalog import SqlAlchemyCatalogUnitOfWork
 from .checkpointer import MySQLCheckpointSaver
 from .collection_rebuild_control import MySqlCollectionRebuildControl
 from .collection_rebuild_repository import MySqlCollectionRebuildRepository
+from .creative_plans import SqlAlchemyCreativePlanUnitOfWork
 from .database import (
     Database,
     create_database,
@@ -75,6 +76,7 @@ __all__ = [
     "SqlAlchemyAssetUnitOfWork",
     "SqlAlchemyBrandProfileUnitOfWork",
     "SqlAlchemyCatalogUnitOfWork",
+    "SqlAlchemyCreativePlanUnitOfWork",
     "SqlAlchemyOperationUnitOfWork",
     "SqlAlchemyOperatorUnitOfWork",
     "SqlAlchemyProductBriefUnitOfWork",
