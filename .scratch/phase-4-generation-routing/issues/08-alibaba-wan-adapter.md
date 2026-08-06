@@ -5,7 +5,7 @@ with async task submission/query and bounded result handling.
 
 **Blocked by:** 03, 06.
 
-**Status:** in_progress
+**Status:** complete
 
 ## Comments
 
@@ -18,10 +18,13 @@ with async task submission/query and bounded result handling.
   Ticket 12 or are not published for the workspace-specific API. Local release gates are green at
   `1653 passed, 1 skipped`, Ruff `505 files`, Mypy baseline `427` with zero drift, plus lock,
   license and vulnerability audits. Exact implementation-SHA CI remains the completion gate.
+- 2026-08-06: Implementation commit `16f18960c06db9abc19626fe7af70fb27ee70619` passed exact
+  GitHub Actions run `31110859233` in all four jobs: Python checks, Web checks, Container builds,
+  and Security/SBOM. All acceptance items are closed without live credentials or paid calls.
 
-- [ ] Endpoint capability pins workspace-specific host, region, model, protocol mode and adapter/configuration hash.
-- [ ] Async submit persists the first task/request identity; query maps pending/success/failure/rejection without resubmission.
-- [ ] Sync and async protocols have separate capabilities/parsers; neither silently falls back to the other.
-- [ ] Temporary result URLs are untrusted handles and never become Candidate identity or browser URLs.
-- [ ] Mounted-secret, exact egress, byte/pixel/type/deadline and redaction controls match existing Alibaba Provider standards.
-- [ ] Official-contract mock tests cover task expiry, malformed status, partial results, throttling, region mismatch and secret rotation.
+- [x] Endpoint capability pins workspace-specific host, region, model, protocol mode and adapter/configuration hash.
+- [x] Async submit persists the first task/request identity; query maps pending/success/failure/rejection without resubmission.
+- [x] Sync and async protocols have separate capabilities/parsers; neither silently falls back to the other.
+- [x] Temporary result URLs are untrusted handles and never become Candidate identity or browser URLs.
+- [x] Mounted-secret, exact egress, byte/pixel/type/deadline and redaction controls match existing Alibaba Provider standards.
+- [x] Official-contract mock tests cover task expiry, malformed status, partial results, throttling, region mismatch and secret rotation.

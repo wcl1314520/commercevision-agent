@@ -2282,3 +2282,16 @@
 - Ticket 08 本地发布门禁全绿：unit+contract `1653 passed, 1 skipped`（仅 opt-in OSS live）、全仓 Ruff
   format/check `505 files`、strict touched-code Mypy、全工作区 Mypy baseline `427` 零漂移、lock、Python
   license、漏洞审计和 diff check。未使用任何真实凭据或付费调用。
+
+# 2026-08-06 Phase 4 Ticket 08 放行与 Ticket 09 启动
+
+- Ticket 08 实现提交 `16f18960c06db9abc19626fe7af70fb27ee70619` 已由精确 GitHub Actions
+  `31110859233` 四路全绿验证：Python checks、Web checks、Container builds、Security 与 SBOM
+  全部成功。首次 push 的瞬时连接重置经同一非强制提交重试后成功，远端与本地提交身份一致。
+- Ticket 08 六项验收全部闭合并置为 `complete`。全程只使用 deterministic/mock HTTP 证据，未读取、
+  使用、持久化或输出任何真实 Provider 凭据，也未发起付费调用。
+- Ticket 09 的 02/05/06 blockers 均已完成，工单已置为 `in_progress`。只读接缝核对确认首个 RED
+  应覆盖现有 Generation Candidate Outbox command 进入同一 Worker/Inbox/Durable Operation executor
+  链路后的缺失收敛行为；继续复用既有 Registry、Lease 和 readiness 框架，不建立第二套任务系统。
+- Ticket 08 的长 CI watch 达到本地工具 15 分钟上限后退出；未将超时误判为 CI 失败，改由 GitHub
+  权威状态查询与后续 watch 确认 Python 全量 pytest 完成，最终运行正常四路全绿。

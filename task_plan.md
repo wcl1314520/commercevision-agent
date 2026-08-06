@@ -272,6 +272,10 @@
   四路全绿放行并正式完成；Ticket 08 Alibaba Wan production Adapter 是下一 blockers-first 目标。
 - Ticket 07 状态提交 `2d79d97` 已由 GitHub Actions `31105556687` 四路全绿验证；Ticket 08 已解除
   门禁并进入 `in_progress`，首个 RED 前只核对 Alibaba 官方 async submit/query 契约。
+- Ticket 08 Alibaba Wan Adapter 提交 `16f1896` 已由 GitHub Actions `31110859233` 四路全绿放行并
+  正式完成；Ticket 09 generation Worker convergence 已按 blockers-first 解锁并进入 `in_progress`。
+- Ticket 09 首个纵向 RED 固定复用现有 Outbox/Inbox、Worker、Durable Operation、Executor Registry、
+  Lease 与 readiness 接缝，证明 generation command 当前尚未收敛到可执行 executor；不引入平行任务系统。
 
 ## 成功标准
 

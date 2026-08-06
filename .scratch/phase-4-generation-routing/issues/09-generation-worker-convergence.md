@@ -5,7 +5,15 @@ outside transactions, validates result bytes, persists assets/candidates/usage a
 
 **Blocked by:** 02, 05, 06.
 
-**Status:** pending
+**Status:** in_progress
+
+## Comments
+
+- 2026-08-06: Blockers 02/05/06 are complete, and Ticket 08 implementation commit
+  `16f18960c06db9abc19626fe7af70fb27ee70619` passed exact GitHub Actions run `31110859233`
+  in all four jobs. Ticket 09 is unblocked. Its first RED will exercise the existing public
+  Outbox/Inbox -> Worker -> Durable Operation executor seam; no parallel queue or job framework
+  will be introduced.
 
 - [ ] Existing Worker/registry/lease/Outbox/Inbox/readiness framework owns the queue; no parallel job system or service framework is introduced.
 - [ ] Authority is rechecked before dispatch and before late result availability.
