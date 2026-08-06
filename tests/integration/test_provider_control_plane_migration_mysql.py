@@ -23,6 +23,7 @@ _TABLES = {
     "model_route_policy_versions",
     "model_route_policy_heads",
     "provider_endpoint_observations",
+    "model_route_decisions",
 }
 
 
@@ -76,7 +77,9 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
                 "WHERE TABLE_SCHEMA = DATABASE() AND ((TABLE_NAME = "
                 "'provider_endpoint_capability_versions' AND COLUMN_NAME IN "
                 "('id', 'provider_id', 'endpoint_id', 'unit_price', 'created_at')) OR "
-                "(TABLE_NAME = 'model_route_policy_heads' AND COLUMN_NAME = 'workspace_id'))"
+                "(TABLE_NAME = 'model_route_policy_heads' AND COLUMN_NAME = 'workspace_id') OR "
+                "(TABLE_NAME = 'model_route_decisions' AND COLUMN_NAME IN "
+                "('workspace_id', 'idempotency_scope_sha256', 'estimated_cost', 'decided_at')))"
             )
         ).mappings()
         columns = {(row["TABLE_NAME"], row["COLUMN_NAME"]): row for row in rows}
@@ -94,6 +97,16 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
         )
         price = columns[("provider_endpoint_capability_versions", "unit_price")]
         assert (price["NUMERIC_PRECISION"], price["NUMERIC_SCALE"]) == (20, 6)
+        assert columns[("model_route_decisions", "workspace_id")]["COLLATION_NAME"] == (
+            "utf8mb4_0900_bin"
+        )
+        assert (
+            columns[("model_route_decisions", "idempotency_scope_sha256")]["COLLATION_NAME"]
+            == "utf8mb4_0900_bin"
+        )
+        assert columns[("model_route_decisions", "decided_at")]["DATETIME_PRECISION"] == 6
+        route_cost = columns[("model_route_decisions", "estimated_cost")]
+        assert (route_cost["NUMERIC_PRECISION"], route_cost["NUMERIC_SCALE"]) == (20, 6)
 
         triggers = set(
             connection.execute(
@@ -107,6 +120,7 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
             "trg_provider_capability_versions_immutable",
             "trg_model_route_policy_versions_immutable",
             "trg_provider_endpoint_observations_immutable",
+            "trg_model_route_decisions_immutable",
         }.issubset(triggers)
 
         connection.execute(

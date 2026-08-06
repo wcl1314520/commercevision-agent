@@ -93,6 +93,8 @@ from .indexing_transfer import (
     ImageIndexDataTransferDenied,
     ImageIndexDataTransferPolicy,
 )
+from .model_router import ModelRouteDecisionResult, ModelRouterApplicationService
+from .model_router_ports import ModelRoutingAuthoritySnapshot
 from .operation_recovery import OperationRecoveryService
 from .operations import (
     DurableOperationWorker,
@@ -289,6 +291,9 @@ __all__ = [
     "build_event_routing_registry",
     "InboxCoordinator",
     "MalformedEventPayloadError",
+    "ModelRouteDecisionResult",
+    "ModelRouterApplicationService",
+    "ModelRoutingAuthoritySnapshot",
     "NullAssetValidationObserver",
     "NullIndexingObserver",
     "NullRetrievalObserver",

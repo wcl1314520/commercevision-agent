@@ -203,8 +203,8 @@ def select_model_route(
         raise ValueError("Route request is invalid")
     if not isinstance(policy, ModelRoutePolicy) or policy.version != request.route_policy_version:
         raise ValueError("Route policy version does not match the request")
-    if not isinstance(capabilities, tuple) or not 1 <= len(capabilities) <= _MAX_ENDPOINTS:
-        raise ValueError("Route capabilities must be a bounded non-empty tuple")
+    if not isinstance(capabilities, tuple) or len(capabilities) > _MAX_ENDPOINTS:
+        raise ValueError("Route capabilities must be a bounded tuple")
     if any(not isinstance(item, ProviderEndpointCapabilityVersion) for item in capabilities):
         raise ValueError("Route capabilities contain an invalid version")
     capability_ids = [item.id for item in capabilities]
@@ -219,6 +219,8 @@ def select_model_route(
         raise ValueError("Route observations contain duplicate endpoint versions")
     if not set(observation_ids).issubset(capability_ids):
         raise ValueError("Route observation does not match a supplied capability version")
+    if not capabilities:
+        raise NoEligibleModelRouteError(((ModelRouteRejectionCode.NO_CURRENT_CAPABILITY, 1),))
     _validate_utc(now, "Route decision time")
     if now >= request.deadline_at:
         raise ValueError("Route request deadline has expired")

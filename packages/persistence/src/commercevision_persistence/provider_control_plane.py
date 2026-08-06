@@ -83,7 +83,7 @@ def _parse_canonical_datetime(value: object) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _capability_from_model(
+def capability_from_model(
     model: ProviderEndpointCapabilityVersionModel,
 ) -> ProviderEndpointCapabilityVersion:
     data = model.capability_json
@@ -158,7 +158,7 @@ def _route_policy_head_from_model(model: ModelRoutePolicyHeadModel) -> ModelRout
     )
 
 
-def _route_policy_version_from_model(
+def route_policy_version_from_model(
     model: ModelRoutePolicyVersionModel,
 ) -> ModelRoutePolicyVersion:
     data = model.policy_json
@@ -261,7 +261,7 @@ class ProviderControlPlaneRepository:
                 ProviderEndpointCapabilityVersionModel.id == capability_version_id,
             )
         )
-        return _capability_from_model(model) if model is not None else None
+        return capability_from_model(model) if model is not None else None
 
     def add_capability_version(
         self,
@@ -366,7 +366,7 @@ class ProviderControlPlaneRepository:
                 ModelRoutePolicyVersionModel.id == policy_version_id,
             )
         )
-        return _route_policy_version_from_model(model) if model is not None else None
+        return route_policy_version_from_model(model) if model is not None else None
 
     def add_route_policy_version(self, policy_version: ModelRoutePolicyVersion) -> None:
         policy = policy_version.policy

@@ -26,6 +26,7 @@ from .indexing_requests import (
     ProductFusedIndexRequestResult,
 )
 from .indexing_status import SqlAlchemyImageIndexStatusQueries
+from .model_router import SqlAlchemyModelRouterUnitOfWork
 from .operations import SqlAlchemyOperationUnitOfWork
 from .operator import SqlAlchemyOperatorUnitOfWork
 from .planning_context_authority import MySqlPlanningContextAuthority
@@ -85,6 +86,7 @@ __all__ = [
     "SqlAlchemyCatalogUnitOfWork",
     "SqlAlchemyCreativePlanUnitOfWork",
     "SqlAlchemyOperationUnitOfWork",
+    "SqlAlchemyModelRouterUnitOfWork",
     "SqlAlchemyOperatorUnitOfWork",
     "SqlAlchemyProductBriefUnitOfWork",
     "SqlAlchemyProductBriefViewQueries",

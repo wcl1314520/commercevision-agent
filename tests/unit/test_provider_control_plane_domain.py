@@ -253,3 +253,35 @@ def test_route_policy_publish_and_rollback_preserve_immutable_versions() -> None
     assert head.current_version_number == 2
     assert head.latest_version_number == 2
     assert head.version == 4
+
+
+def test_route_policy_hash_survives_fixed_scale_mysql_decimal_round_trip() -> None:
+    original = ModelRoutePolicyVersion.create(
+        id="019b0000-0000-7000-8000-000000000703",
+        workspace_id="workspace-route-policy",
+        policy_key="image-generation",
+        version_number=1,
+        policy=ModelRoutePolicy(
+            version="price-first.v1",
+            quality_weight=Decimal("0"),
+            availability_weight=Decimal("0"),
+            latency_weight=Decimal("0"),
+            quota_weight=Decimal("0"),
+            price_weight=Decimal("1"),
+        ),
+        actor_id="route-admin",
+        now=NOW,
+    )
+    reconstructed = replace(
+        original,
+        policy=ModelRoutePolicy(
+            version="price-first.v1",
+            quality_weight=Decimal("0.000000"),
+            availability_weight=Decimal("0.000000"),
+            latency_weight=Decimal("0.000000"),
+            quota_weight=Decimal("0.000000"),
+            price_weight=Decimal("1.000000"),
+        ),
+    )
+
+    assert reconstructed.policy_sha256 == original.policy_sha256

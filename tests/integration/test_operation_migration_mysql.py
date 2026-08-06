@@ -31,6 +31,7 @@ WORKSPACE_ID_TABLES = {
     "embedding_records",
     "model_route_policy_heads",
     "model_route_policy_versions",
+    "model_route_decisions",
     "collection_rebuilds",
     "collection_rebuild_placements",
     "creative_plan_versions",

@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from enum import StrEnum
 
 from commercevision_domain.ids import canonicalize_uuid
@@ -20,6 +21,7 @@ from commercevision_domain.workspace_identity import validate_workspace_id
 
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", re.ASCII)
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
+_SCORE_QUANTUM = Decimal("0.000001")
 _FORBIDDEN_DISCOVERY_KEYS = frozenset(
     {"api_key", "apikey", "authorization", "credential", "password", "secret", "token"}
 )
@@ -29,6 +31,10 @@ def _validate_token(value: str, field_name: str) -> str:
     if not isinstance(value, str) or _TOKEN_PATTERN.fullmatch(value) is None:
         raise ValueError(f"{field_name} is invalid")
     return value
+
+
+def _canonical_score(value: Decimal) -> str:
+    return format(value.quantize(_SCORE_QUANTUM), "f")
 
 
 def _validate_utc(value: datetime, field_name: str) -> datetime:
@@ -279,11 +285,11 @@ class ModelRoutePolicyVersion:
             "policy_key": self.policy_key,
             "version_number": self.version_number,
             "policy_version": self.policy.version,
-            "quality_weight": str(self.policy.quality_weight),
-            "availability_weight": str(self.policy.availability_weight),
-            "latency_weight": str(self.policy.latency_weight),
-            "quota_weight": str(self.policy.quota_weight),
-            "price_weight": str(self.policy.price_weight),
+            "quality_weight": _canonical_score(self.policy.quality_weight),
+            "availability_weight": _canonical_score(self.policy.availability_weight),
+            "latency_weight": _canonical_score(self.policy.latency_weight),
+            "quota_weight": _canonical_score(self.policy.quota_weight),
+            "price_weight": _canonical_score(self.policy.price_weight),
             "maximum_observation_age_seconds": self.policy.maximum_observation_age_seconds,
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat().replace("+00:00", "Z"),

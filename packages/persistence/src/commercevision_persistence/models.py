@@ -1445,6 +1445,7 @@ class AuditEventModel(Base):
 from . import brand_profile_models as _brand_profile_models  # noqa: E402, F401, I001
 from . import creative_plan_models as _creative_plan_models  # noqa: E402, F401, I001
 from . import indexing_models as _indexing_models  # noqa: E402, F401, I001
+from . import model_router_models as _model_router_models  # noqa: E402, F401, I001
 from . import product_brief_models as _product_brief_models  # noqa: E402, F401, I001
 from . import planning_context_models as _planning_context_models  # noqa: E402, F401, I001
 from . import prompt_registry_models as _prompt_registry_models  # noqa: E402, F401, I001

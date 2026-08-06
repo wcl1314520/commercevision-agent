@@ -5,7 +5,7 @@ pointers, Route Policies, circuits and quota observations with transactional pub
 
 **Blocked by:** 01.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Alembic migrations use workspace-first tenant identities where applicable, binary-exact IDs, `DATETIME(6)` and `DECIMAL(20,6)` money.
 - [x] Publishing appends an immutable version and CAS-advances a current pointer; rollback moves only the pointer.
@@ -15,6 +15,10 @@ pointers, Route Policies, circuits and quota observations with transactional pub
 - [x] Empty/upgrade/downgrade/re-upgrade, drift, immutability and real-MySQL concurrency tests pass.
 
 ## Comments
+
+- Implementation commit `b5bd24ae86730dc38d94646c41c3ae0ebb839a4a` is green in exact
+  GitHub Actions run `31077517988`; Python, Web, Container builds, Gitleaks and SBOM all passed.
+  Ticket 03 is complete and Ticket 04 is unblocked.
 
 - Ticket 01 routing contracts and Ticket 02 generation/candidate/call/usage contracts are complete;
   the control-plane persistence seam is ready for its first migration-level RED.

@@ -2067,3 +2067,26 @@
   Ruff、touched-code Mypy、431 条既有 Mypy baseline 零漂移、Alembic check 与 `git diff --check` 全绿。
   本机完整 pytest 两次分别被 5/15 分钟执行窗口终止且无失败输出；不冒充全量通过，等待 exact-SHA CI
   使用约 20 分钟的正式窗口完成最终判定。
+
+# 2026-08-06 Phase 4 Ticket 03 放行与 Ticket 04 RED
+
+- Ticket 03 权威提交 `b5bd24ae86730dc38d94646c41c3ae0ebb839a4a` 已由精确 GitHub Actions
+  `31077517988` 四路全绿验证；Python、Web、Container builds、Gitleaks 与 SBOM 全部成功，Ticket 03
+  正式完成。
+- Ticket 04 blockers-first 门禁解除并进入 `in_progress`。首个 public application RED 锁定 server-owned
+  capability/policy/observation authority、不可变 Route Decision、同事务 audit/idempotency，以及 replay
+  返回原决定且不读取可变当前权威或追加副作用。
+
+# 2026-08-06 Phase 4 Ticket 04 本地实现完成
+
+- 新增独立 Model Router 应用/Port/MySQL 深模块；调用方只提交可信 Route Request 与 policy key，当前
+  capability versions、exact policy row 和 workspace-scoped latest observations 全由服务端加载并锁定。
+- 路由成功在同一事务写 immutable Route Decision、Audit 与 scoped Idempotency；重放同时核验 response hash
+  和不可变决定行，即使当前 circuit/quota authority 已变化也只返回原决定且不追加副作用。
+- 新增 tenant-first `model_route_decisions`、五组权威外键、`DECIMAL(20,6)` 成本、`DATETIME(6)`、binary-exact
+  identity、immutable UPDATE trigger 及完整 downgrade/re-upgrade；Alembic metadata 无漂移。
+- 真实 MySQL 覆盖预算等号/超限、quota exhaustion、OPEN circuit、未提交 circuit transition 并发锁、stale
+  policy pointer、foreign workspace、decision immutability 和重放唯一性。观测加载从审查发现的 bounded N+1
+  收敛为单次 locking anti-join query。
+- 完整 unit/contract `1521 passed, 1 skipped`；全仓 Ruff、strict touched-code Mypy 与 431 条 baseline 零漂移。
+  Ticket 04 验收项已闭合，但在 exact-SHA GitHub Actions 四路全绿前保持 `in_progress`，Ticket 05 不启动。
