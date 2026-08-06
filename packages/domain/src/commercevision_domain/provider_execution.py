@@ -109,7 +109,7 @@ class ProviderCall:
     durable_operation_id: str
     operation_attempt: int
     call_index: int
-    route_decision_id: str
+    route_decision_sha256: str
     endpoint_capability_version_id: str
     provider: str
     model: str
@@ -126,11 +126,11 @@ class ProviderCall:
             (self.id, "Provider Call id"),
             (self.candidate_slot_id, "Candidate Slot id"),
             (self.durable_operation_id, "Durable Operation id"),
-            (self.route_decision_id, "Model Route Decision id"),
             (self.endpoint_capability_version_id, "Endpoint Capability Version id"),
         ):
             _validate_uuid(value, field_name)
         validate_workspace_id(self.workspace_id)
+        _validate_sha256(self.route_decision_sha256, "Model Route Decision hash")
         if (
             not isinstance(self.operation_attempt, int)
             or isinstance(self.operation_attempt, bool)

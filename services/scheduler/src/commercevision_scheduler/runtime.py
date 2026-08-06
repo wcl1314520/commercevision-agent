@@ -43,6 +43,7 @@ class CeleryMessagePublisher:
             {
                 EventQueue.WORKFLOW: settings.workflow_queue_name,
                 EventQueue.ASSET: settings.asset_queue_name,
+                EventQueue.GENERATION: settings.generation_queue_name,
                 EventQueue.INDEX: settings.index_queue_name,
                 EventQueue.MAINTENANCE: settings.maintenance_queue_name,
             }

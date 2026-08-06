@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import oss2
 from commercevision_contracts.object_storage import (
@@ -16,6 +16,7 @@ from commercevision_contracts.object_storage import (
     ConditionalDeleteRequest,
     ConditionalWriteRequest,
     DeleteMarkerRequest,
+    GenerationMediaWriteRequest,
     ObjectReference,
     ObjectStat,
     ObjectVersionEntry,
@@ -105,7 +106,7 @@ class OssObjectStorage:
         signers: Mapping[StorageLocationClass, Any] | None = None,
         readiness_clients: Mapping[StorageLocationClass, Any] | None = None,
     ) -> None:
-        self._bucket_names = dict(buckets)
+        self._bucket_names: dict[StorageLocationClass, str] = dict(buckets)
         self._require_encryption = require_encryption
         self._credential_provider = credential_provider
         request_timeout = (connect_timeout, read_timeout or connect_timeout)
@@ -365,21 +366,34 @@ class OssObjectStorage:
         return copied
 
     def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat:
+        return self._write_if_absent(
+            request,
+            metadata=request.metadata,
+            require_encryption=request.require_encryption,
+        )
+
+    def _write_if_absent(
+        self,
+        request: ConditionalWriteRequest | GenerationMediaWriteRequest,
+        *,
+        metadata: Mapping[str, str],
+        require_encryption: bool,
+    ) -> ObjectStat:
         try:
             existing = self._stat_if_present(request.reference)
         except StorageUnavailableError as exc:
             raise StorageWriteSafeToRetryError(
                 "object storage became unavailable before conditional write"
             ) from exc
-        metadata = {**request.metadata, "sha256": request.expected_sha256}
-        require_encryption = self._require_encryption or request.require_encryption
+        expected_metadata = {**metadata, "sha256": request.expected_sha256}
+        require_encryption = self._require_encryption or require_encryption
         if existing is not None:
             if not written_object_matches(
                 existing,
                 expected_length=len(request.payload),
                 expected_sha256=request.expected_sha256,
                 expected_content_type=request.content_type,
-                expected_metadata=metadata,
+                expected_metadata=expected_metadata,
                 require_encryption=require_encryption,
             ):
                 raise StoragePreconditionError(
@@ -393,7 +407,7 @@ class OssObjectStorage:
         headers = {
             "Content-Type": request.content_type,
             "x-oss-forbid-overwrite": "true",
-            **{f"x-oss-meta-{name}": value for name, value in metadata.items()},
+            **{f"x-oss-meta-{name}": value for name, value in expected_metadata.items()},
         }
         if require_encryption:
             headers["x-oss-server-side-encryption"] = "AES256"
@@ -410,7 +424,7 @@ class OssObjectStorage:
                 expected_length=len(request.payload),
                 expected_sha256=request.expected_sha256,
                 expected_content_type=request.content_type,
-                expected_metadata=metadata,
+                expected_metadata=expected_metadata,
                 require_encryption=require_encryption,
             ):
                 _require_copy_version_id(existing.reference.version_id, role="written object")
@@ -432,7 +446,7 @@ class OssObjectStorage:
                 expected_length=len(request.payload),
                 expected_sha256=request.expected_sha256,
                 expected_content_type=request.content_type,
-                expected_metadata=metadata,
+                expected_metadata=expected_metadata,
                 require_encryption=require_encryption,
             ):
                 raise StoragePreconditionError(
@@ -454,6 +468,20 @@ class OssObjectStorage:
                 raise
             raise StoragePreconditionError("written object verification failed") from exc
         return written
+
+    def write_generation_media_if_absent(
+        self,
+        request: GenerationMediaWriteRequest,
+    ) -> ObjectStat:
+        return self._write_if_absent(
+            request,
+            metadata={
+                "durable-operation-id": request.durable_operation_id,
+                "candidate-slot-id": request.candidate_slot_id,
+                "provider-call-id": request.provider_call_id,
+            },
+            require_encryption=True,
+        )
 
     def _cleanup_failed_write(
         self,
@@ -526,10 +554,11 @@ class OssObjectStorage:
         except (oss2.exceptions.OssError, oss2.exceptions.RequestError) as exc:
             _raise_oss_error(exc)
         entries: list[ObjectVersionEntry] = []
-        for items, kind in (
+        version_groups: tuple[tuple[list[Any], Literal["OBJECT", "DELETE_MARKER"]], ...] = (
             (result.versions, "OBJECT"),
             (result.delete_marker, "DELETE_MARKER"),
-        ):
+        )
+        for items, kind in version_groups:
             for item in items:
                 if item.key != request.reference.key:
                     continue

@@ -26,6 +26,10 @@ _TABLES = {
     "model_route_decisions",
     "generation_batches",
     "candidate_slots",
+    "generation_dispatch_attempts",
+    "generation_provider_calls",
+    "generation_usage_records",
+    "candidate_images",
 }
 
 
@@ -75,6 +79,31 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
     }
     assert route_columns["authorized_asset_version_ids_json"]["nullable"] is True
     assert route_columns["route_candidate_count"]["nullable"] is True
+    assert route_columns["route_request_json"]["nullable"] is True
+    asset_version_columns = {
+        column["name"]: column for column in inspector.get_columns("asset_versions")
+    }
+    assert asset_version_columns["upload_session_id"]["nullable"] is True
+    assert asset_version_columns["generation_provider_call_id"]["nullable"] is True
+    assert "fk_asset_version_generation_provider_call" in {
+        foreign_key["name"] for foreign_key in inspector.get_foreign_keys("asset_versions")
+    }
+    assert "ck_asset_version_exactly_one_origin" in {
+        constraint["name"] for constraint in inspector.get_check_constraints("asset_versions")
+    }
+    assert tuple(
+        inspector.get_pk_constraint("generation_dispatch_attempts")["constrained_columns"]
+    ) == ("workspace_id", "id")
+    assert tuple(
+        inspector.get_pk_constraint("generation_provider_calls")["constrained_columns"]
+    ) == ("workspace_id", "id")
+    assert tuple(
+        inspector.get_pk_constraint("generation_usage_records")["constrained_columns"]
+    ) == ("workspace_id", "id")
+    assert tuple(inspector.get_pk_constraint("candidate_images")["constrained_columns"]) == (
+        "workspace_id",
+        "id",
+    )
 
     with engine.begin() as connection:
         rows = connection.execute(
@@ -86,7 +115,15 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
                 "('id', 'provider_id', 'endpoint_id', 'unit_price', 'created_at')) OR "
                 "(TABLE_NAME = 'model_route_policy_heads' AND COLUMN_NAME = 'workspace_id') OR "
                 "(TABLE_NAME = 'model_route_decisions' AND COLUMN_NAME IN "
-                "('workspace_id', 'idempotency_scope_sha256', 'estimated_cost', 'decided_at')))"
+                "('workspace_id', 'idempotency_scope_sha256', 'estimated_cost', 'decided_at')) OR "
+                "(TABLE_NAME = 'generation_dispatch_attempts' AND COLUMN_NAME IN "
+                "('workspace_id', 'request_sha256', 'provider_request_id', 'created_at')) OR "
+                "(TABLE_NAME = 'generation_provider_calls' AND COLUMN_NAME IN "
+                "('workspace_id', 'route_decision_sha256', 'observed_at')) OR "
+                "(TABLE_NAME = 'generation_usage_records' AND COLUMN_NAME IN "
+                "('estimated_amount', 'actual_amount', 'recorded_at')) OR "
+                "(TABLE_NAME = 'candidate_images' AND COLUMN_NAME IN "
+                "('content_sha256', 'created_at', 'retention_deadline')))"
             )
         ).mappings()
         columns = {(row["TABLE_NAME"], row["COLUMN_NAME"]): row for row in rows}
@@ -114,6 +151,29 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
         assert columns[("model_route_decisions", "decided_at")]["DATETIME_PRECISION"] == 6
         route_cost = columns[("model_route_decisions", "estimated_cost")]
         assert (route_cost["NUMERIC_PRECISION"], route_cost["NUMERIC_SCALE"]) == (20, 6)
+        for column_name in ("workspace_id", "request_sha256", "provider_request_id"):
+            assert (
+                columns[("generation_dispatch_attempts", column_name)]["COLLATION_NAME"]
+                == "utf8mb4_0900_bin"
+            )
+        assert columns[("generation_dispatch_attempts", "created_at")]["DATETIME_PRECISION"] == 6
+        assert columns[("generation_provider_calls", "workspace_id")]["COLLATION_NAME"] == (
+            "utf8mb4_0900_bin"
+        )
+        assert (
+            columns[("generation_provider_calls", "route_decision_sha256")]["COLLATION_NAME"]
+            == "utf8mb4_0900_bin"
+        )
+        assert columns[("generation_provider_calls", "observed_at")]["DATETIME_PRECISION"] == 6
+        for amount_column in ("estimated_amount", "actual_amount"):
+            amount = columns[("generation_usage_records", amount_column)]
+            assert (amount["NUMERIC_PRECISION"], amount["NUMERIC_SCALE"]) == (20, 6)
+        assert columns[("generation_usage_records", "recorded_at")]["DATETIME_PRECISION"] == 6
+        assert columns[("candidate_images", "content_sha256")]["COLLATION_NAME"] == (
+            "utf8mb4_0900_bin"
+        )
+        assert columns[("candidate_images", "created_at")]["DATETIME_PRECISION"] == 6
+        assert columns[("candidate_images", "retention_deadline")]["DATETIME_PRECISION"] == 6
 
         triggers = set(
             connection.execute(
@@ -130,6 +190,10 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
             "trg_model_route_decisions_immutable",
             "trg_generation_batches_immutable",
             "trg_candidate_slots_immutable",
+            "trg_generation_dispatch_attempt_identity_immutable",
+            "trg_generation_provider_calls_immutable",
+            "trg_generation_usage_records_immutable",
+            "trg_candidate_images_immutable",
         }.issubset(triggers)
 
         connection.execute(

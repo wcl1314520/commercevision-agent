@@ -144,7 +144,8 @@ export interface AssetVersionResponseV1 {
   workspace_id: string;
   asset_id: string;
   version_number: number;
-  upload_session_id: string;
+  upload_session_id: string | null;
+  generation_provider_call_id: string | null;
   filename: string;
   sha256: string;
   byte_size: number;

@@ -182,6 +182,7 @@ class ModelRouteAuthorityRepository:
                 creative_plan_version_id=request.creative_plan_version_id,
                 plan_approval_id=request.plan_approval_id,
                 route_request_sha256=decision.request_sha256,
+                route_request_json=request.canonical_data(),
                 authorized_asset_version_ids_json=list(request.authorized_asset_version_ids),
                 route_candidate_count=request.candidate_count,
                 policy_key=record.policy_key,

@@ -7,7 +7,7 @@ import hashlib
 from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
 
 import boto3
 from botocore.client import Config
@@ -19,6 +19,7 @@ from commercevision_contracts.object_storage import (
     ConditionalDeleteRequest,
     ConditionalWriteRequest,
     DeleteMarkerRequest,
+    GenerationMediaWriteRequest,
     ObjectReference,
     ObjectStat,
     ObjectVersionEntry,
@@ -98,7 +99,7 @@ class MinioObjectStorage:
         signer: Any | None = None,
         readiness_client: Any | None = None,
     ) -> None:
-        self._buckets = dict(buckets)
+        self._buckets: dict[StorageLocationClass, str] = dict(buckets)
         self._require_encryption = require_encryption
         boto_config = Config(
             connect_timeout=connect_timeout,
@@ -280,13 +281,14 @@ class MinioObjectStorage:
             ):
                 raise StoragePreconditionError("copy destination already contains another object")
             return existing
+        copy_source: dict[str, object] = {
+            "Bucket": self._bucket(request.source.location),
+            "Key": request.source.key,
+        }
         params: dict[str, object] = {
             "Bucket": self._bucket(request.destination.location),
             "Key": request.destination.key,
-            "CopySource": {
-                "Bucket": self._bucket(request.source.location),
-                "Key": request.source.key,
-            },
+            "CopySource": copy_source,
             "CopySourceIfMatch": request.source_etag,
             "IfNoneMatch": "*",
             "ContentType": request.content_type,
@@ -297,7 +299,7 @@ class MinioObjectStorage:
             "MetadataDirective": "REPLACE",
         }
         if request.source.version_id is not None:
-            params["CopySource"]["VersionId"] = request.source.version_id
+            copy_source["VersionId"] = request.source.version_id
         if self._require_encryption:
             params["ServerSideEncryption"] = "AES256"
         try:
@@ -336,21 +338,34 @@ class MinioObjectStorage:
         return copied
 
     def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat:
+        return self._write_if_absent(
+            request,
+            metadata=request.metadata,
+            require_encryption=request.require_encryption,
+        )
+
+    def _write_if_absent(
+        self,
+        request: ConditionalWriteRequest | GenerationMediaWriteRequest,
+        *,
+        metadata: Mapping[str, str],
+        require_encryption: bool,
+    ) -> ObjectStat:
         try:
             existing = self._stat_if_present(request.reference)
         except StorageUnavailableError as exc:
             raise StorageWriteSafeToRetryError(
                 "object storage became unavailable before conditional write"
             ) from exc
-        metadata = {**request.metadata, "sha256": request.expected_sha256}
-        require_encryption = self._require_encryption or request.require_encryption
+        expected_metadata = {**metadata, "sha256": request.expected_sha256}
+        require_encryption = self._require_encryption or require_encryption
         if existing is not None:
             if not written_object_matches(
                 existing,
                 expected_length=len(request.payload),
                 expected_sha256=request.expected_sha256,
                 expected_content_type=request.content_type,
-                expected_metadata=metadata,
+                expected_metadata=expected_metadata,
                 require_encryption=require_encryption,
             ):
                 raise StoragePreconditionError(
@@ -371,7 +386,7 @@ class MinioObjectStorage:
                 "ascii"
             ),
             "IfNoneMatch": "*",
-            "Metadata": metadata,
+            "Metadata": expected_metadata,
         }
         if require_encryption:
             params["ServerSideEncryption"] = "AES256"
@@ -387,7 +402,7 @@ class MinioObjectStorage:
                     expected_length=len(request.payload),
                     expected_sha256=request.expected_sha256,
                     expected_content_type=request.content_type,
-                    expected_metadata=metadata,
+                    expected_metadata=expected_metadata,
                     require_encryption=require_encryption,
                 ):
                     return existing
@@ -412,7 +427,7 @@ class MinioObjectStorage:
                 expected_length=len(request.payload),
                 expected_sha256=request.expected_sha256,
                 expected_content_type=request.content_type,
-                expected_metadata=metadata,
+                expected_metadata=expected_metadata,
                 require_encryption=require_encryption,
             ):
                 raise StoragePreconditionError(
@@ -434,6 +449,20 @@ class MinioObjectStorage:
                 raise
             raise StoragePreconditionError("written object verification failed") from exc
         return written
+
+    def write_generation_media_if_absent(
+        self,
+        request: GenerationMediaWriteRequest,
+    ) -> ObjectStat:
+        return self._write_if_absent(
+            request,
+            metadata={
+                "durable-operation-id": request.durable_operation_id,
+                "candidate-slot-id": request.candidate_slot_id,
+                "provider-call-id": request.provider_call_id,
+            },
+            require_encryption=True,
+        )
 
     def _cleanup_failed_write(
         self,
@@ -513,10 +542,11 @@ class MinioObjectStorage:
         except (BotoCoreError, ClientError) as exc:
             _raise_s3_error(exc)
         entries: list[ObjectVersionEntry] = []
-        for field, kind in (
+        version_groups: tuple[tuple[str, Literal["OBJECT", "DELETE_MARKER"]], ...] = (
             ("Versions", "OBJECT"),
             ("DeleteMarkers", "DELETE_MARKER"),
-        ):
+        )
+        for field, kind in version_groups:
             for item in response.get(field, []):
                 if item.get("Key") != request.reference.key:
                     continue

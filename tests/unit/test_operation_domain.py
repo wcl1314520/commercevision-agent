@@ -737,12 +737,28 @@ def test_reconciliation_uncertainty_has_readiness_and_attempt_boundaries() -> No
 def test_operation_execution_idempotency_key_is_stable_across_lease_tokens() -> None:
     operation = create_operation()
 
+    first_token = operation.claim(
+        owner="worker-a",
+        lease_duration=timedelta(seconds=30),
+        now=NOW,
+    )
     first = OperationExecutionRequest.from_operation(operation)
+    operation.recover_expired_lease(
+        retry_at=NOW + timedelta(seconds=31),
+        now=NOW + timedelta(seconds=31),
+    )
+    second_token = operation.retry(
+        owner="worker-b",
+        lease_duration=timedelta(seconds=30),
+        now=NOW + timedelta(seconds=31),
+    )
     second = OperationExecutionRequest.from_operation(operation)
 
+    assert first_token != second_token
+    assert first.lease_token == first_token
+    assert second.lease_token == second_token
     assert first.idempotency_key == second.idempotency_key
     assert first.idempotency_key == f"durable-operation:{operation.id}"
-    assert not hasattr(first, "lease_token")
 
 
 def test_executor_registry_reports_registered_and_missing_operation_kinds() -> None:

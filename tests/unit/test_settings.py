@@ -967,6 +967,7 @@ def test_settings_reject_unknown_mcp_transport() -> None:
         "worker_consumer_name",
         "workflow_queue_name",
         "asset_queue_name",
+        "generation_queue_name",
         "index_queue_name",
         "maintenance_queue_name",
     ],
@@ -983,6 +984,7 @@ def test_settings_trim_queue_and_consumer_identities(field_name: str) -> None:
         "worker_consumer_name",
         "workflow_queue_name",
         "asset_queue_name",
+        "generation_queue_name",
         "index_queue_name",
         "maintenance_queue_name",
     ],
@@ -1006,6 +1008,7 @@ def test_worker_queues_none_selects_all_configured_queues() -> None:
     assert settings.configured_worker_queues == (
         settings.workflow_queue_name,
         settings.asset_queue_name,
+        settings.generation_queue_name,
         settings.index_queue_name,
         settings.maintenance_queue_name,
     )

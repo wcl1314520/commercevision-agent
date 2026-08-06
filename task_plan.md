@@ -276,6 +276,21 @@
   正式完成；Ticket 09 generation Worker convergence 已按 blockers-first 解锁并进入 `in_progress`。
 - Ticket 09 首个纵向 RED 固定复用现有 Outbox/Inbox、Worker、Durable Operation、Executor Registry、
   Lease 与 readiness 接缝，证明 generation command 当前尚未收敛到可执行 executor；不引入平行任务系统。
+- Ticket 08 状态提交 `595a4c8` 已由 GitHub Actions `31113124705` 四路全绿验证。Ticket 09 RED/GREEN 1
+  已闭合独立 generation queue 到现有 Durable Operation Worker 的严格事件路由；下一 RED 进入真实生成
+  Executor 的 dispatch 前权威重校验，不在该队列切片内预建 Candidate 持久化。
+- Ticket 09 RED/GREEN 2–6 已闭合 executor、不可变 Route Request 投影、真实 MySQL dispatch authority、
+  结构化 Provider request builder 与通用 Operation 原子完成协议。下一 RED 直接锁定 Provider result 的
+  object-first 可恢复写入，以及 Candidate/Usage/Asset/Operation 的单事务 MySQL 收敛；不以 Provider URL
+  或进程内字节作为 durable output identity。
+- Ticket 09 RED/GREEN 7–10 已闭合 dispatch-attempt no-resubmit fence、受控 TASK object 写入、
+  ProviderCall/Usage/Candidate/Asset/Operation 单事务收敛，以及 Candidate Ready 经 MySQL 全批权威进入
+  独立 LangGraph checkpoint generation 的跨重启恢复。fresh-schema 生成/迁移/故障回归 `79 passed`；
+  当前只允许完成本票审查与本地发布门禁、形成单一提交并等待精确 GitHub Actions，全绿前 Ticket 10
+  保持 blocked。
+- Ticket 09 五轴终审再以 RED/GREEN 收紧 TASK-only media write 与 Provider request hash 派生；最终本地
+  unit+contract `1673 passed, 1 skipped`、真实 MySQL `105 passed`、Web `224 passed`，静态/供应链/秘密扫描
+  全绿。当前唯一放行 blocker 是实现提交的精确 GitHub Actions；Ticket 10 继续保持 blocked。
 
 ## 成功标准
 

@@ -1093,7 +1093,7 @@ class AssetVersion:
     workspace_id: str
     asset_id: str
     version_number: int
-    upload_session_id: str
+    upload_session_id: str | None
     filename: str
     sha256: str
     byte_size: int
@@ -1110,6 +1110,7 @@ class AssetVersion:
     created_at: datetime
     validation_transfer_policy_version: str = "legacy-validation-transfer-deny-v1"
     validation_transfer_policy_snapshot_sha256: str = "0" * 64
+    generation_provider_call_id: str | None = None
 
     def __post_init__(self) -> None:
         validate_workspace_id(self.workspace_id)
@@ -1118,6 +1119,8 @@ class AssetVersion:
             raise ValueError("Asset Version number must be positive")
         if self.byte_size < 1:
             raise ValueError("Asset Version byte size must be positive")
+        if bool(self.upload_session_id) == bool(self.generation_provider_call_id):
+            raise ValueError("Asset Version requires exactly one origin")
         image_facts = (
             self.image_format,
             self.width,
@@ -1206,6 +1209,7 @@ class AssetVersion:
             validation_transfer_policy_version=validation_transfer_policy_version,
             validation_transfer_policy_snapshot_sha256=(validation_transfer_policy_snapshot_sha256),
             created_at=now,
+            generation_provider_call_id=None,
         )
 
 

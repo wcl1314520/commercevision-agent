@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
@@ -1383,6 +1383,8 @@ class OperationExecutionRequest:
     provider_request_id: str | None
     attempt_count: int
     idempotency_key: str
+    execution_version: int = 0
+    lease_token: str | None = field(default=None, repr=False)
     lease_expires_at: datetime | None = None
     replay_source_dead_letter_id: str | None = None
     replay_attempt: int = 0
@@ -1404,6 +1406,8 @@ class OperationExecutionRequest:
             provider_request_id=operation.provider_request_id,
             attempt_count=operation.attempt_count,
             idempotency_key=f"durable-operation:{operation.id}",
+            execution_version=operation.version,
+            lease_token=operation.lease_token,
             lease_expires_at=operation.lease_expires_at,
             replay_source_dead_letter_id=operation.replay_source_dead_letter_id,
             replay_attempt=operation.replay_attempt,
@@ -1415,8 +1419,11 @@ class OperationExecutionResult:
     operation_id: str
     output_ref: str | None
     provider_request_id: str | None = None
+    completion_committed: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.completion_committed, bool):
+            raise ValueError("completion_committed must be boolean")
         object.__setattr__(
             self,
             "provider_request_id",
@@ -1916,6 +1923,21 @@ class DurableOperationWorker:
                 reconciliation_deadline_at=self._reconciliation_policy.deadline_for(required_at),
                 now=required_at,
             )
+        if result.completion_committed:
+            completed = self._operations.get(
+                workspace_id=running.workspace_id,
+                operation_id=running.id,
+            )
+            if (
+                completed.state is not OperationState.SUCCEEDED
+                or completed.attempt_count != running.attempt_count
+                or completed.output_ref != result.output_ref
+                or completed.provider_request_id != result.provider_request_id
+            ):
+                raise ConcurrencyError(
+                    "executor-committed Operation completion does not match MySQL"
+                )
+            return completed
         return self._operations.succeed(
             workspace_id=running.workspace_id,
             operation_id=running.id,

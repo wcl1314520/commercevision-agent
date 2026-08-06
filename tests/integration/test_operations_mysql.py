@@ -25,6 +25,7 @@ from commercevision_contracts.events import (
     OperationRecoveryRequestedPayload,
 )
 from commercevision_domain import (
+    ConcurrencyError,
     InvalidTransitionError,
     NormalizedOperationError,
     OperationKind,
@@ -183,6 +184,51 @@ class RecordingExecutor:
         )
 
 
+class AtomicCompletionExecutor(RecordingExecutor):
+    def __init__(
+        self,
+        *,
+        operations: OperationApplicationService,
+        now: datetime,
+    ) -> None:
+        super().__init__()
+        self._operations = operations
+        self._now = now
+
+    def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
+        self.transaction_states.append(is_unit_of_work_active())
+        if request.lease_token is None:
+            raise AssertionError("atomic completion requires the active Operation lease")
+        output_ref = f"mysql://atomic-operation-results/{request.operation_id}"
+        provider_request_id = f"provider-atomic-{request.operation_id}"
+        self._operations.succeed(
+            workspace_id=request.workspace_id,
+            operation_id=request.operation_id,
+            lease_token=request.lease_token,
+            output_ref=output_ref,
+            provider_request_id=provider_request_id,
+            expected_execution_version=request.execution_version,
+            expected_attempt_count=request.attempt_count,
+            now=self._now,
+        )
+        return OperationExecutionResult(
+            operation_id=request.operation_id,
+            output_ref=output_ref,
+            provider_request_id=provider_request_id,
+            completion_committed=True,
+        )
+
+
+class FalseAtomicCompletionExecutor(RecordingExecutor):
+    def execute(self, request: OperationExecutionRequest) -> OperationExecutionResult:
+        self.transaction_states.append(is_unit_of_work_active())
+        return OperationExecutionResult(
+            operation_id=request.operation_id,
+            output_ref=f"mysql://uncommitted-results/{request.operation_id}",
+            completion_committed=True,
+        )
+
+
 class RecordingTerminalFailureExecutor(RecordingExecutor):
     def __init__(self) -> None:
         super().__init__()
@@ -336,6 +382,95 @@ class UnexpectedExecutionCrashExecutor:
         request: OperationExecutionRequest,
     ) -> OperationReconciliationResult:
         raise AssertionError(f"crashed executor must not reconcile {request.operation_id}")
+
+
+def test_worker_accepts_exact_executor_committed_atomic_completion(
+    integration_database,
+) -> None:
+    now = datetime(2026, 8, 6, 14, 0, tzinfo=UTC)
+    service = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    operation = service.create(
+        OperationCreateCommand(
+            workspace_id="workspace-atomic-completion",
+            kind=OperationKind.IMAGE_GENERATION,
+            target_type="generation-candidate-slot",
+            target_id="019b0000-0000-7000-8000-000000000901",
+            target_version=1,
+            input_hash="9" * 64,
+            input_ref=None,
+            max_attempts=3,
+        )
+    )
+    executor = AtomicCompletionExecutor(operations=service, now=now)
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-atomic-completion",
+        lease_duration=timedelta(minutes=2),
+        clock=lambda: now,
+    )
+
+    completed = worker.execute(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+
+    assert completed.state is OperationState.SUCCEEDED
+    assert completed.output_ref == f"mysql://atomic-operation-results/{operation.id}"
+    assert completed.provider_request_id == f"provider-atomic-{operation.id}"
+    assert completed.attempt_count == 1
+    assert executor.transaction_states == [False]
+
+
+def test_worker_never_trusts_unproven_executor_committed_completion(
+    integration_database,
+) -> None:
+    now = datetime(2026, 8, 6, 14, 30, tzinfo=UTC)
+    service = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    operation = service.create(
+        OperationCreateCommand(
+            workspace_id="workspace-false-atomic-completion",
+            kind=OperationKind.IMAGE_GENERATION,
+            target_type="generation-candidate-slot",
+            target_id="019b0000-0000-7000-8000-000000000902",
+            target_version=1,
+            input_hash="8" * 64,
+            input_ref=None,
+            max_attempts=3,
+        )
+    )
+    executor = FalseAtomicCompletionExecutor()
+    worker = DurableOperationWorker(
+        operations=service,
+        execution=OperationExecutionBoundary(
+            executor=executor,
+            transaction_active=is_unit_of_work_active,
+        ),
+        owner="worker-false-atomic-completion",
+        lease_duration=timedelta(minutes=2),
+        clock=lambda: now,
+    )
+
+    with pytest.raises(ConcurrencyError, match="does not match MySQL"):
+        worker.execute(
+            workspace_id=operation.workspace_id,
+            operation_id=operation.id,
+        )
+
+    unchanged = service.get(
+        workspace_id=operation.workspace_id,
+        operation_id=operation.id,
+    )
+    assert unchanged.state is OperationState.RUNNING
+    assert unchanged.output_ref is None
+    assert executor.transaction_states == [False]
 
 
 def operation_recovery_event(

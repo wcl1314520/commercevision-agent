@@ -206,6 +206,34 @@ def _canonical_decimal(value: Decimal) -> str:
     return format(value.quantize(_MONEY_QUANTUM), "f")
 
 
+def _projection_string(data: dict[str, object], key: str) -> str:
+    value = data[key]
+    if not isinstance(value, str):
+        raise TypeError(f"route request projection {key} must be a string")
+    return value
+
+
+def _projection_integer(data: dict[str, object], key: str) -> int:
+    value = data[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"route request projection {key} must be an integer")
+    return value
+
+
+def _projection_boolean(data: dict[str, object], key: str) -> bool:
+    value = data[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"route request projection {key} must be a boolean")
+    return value
+
+
+def _projection_strings(data: dict[str, object], key: str) -> tuple[str, ...]:
+    value = data[key]
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise TypeError(f"route request projection {key} must be a string list")
+    return tuple(value)
+
+
 def _canonical_sha256(value: dict[str, object]) -> str:
     encoded = json.dumps(
         value,
@@ -675,45 +703,142 @@ class ModelRouteRequest:
             maximum=1_073_741_824,
         )
 
+    @classmethod
+    def from_canonical_data(cls, data: dict[str, object]) -> ModelRouteRequest:
+        """Reconstruct and fully revalidate one persisted route-request projection."""
+
+        expected_keys = {
+            "schema_version",
+            "workspace_id",
+            "workflow_id",
+            "creative_plan_version_id",
+            "plan_approval_id",
+            "required_capability",
+            "allowed_providers",
+            "allowed_endpoint_regions",
+            "maximum_cost",
+            "currency",
+            "route_policy_version",
+            "deadline_at",
+            "required_execution_mode",
+            "requires_query",
+            "required_quota_units",
+            "product_category",
+            "image_role",
+            "required_output_format",
+            "width",
+            "height",
+            "candidate_count",
+            "required_safety_policy_version",
+            "allowed_data_regions",
+            "maximum_retention_days",
+            "allow_training_use",
+            "required_protocol",
+            "reference_image_count",
+            "authorized_asset_version_ids",
+            "requires_mask",
+            "requires_seed",
+            "requires_lora",
+            "estimated_request_bytes",
+            "required_result_byte_limit",
+        }
+        if not isinstance(data, dict) or set(data) != expected_keys:
+            raise ValueError("model route request projection fields are invalid")
+        try:
+            if _projection_string(data, "schema_version") != "model-route-request.v1":
+                raise ValueError("model route request projection version is invalid")
+            request = cls(
+                workspace_id=_projection_string(data, "workspace_id"),
+                workflow_id=_projection_string(data, "workflow_id"),
+                creative_plan_version_id=_projection_string(data, "creative_plan_version_id"),
+                plan_approval_id=_projection_string(data, "plan_approval_id"),
+                required_capability=ProviderCapability(
+                    _projection_string(data, "required_capability")
+                ),
+                allowed_providers=frozenset(_projection_strings(data, "allowed_providers")),
+                allowed_endpoint_regions=frozenset(
+                    _projection_strings(data, "allowed_endpoint_regions")
+                ),
+                maximum_cost=Decimal(_projection_string(data, "maximum_cost")),
+                currency=_projection_string(data, "currency"),
+                route_policy_version=_projection_string(data, "route_policy_version"),
+                deadline_at=datetime.fromisoformat(_projection_string(data, "deadline_at")),
+                required_execution_mode=ProviderExecutionMode(
+                    _projection_string(data, "required_execution_mode")
+                ),
+                requires_query=_projection_boolean(data, "requires_query"),
+                required_quota_units=_projection_integer(data, "required_quota_units"),
+                product_category=_projection_string(data, "product_category"),
+                image_role=ImageRole(_projection_string(data, "image_role")),
+                required_output_format=_projection_string(data, "required_output_format"),
+                width=_projection_integer(data, "width"),
+                height=_projection_integer(data, "height"),
+                candidate_count=_projection_integer(data, "candidate_count"),
+                required_safety_policy_version=_projection_string(
+                    data, "required_safety_policy_version"
+                ),
+                allowed_data_regions=frozenset(_projection_strings(data, "allowed_data_regions")),
+                maximum_retention_days=_projection_integer(data, "maximum_retention_days"),
+                allow_training_use=_projection_boolean(data, "allow_training_use"),
+                required_protocol=ProviderProtocol(_projection_string(data, "required_protocol")),
+                reference_image_count=_projection_integer(data, "reference_image_count"),
+                authorized_asset_version_ids=_projection_strings(
+                    data, "authorized_asset_version_ids"
+                ),
+                requires_mask=_projection_boolean(data, "requires_mask"),
+                requires_seed=_projection_boolean(data, "requires_seed"),
+                requires_lora=_projection_boolean(data, "requires_lora"),
+                estimated_request_bytes=_projection_integer(data, "estimated_request_bytes"),
+                required_result_byte_limit=_projection_integer(data, "required_result_byte_limit"),
+            )
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError("model route request projection is invalid") from exc
+        if request.canonical_data() != data:
+            raise ValueError("model route request projection is not canonical")
+        return request
+
+    def canonical_data(self) -> dict[str, object]:
+        """Return the credential-free projection needed to prove this exact request."""
+
+        return {
+            "schema_version": "model-route-request.v1",
+            "workspace_id": self.workspace_id,
+            "workflow_id": self.workflow_id,
+            "creative_plan_version_id": self.creative_plan_version_id,
+            "plan_approval_id": self.plan_approval_id,
+            "required_capability": self.required_capability.value,
+            "allowed_providers": sorted(self.allowed_providers),
+            "allowed_endpoint_regions": sorted(self.allowed_endpoint_regions),
+            "maximum_cost": _canonical_decimal(self.maximum_cost),
+            "currency": self.currency,
+            "route_policy_version": self.route_policy_version,
+            "deadline_at": _canonical_datetime(self.deadline_at),
+            "required_execution_mode": self.required_execution_mode.value,
+            "requires_query": self.requires_query,
+            "required_quota_units": self.required_quota_units,
+            "product_category": self.product_category,
+            "image_role": self.image_role.value,
+            "required_output_format": self.required_output_format,
+            "width": self.width,
+            "height": self.height,
+            "candidate_count": self.candidate_count,
+            "required_safety_policy_version": self.required_safety_policy_version,
+            "allowed_data_regions": sorted(self.allowed_data_regions),
+            "maximum_retention_days": self.maximum_retention_days,
+            "allow_training_use": self.allow_training_use,
+            "required_protocol": self.required_protocol.value,
+            "reference_image_count": self.reference_image_count,
+            "authorized_asset_version_ids": list(self.authorized_asset_version_ids),
+            "requires_mask": self.requires_mask,
+            "requires_seed": self.requires_seed,
+            "requires_lora": self.requires_lora,
+            "estimated_request_bytes": self.estimated_request_bytes,
+            "required_result_byte_limit": self.required_result_byte_limit,
+        }
+
     @property
     def request_sha256(self) -> str:
-        return _canonical_sha256(
-            {
-                "schema_version": "model-route-request.v1",
-                "workspace_id": self.workspace_id,
-                "workflow_id": self.workflow_id,
-                "creative_plan_version_id": self.creative_plan_version_id,
-                "plan_approval_id": self.plan_approval_id,
-                "required_capability": self.required_capability.value,
-                "allowed_providers": sorted(self.allowed_providers),
-                "allowed_endpoint_regions": sorted(self.allowed_endpoint_regions),
-                "maximum_cost": _canonical_decimal(self.maximum_cost),
-                "currency": self.currency,
-                "route_policy_version": self.route_policy_version,
-                "deadline_at": _canonical_datetime(self.deadline_at),
-                "required_execution_mode": self.required_execution_mode.value,
-                "requires_query": self.requires_query,
-                "required_quota_units": self.required_quota_units,
-                "product_category": self.product_category,
-                "image_role": self.image_role.value,
-                "required_output_format": self.required_output_format,
-                "width": self.width,
-                "height": self.height,
-                "candidate_count": self.candidate_count,
-                "required_safety_policy_version": self.required_safety_policy_version,
-                "allowed_data_regions": sorted(self.allowed_data_regions),
-                "maximum_retention_days": self.maximum_retention_days,
-                "allow_training_use": self.allow_training_use,
-                "required_protocol": self.required_protocol.value,
-                "reference_image_count": self.reference_image_count,
-                "authorized_asset_version_ids": list(self.authorized_asset_version_ids),
-                "requires_mask": self.requires_mask,
-                "requires_seed": self.requires_seed,
-                "requires_lora": self.requires_lora,
-                "estimated_request_bytes": self.estimated_request_bytes,
-                "required_result_byte_limit": self.required_result_byte_limit,
-            }
-        )
+        return _canonical_sha256(self.canonical_data())
 
 
 @dataclass(frozen=True, slots=True)

@@ -30,6 +30,7 @@ from commercevision_application import (
     DurableOperationWorker,
     EventRoutingError,
     EventRoutingRegistry,
+    GenerationWorkflowContinuationAuthority,
     InboxCoordinator,
     OperationApplicationService,
     OperationExecutionBoundary,
@@ -72,6 +73,8 @@ from commercevision_contracts.events import (
     COLLECTION_REBUILD_PROGRESSED_V1,
     COLLECTION_REBUILD_REQUESTED_V1,
     DEAD_LETTER_REPLAY_RECORDED_V1,
+    GENERATION_CANDIDATE_READY_V1,
+    GENERATION_CANDIDATE_REQUESTED_V1,
     OPERATION_RECOVERY_REQUESTED_V1,
     PRODUCT_BRIEF_AWAITING_CONFIRMATION_V1,
     PRODUCT_BRIEF_CONFIRMED_V1,
@@ -100,6 +103,8 @@ from commercevision_contracts.events import (
     CollectionRebuildRequestedPayload,
     EventQueue,
     EventType,
+    GenerationCandidateReadyPayload,
+    GenerationCandidateRequestedPayload,
     ProductBriefAwaitingConfirmationPayload,
     ProductBriefConfirmedPayload,
     ProductBriefRequestedPayload,
@@ -107,8 +112,10 @@ from commercevision_contracts.events import (
     WorkflowRunRequestedPayload,
 )
 from commercevision_contracts.object_storage import ObjectStorage
+from commercevision_contracts.workflow import generation_batch_checkpoint_generation
 from commercevision_domain import (
     ApprovalType,
+    ConcurrencyError,
     DurableOperation,
     LeaseConflictError,
     NotFoundError,
@@ -139,6 +146,7 @@ from commercevision_persistence import (
     MySQLCheckpointSaver,
     MySqlCollectionRebuildRepository,
     MySqlFixturePlanningAuthority,
+    MySqlGenerationWorkflowContinuationAuthority,
     MySqlImageIndexRequestService,
     MySqlIndexingAuthority,
     MySqlPlanningContextAuthority,
@@ -240,6 +248,7 @@ class WorkerRuntime:
     lifecycle: DurableNodeLifecycle | None = None
     workflow_service: WorkflowApplicationService | None = None
     tool_authorization: PlanToolAuthorizationService | None = None
+    generation_continuations: GenerationWorkflowContinuationAuthority | None = None
     telemetry: Phase2Telemetry = field(default_factory=Phase2Telemetry)
 
     @classmethod
@@ -569,10 +578,14 @@ class WorkerRuntime:
             lifecycle=lifecycle,
             workflow_service=workflow_service,
             tool_authorization=tool_authorization,
+            generation_continuations=MySqlGenerationWorkflowContinuationAuthority(
+                database.session_factory
+            ),
             event_router=build_event_routing_registry(
                 {
                     EventQueue.WORKFLOW: settings.workflow_queue_name,
                     EventQueue.ASSET: settings.asset_queue_name,
+                    EventQueue.GENERATION: settings.generation_queue_name,
                     EventQueue.INDEX: settings.index_queue_name,
                     EventQueue.MAINTENANCE: settings.maintenance_queue_name,
                 }
@@ -621,6 +634,14 @@ class WorkerRuntime:
         runtime.event_router.register_handler(
             contract=ASSET_VALIDATION_FAILED_V1,
             handler=runtime._observe_asset_validation_terminal,
+        )
+        runtime.event_router.register_handler(
+            contract=GENERATION_CANDIDATE_REQUESTED_V1,
+            handler=runtime._handle_generation_candidate,
+        )
+        runtime.event_router.register_handler(
+            contract=GENERATION_CANDIDATE_READY_V1,
+            handler=runtime._handle_generation_candidate_ready,
         )
         runtime.event_router.register_handler(
             contract=ASSET_INDEX_REQUESTED_V1,
@@ -1234,6 +1255,97 @@ class WorkerRuntime:
             workspace_id=payload.workspace_id,
             operation_id=payload.operation_id,
         )
+
+    def _handle_generation_candidate(self, event: OutboxEvent) -> None:
+        payload = GENERATION_CANDIDATE_REQUESTED_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, GenerationCandidateRequestedPayload):
+            raise TypeError("Generation candidate contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Generation candidate workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "generation-batch"
+            or event.envelope.aggregate_id != payload.generation_batch_id
+        ):
+            raise EventRoutingError(
+                "Generation candidate does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        _execute_and_observe_operation(
+            self,
+            workspace_id=payload.workspace_id,
+            operation_id=payload.operation_id,
+        )
+
+    def _handle_generation_candidate_ready(self, event: OutboxEvent) -> None:
+        payload = GENERATION_CANDIDATE_READY_V1.validate_payload(event.envelope.payload)
+        if not isinstance(payload, GenerationCandidateReadyPayload):
+            raise TypeError("Generation Candidate Ready contract returned an unexpected payload")
+        if event.workspace_id != payload.workspace_id:
+            raise EventRoutingError(
+                "Generation Candidate Ready workspace does not match its Outbox envelope",
+                reason="workspace_mismatch",
+            )
+        if (
+            event.envelope.aggregate_type != "generation-batch"
+            or event.envelope.aggregate_id != payload.generation_batch_id
+            or event.envelope.aggregate_version != 1
+        ):
+            raise EventRoutingError(
+                "Generation Candidate Ready does not match its Outbox aggregate",
+                reason="aggregate_mismatch",
+            )
+        authority = self.generation_continuations
+        if authority is None:
+            raise RuntimeError("Generation Workflow continuation authority is unavailable")
+        try:
+            claim = authority.claim_ready_batch(
+                workspace_id=payload.workspace_id,
+                workflow_id=payload.workflow_id,
+                generation_batch_id=payload.generation_batch_id,
+                candidate_slot_id=payload.candidate_slot_id,
+                candidate_image_id=payload.candidate_image_id,
+                asset_version_id=payload.asset_version_id,
+                operation_id=payload.operation_id,
+                usage_record_id=payload.usage_record_id,
+            )
+        except ConcurrencyError as exc:
+            raise EventRoutingError(
+                "Generation continuation does not match current MySQL authority",
+                reason="generation_continuation_authority_mismatch",
+            ) from exc
+        if claim is None:
+            return
+        fixture_config = claim.input_data.get("fixture_config", claim.input_data)
+        if not isinstance(fixture_config, dict):
+            raise EventRoutingError(
+                "Generation Workflow input is invalid",
+                reason="generation_continuation_authority_mismatch",
+            )
+        initial_state = FixtureAgentState(
+            workflow_id=claim.workflow_id,
+            workflow_version=claim.workflow_version,
+            workspace_id=claim.workspace_id,
+            actor_id=claim.actor_id,
+            trace_id=event.envelope.trace_id,
+            input_ref=f"mysql://workflows/{claim.workflow_id}/input",
+            fixture_config=fixture_config,
+            creative_plan_ref=f"mysql://creative-plans/{claim.creative_plan_id}",
+            creative_plan_version_id=claim.creative_plan_version_id,
+            creative_plan_version=claim.creative_plan_version,
+            generation_batch_id=claim.generation_batch_id,
+            generation_iteration=claim.generation_iteration,
+            generation_checkpoint_generation=generation_batch_checkpoint_generation(
+                workspace_id=claim.workspace_id,
+                generation_batch_id=claim.generation_batch_id,
+            ),
+            candidate_refs=list(claim.candidate_refs),
+            current_node="evaluate_results",
+            initial_entry_reason="GENERATION_CANDIDATES_READY",
+        )
+        self.agent.run(initial_state=initial_state)
 
     @staticmethod
     def _observe_asset_validation_terminal(event: OutboxEvent) -> None:

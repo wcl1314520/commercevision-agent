@@ -15,7 +15,14 @@ from .database import (
     is_unit_of_work_active,
 )
 from .fixture_planner import MySqlFixturePlanningAuthority
-from .generation import MySqlApprovedGenerationAuthority, SqlAlchemyApprovedGenerationUnitOfWork
+from .generation import (
+    MySqlApprovedGenerationAuthority,
+    MySqlGenerationDispatchAttemptCoordinator,
+    MySqlGenerationDispatchAuthority,
+    MySqlGenerationResultConverger,
+    MySqlGenerationWorkflowContinuationAuthority,
+    SqlAlchemyApprovedGenerationUnitOfWork,
+)
 from .indexing import MySqlExactImageReference, MySqlIndexingAuthority
 from .indexing_requests import (
     ImageIndexNotApplicable,
@@ -61,6 +68,10 @@ __all__ = [
     "MySqlIndexingAuthority",
     "MySqlFixturePlanningAuthority",
     "MySqlApprovedGenerationAuthority",
+    "MySqlGenerationDispatchAuthority",
+    "MySqlGenerationDispatchAttemptCoordinator",
+    "MySqlGenerationResultConverger",
+    "MySqlGenerationWorkflowContinuationAuthority",
     "MySqlAssetDeletionCoordinator",
     "MySqlImageIndexRequestService",
     "MySqlIndexRequestService",

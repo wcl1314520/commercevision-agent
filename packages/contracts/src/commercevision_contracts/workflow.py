@@ -43,6 +43,21 @@ def product_brief_checkpoint_generation(
     return f"product-brief:v1:{hashlib.sha256(generation_identity).hexdigest()}"
 
 
+def generation_batch_checkpoint_generation(
+    *,
+    workspace_id: str,
+    generation_batch_id: str,
+) -> str:
+    """Return the stable checkpoint namespace for one immutable Generation Batch."""
+
+    generation_identity = json.dumps(
+        [workspace_id, generation_batch_id],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode()
+    return f"generation-batch:v1:{hashlib.sha256(generation_identity).hexdigest()}"
+
+
 class CommerceImageGenerationInputV1(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

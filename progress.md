@@ -2295,3 +2295,59 @@
   链路后的缺失收敛行为；继续复用既有 Registry、Lease 和 readiness 框架，不建立第二套任务系统。
 - Ticket 08 的长 CI watch 达到本地工具 15 分钟上限后退出；未将超时误判为 CI 失败，改由 GitHub
   权威状态查询与后续 watch 确认 Python 全量 pytest 完成，最终运行正常四路全绿。
+- Ticket 08 release-state commit `595a4c825baa58a88bc0a12b7d57fa8838af3e4e` passed exact GitHub
+  Actions run `31113124705` in all four jobs. Direct Git transport was temporarily unavailable;
+  the Git Objects fallback first rejected a commit SHA mismatch caused by trailing-newline
+  normalization, then wrote the exact content-identical commit object and performed a non-force
+  fast-forward only after local/remote SHA equality was proven.
+- Ticket 09 RED 1 is stable: the new public Worker routing test failed because
+  `EventQueue.GENERATION` did not exist. No database, storage, or Provider behavior was reached.
+- Ticket 09 GREEN 1 adds one isolated logical generation queue, shared Scheduler/Worker routing,
+  strict Outbox workspace and Generation Batch identity fences, and dispatches the existing
+  Durable Operation Worker exactly once. It does not add another job framework or call an Adapter.
+- Queue/route/settings/deployment regression is green at `192 passed`; focused Ruff and diff checks
+  are green. Full-workspace Mypy remains exactly `427` known diagnostics; only existing diagnostic
+  line identities moved, so the versioned baseline was refreshed without increasing its count.
+- Ticket 09 RED 2 is stable at collection: the production `commercevision_worker.generation`
+  executor module did not exist. GREEN adds a fail-closed `GenerationOperationExecutor` behind the
+  existing Operation interface; stale authority becomes a non-retryable, redacted typed failure and
+  the Provider dispatcher remains uncalled (`1 passed`).
+- Applying the codebase-design deep-module vocabulary moved the authority snapshot and injected
+  authority/dispatcher ports to `commercevision_application.generation_execution`. Persistence can
+  implement the authority port without depending on Worker, while Worker callers still learn only
+  the existing `execute/reconcile` interface. Focused Ruff and strict two-module Mypy are green.
+- Ticket 09 RED 3 exposed a blockers-first persistence gap: Route Decisions stored only a hash, so
+  Worker execution could not reconstruct exact dimensions, format, protocol or deadline without
+  guessing. GREEN extracts `ModelRouteRequest.canonical_data()`, adds strict round-trip validation,
+  and stores one nullable credential-free JSON projection while preserving the existing request hash.
+- New Alembic head `fb9e4c6a1205` adds only the legacy-safe nullable projection. ORM/domain tests are
+  `16 passed`, the exact real-MySQL upgrade/downgrade/re-upgrade contract passes, and a production
+  generation-command test proves the persisted projection equals the exact routed request.
+- Ticket 09 RED/GREEN 4–5 now cover dispatch-time authority and exact request construction through
+  the public executor seam. Real MySQL cancellation stops request construction and Provider calls;
+  the authorized path exports only immutable domain/application facts after the transaction closes.
+  `StructuredGenerationDispatchBuilder` renders only the approved structured direction under the
+  locked `creative-plan-image.v1` contract and binds exact media/deadline/idempotency facts.
+- Ticket 09 RED/GREEN 6 closes the generic atomic-completion prerequisite: `OperationExecutionRequest`
+  carries its active lease with repr redaction and exact execution version, and an executor-committed
+  result is accepted only after MySQL proves the matching SUCCEEDED state. Real MySQL positive and
+  false-claim tests are `2 passed`; relevant generation/route/Worker regression is `194 passed`,
+  and the full-workspace Mypy baseline remains exactly 427 diagnostics with zero drift.
+- Ticket 09 RED/GREEN 7–10 closes result convergence and Workflow restart. A durable attempt fence
+  precedes every Provider submit; controlled TASK bytes, Provider Call, Asset Version, Candidate,
+  Usage, audit, Outbox and Operation success converge atomically. Candidate Ready is reauthorized
+  from MySQL and starts `evaluate_results` only in a batch-specific checkpoint generation, so an
+  old approval checkpoint can never re-run fixture generation. Fresh-schema generation/migration,
+  crash, duplicate-delivery and checkpoint tests are `79 passed`; no live Provider call or real
+  credential was used.
+
+# 2026-08-07 Phase 4 Ticket 09 本地放行候选
+
+- 五轴审查补齐两项 Required：生成媒体公共写契约只能指向受控 TASK 位置；Provider 请求哈希改为
+  `AuthorizedGenerationDispatch` 从精确结构化请求派生，调用方不能再提交不一致的重复状态。
+- Compose 生产订阅继续 fail-closed：Ticket 09 完成隔离队列、Worker/Inbox/Operation 与可注入 executor
+  接缝，但在 Ticket 10 对账和 Ticket 11 强制结果审核完成前，不单独启用 generation consumer 或宣称
+  `IMAGE_GENERATION` readiness；后续必须将 queue、executor、admission、reconciliation 原子解锁。
+- 最终本地证据：unit+contract `1673 passed, 1 skipped`，真实 MySQL Ticket 09 矩阵 `105 passed`，
+  Web `224 passed`，Ruff `512 files`，Mypy baseline `426` 零漂移，OpenAPI/types、lock、diff、许可证、
+  漏洞与新增差异 secret scan 全绿。未读取或使用真实 Provider 凭据，未发起任何付费调用。

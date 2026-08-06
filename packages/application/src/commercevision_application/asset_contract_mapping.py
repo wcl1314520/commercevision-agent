@@ -54,6 +54,7 @@ def asset_version_response(
         asset_id=asset_version.asset_id,
         version_number=asset_version.version_number,
         upload_session_id=asset_version.upload_session_id,
+        generation_provider_call_id=asset_version.generation_provider_call_id,
         filename=asset_version.filename,
         sha256=asset_version.sha256,
         byte_size=asset_version.byte_size,

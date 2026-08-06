@@ -635,6 +635,11 @@ def test_model_route_decision_hash_is_stable_for_reconstructed_inputs() -> None:
 
     assert len(alpha.capability_sha256) == 64
     assert len(request.request_sha256) == 64
+    assert request.canonical_data()["width"] == 1024
+    assert request.canonical_data()["required_output_format"] == "image/png"
+    assert ModelRouteRequest.from_canonical_data(request.canonical_data()) == request
+    with pytest.raises(ValueError, match="projection"):
+        ModelRouteRequest.from_canonical_data(request.canonical_data() | {"unexpected": True})
     assert first.request_sha256 == request.request_sha256
     assert first.decision_sha256 == reconstructed.decision_sha256
     assert first.decision_sha256 != later.decision_sha256

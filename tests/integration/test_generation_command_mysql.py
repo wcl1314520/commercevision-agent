@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -15,9 +16,38 @@ from commercevision_application import (
     ApprovedPlanGenerationCommand,
     ApprovedPlanGenerationService,
     AuthenticatedPrincipal,
+    AuthorizedGenerationDispatch,
+    DurableNodeLifecycle,
+    GenerationDispatchAttemptClaim,
+    GenerationDispatchFacts,
+    GenerationSuccessCommit,
     ModelRouterApplicationService,
+    OperationApplicationService,
+    OperationExecutionFailure,
+    OperationExecutionRequest,
+    OperationExecutionResult,
+    StructuredGenerationDispatchBuilder,
     ToolAuthorizationEntitlements,
     ToolAuthorizationPolicy,
+    UnknownOperationOutcome,
+)
+from commercevision_contracts.image_provider import (
+    ImageGenerationProviderRequest,
+    ImageProviderCallOutcome,
+    ImageProviderMediaRequirements,
+    ImageProviderMediaType,
+    ImageProviderOutputFormat,
+    ImageProviderRequestIdentity,
+    ImageProviderResult,
+    ImageProviderTaskState,
+    ImageProviderUsage,
+    ImageProviderUsageUnit,
+    NormalizedImageProviderOutcome,
+)
+from commercevision_contracts.object_storage import (
+    ObjectReference,
+    ObjectStat,
+    ServerSideEncryptionState,
 )
 from commercevision_domain import (
     CircuitState,
@@ -25,19 +55,36 @@ from commercevision_domain import (
     CreativePlanDirection,
     CreativePlanPayload,
     ImageRole,
+    StepType,
+    StorageBackend,
+    StorageLocationClass,
     ToolIntentProposal,
+    WorkflowStatus,
 )
 from commercevision_persistence import (
     MySqlApprovedGenerationAuthority,
+    MySqlGenerationDispatchAttemptCoordinator,
+    MySqlGenerationDispatchAuthority,
+    MySqlGenerationResultConverger,
+    MySqlGenerationWorkflowContinuationAuthority,
     SqlAlchemyApprovedGenerationUnitOfWork,
     SqlAlchemyModelRouterUnitOfWork,
+    SqlAlchemyOperationUnitOfWork,
+    SqlAlchemyUnitOfWork,
+    is_unit_of_work_active,
 )
 from commercevision_persistence.generation_models import (
+    CandidateImageModel,
     CandidateSlotModel,
     GenerationBatchModel,
+    GenerationDispatchAttemptModel,
+    ProviderCallModel,
+    UsageRecordModel,
 )
+from commercevision_persistence.model_router_models import ModelRouteDecisionModel
 from commercevision_persistence.models import (
     ApprovalModel,
+    AssetVersionModel,
     AuditEventModel,
     DurableOperationModel,
     IdempotencyKeyModel,
@@ -54,6 +101,10 @@ from commercevision_tool_runtime import (
     ToolRegistry,
 )
 from commercevision_tool_runtime.fixture import fixture_image_intent_definition
+from commercevision_worker.generation import (
+    AtomicGenerationProviderDispatcher,
+    GenerationOperationExecutor,
+)
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, Field
@@ -227,33 +278,114 @@ def _production_generation_service(
     return ApprovedPlanGenerationService(
         lambda: SqlAlchemyApprovedGenerationUnitOfWork(
             integration_database.session_factory,
-            lambda session: MySqlApprovedGenerationAuthority(
+            lambda session: _approved_generation_authority(
                 session,
-                authorizer=ToolIntentAuthorizer(
-                    registry=ToolRegistry([definition]),
-                    policy_version="tool-intent-policy-v1",
-                ),
-                policy=ToolAuthorizationPolicy(
-                    version="tool-intent-policy-v1",
-                    node="execute_tool",
-                ),
-                entitlements=ToolAuthorizationEntitlements(
-                    granted_scopes=frozenset({"image.generate"}),
-                    authorized_resource_ids=authorized_asset_version_ids,
-                    allowed_providers=frozenset({"provider-a"}),
-                    allowed_cost_classes=frozenset({ToolCostClass.LOW}),
-                    remaining_quota_units=1,
-                    remaining_budget_units=remaining_budget_units,
-                ),
-                generation_tools={
-                    ("provider-a.image.generate", "1.0"): "provider-a",
-                },
+                definition=definition,
+                authorized_asset_version_ids=authorized_asset_version_ids,
                 rights_policy_version=rights_policy_version,
-                safety_policy_version="media-safety.v1",
-                actor_id="generation-service",
+                remaining_budget_units=remaining_budget_units,
             ),
         )
     )
+
+
+def _approved_generation_authority(
+    session,
+    *,
+    definition: ToolDefinition,
+    authorized_asset_version_ids: frozenset[str],
+    rights_policy_version: str,
+    remaining_budget_units: int = 1,
+) -> MySqlApprovedGenerationAuthority:
+    return MySqlApprovedGenerationAuthority(
+        session,
+        authorizer=ToolIntentAuthorizer(
+            registry=ToolRegistry([definition]),
+            policy_version="tool-intent-policy-v1",
+        ),
+        policy=ToolAuthorizationPolicy(
+            version="tool-intent-policy-v1",
+            node="execute_tool",
+        ),
+        entitlements=ToolAuthorizationEntitlements(
+            granted_scopes=frozenset({"image.generate"}),
+            authorized_resource_ids=authorized_asset_version_ids,
+            allowed_providers=frozenset({"provider-a"}),
+            allowed_cost_classes=frozenset({ToolCostClass.LOW}),
+            remaining_quota_units=1,
+            remaining_budget_units=remaining_budget_units,
+        ),
+        generation_tools={("provider-a.image.generate", "1.0"): "provider-a"},
+        rights_policy_version=rights_policy_version,
+        safety_policy_version="media-safety.v1",
+        actor_id="generation-service",
+    )
+
+
+def _start_running_generation_dispatch(integration_database, *, suffix: str):
+    payload = _generation_plan_payload()
+    now = _seed_route_authority(
+        integration_database,
+        plan_payload=payload,
+        workflow_version=2,
+        workflow_node="approve_plan",
+        approval_expected_workflow_version=1,
+        approval_decision="APPROVE",
+    )
+    route = ModelRouterApplicationService(
+        lambda: SqlAlchemyModelRouterUnitOfWork(integration_database.session_factory)
+    ).route(
+        request=_request(now),
+        policy_key="default-images",
+        actor_id="generation-service",
+        idempotency_key=f"test:generation-dispatch-route-{suffix}",
+        trace_id=f"trace-generation-dispatch-route-{suffix}",
+    )
+    definition = replace(
+        fixture_image_intent_definition(),
+        name="provider-a.image.generate",
+        provider="provider-a",
+    )
+    result = _production_generation_service(
+        integration_database,
+        definition=definition,
+        authorized_asset_version_ids=frozenset(),
+        rights_policy_version="rights-none.v1",
+    ).start(
+        command=ApprovedPlanGenerationCommand(
+            workspace_id=WORKSPACE_ID,
+            workflow_id=WORKFLOW_ID,
+            expected_workflow_version=2,
+            creative_plan_id=PLAN_ID,
+            creative_plan_version_id=PLAN_VERSION_ID,
+            creative_plan_version=1,
+            approval_id=APPROVAL_ID,
+            direction_key="main-image",
+            tool_intent_key="generate-main-image",
+            route_decision_sha256=route.decision.decision_sha256,
+        ),
+        idempotency_key=f"test:generation-dispatch-command-{suffix}",
+        trace_id=f"trace-generation-dispatch-command-{suffix}",
+    )
+    operations = OperationApplicationService(
+        uow_factory=lambda: SqlAlchemyOperationUnitOfWork(integration_database.session_factory)
+    )
+    with integration_database.session_factory() as session:
+        claimed_at = _database_now(session)
+    lease_token = operations.claim(
+        workspace_id=WORKSPACE_ID,
+        operation_id=result.operations[0].id,
+        owner="generation-worker-1",
+        lease_duration=timedelta(minutes=2),
+        now=claimed_at,
+    )
+    running = operations.start(
+        workspace_id=WORKSPACE_ID,
+        operation_id=result.operations[0].id,
+        lease_token=lease_token,
+        now=claimed_at,
+    )
+    return definition, result, running, claimed_at
 
 
 def _generation_http_app(service: ApprovedPlanGenerationService) -> FastAPI:
@@ -300,6 +432,49 @@ class _ExactGenerationAuthority:
         return self._authority
 
 
+class _NeverGenerationDispatchBuilder:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def build(self, _facts: object) -> object:
+        self.calls += 1
+        raise AssertionError("stale authority must be denied before request construction")
+
+
+class _NeverGenerationProviderDispatcher:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def submit(self, _dispatch: object) -> object:
+        self.calls += 1
+        raise AssertionError("stale authority must be denied before Provider dispatch")
+
+
+class _CapturingGenerationDispatchBuilder:
+    def __init__(self) -> None:
+        self.facts: list[GenerationDispatchFacts] = []
+        self._builder = StructuredGenerationDispatchBuilder()
+
+    def build(self, facts: GenerationDispatchFacts) -> AuthorizedGenerationDispatch:
+        assert is_unit_of_work_active() is False
+        self.facts.append(facts)
+        return self._builder.build(facts)
+
+
+class _CapturingGenerationProviderDispatcher:
+    def __init__(self) -> None:
+        self.dispatches: list[AuthorizedGenerationDispatch] = []
+
+    def submit(self, dispatch: AuthorizedGenerationDispatch) -> OperationExecutionResult:
+        assert is_unit_of_work_active() is False
+        self.dispatches.append(dispatch)
+        return OperationExecutionResult(
+            operation_id=dispatch.operation_id,
+            output_ref="provider-result://generation-test",
+            provider_request_id="provider-request-generation-test",
+        )
+
+
 class _BarrierGenerationAuthority(_ExactGenerationAuthority):
     def __init__(
         self,
@@ -314,6 +489,88 @@ class _BarrierGenerationAuthority(_ExactGenerationAuthority):
     ) -> ApprovedGenerationAuthority:
         self._barrier.wait(timeout=10)
         return super().load_current_authority(command)
+
+
+def _generation_success_commit(
+    *,
+    running,
+    claimed_at: datetime,
+    suffix: str,
+) -> GenerationSuccessCommit:
+    payload = f"validated-generation-result:{suffix}".encode()
+    content_sha256 = hashlib.sha256(payload).hexdigest()
+    return GenerationSuccessCommit(
+        operation=OperationExecutionRequest.from_operation(running),
+        provider_outcome=NormalizedImageProviderOutcome(
+            call_outcome=ImageProviderCallOutcome.CONFIRMED_SUCCESS,
+            task_state=ImageProviderTaskState.SUCCEEDED,
+            identity=ImageProviderRequestIdentity(
+                provider_request_id=f"provider-request-{suffix}",
+                provider_task_id=None,
+            ),
+            result=ImageProviderResult(
+                provider_result_id=f"provider-result-{suffix}",
+                content=payload,
+                content_sha256=content_sha256,
+                media_type=ImageProviderMediaType.PNG,
+                width=1024,
+                height=1024,
+            ),
+            usage=ImageProviderUsage(
+                unit=ImageProviderUsageUnit.IMAGE,
+                quantity=Decimal("1.000000"),
+                evidence_sha256="b" * 64,
+            ),
+            error=None,
+            latency_ms=250,
+        ),
+        controlled_object=ObjectStat(
+            reference=ObjectReference(
+                location=StorageLocationClass.TASK,
+                key=f"generation/{running.id}/candidate.png",
+                version_id=f"provider-version-{suffix}",
+            ),
+            backend=StorageBackend.MINIO,
+            bucket="task-assets",
+            etag='"generation-etag"',
+            content_length=len(payload),
+            content_type="image/png",
+            checksum_sha256_base64=None,
+            metadata={"sha256": content_sha256},
+            last_modified=claimed_at,
+            server_side_encryption=ServerSideEncryptionState.AES256,
+        ),
+        request_sha256="c" * 64,
+        moderation_decision_sha256="d" * 64,
+        trace_id=f"trace-generation-{suffix}",
+    )
+
+
+def _record_generation_dispatch_attempt(
+    integration_database,
+    *,
+    definition: ToolDefinition,
+    running,
+    outcome: NormalizedImageProviderOutcome,
+) -> AuthorizedGenerationDispatch:
+    dispatch = MySqlGenerationDispatchAuthority(
+        integration_database.session_factory,
+        approved_authority_factory=lambda session: _approved_generation_authority(
+            session,
+            definition=definition,
+            authorized_asset_version_ids=frozenset(),
+            rights_policy_version="rights-none.v1",
+        ),
+        dispatch_builder=StructuredGenerationDispatchBuilder(),
+    ).prepare_dispatch(OperationExecutionRequest.from_operation(running))
+    attempts = MySqlGenerationDispatchAttemptCoordinator(integration_database.session_factory)
+    claim = attempts.claim(dispatch)
+    attempts.record_outcome(
+        claim=claim,
+        dispatch=dispatch,
+        outcome=outcome,
+    )
+    return dispatch
 
 
 def test_approved_generation_command_persists_and_replays_one_atomic_aggregate(
@@ -625,6 +882,527 @@ def test_generation_command_revalidates_real_mysql_approval_plan_policy_and_rout
     assert result.batch.tool_policy_version == "tool-intent-policy-v1"
     assert result.batch.rights_policy_version == "rights-none.v1"
     assert result.batch.safety_policy_version == "media-safety.v1"
+    with integration_database.session_factory() as session:
+        persisted_route = session.scalar(
+            select(ModelRouteDecisionModel).where(
+                ModelRouteDecisionModel.workspace_id == WORKSPACE_ID,
+                ModelRouteDecisionModel.decision_sha256 == route.decision.decision_sha256,
+            )
+        )
+        assert persisted_route is not None
+        assert persisted_route.route_request_json == _request(now).canonical_data()
+
+
+def test_generation_dispatch_uses_revalidated_facts_outside_mysql_transaction(
+    integration_database,
+) -> None:
+    definition, result, running, _claimed_at = _start_running_generation_dispatch(
+        integration_database,
+        suffix="authorized",
+    )
+    builder = _CapturingGenerationDispatchBuilder()
+    dispatcher = _CapturingGenerationProviderDispatcher()
+    executor = GenerationOperationExecutor(
+        authority=MySqlGenerationDispatchAuthority(
+            integration_database.session_factory,
+            approved_authority_factory=lambda session: _approved_generation_authority(
+                session,
+                definition=definition,
+                authorized_asset_version_ids=frozenset(),
+                rights_policy_version="rights-none.v1",
+            ),
+            dispatch_builder=builder,
+        ),
+        dispatcher=dispatcher,
+    )
+
+    execution_result = executor.execute(OperationExecutionRequest.from_operation(running))
+
+    assert execution_result.operation_id == running.id
+    assert execution_result.provider_request_id == "provider-request-generation-test"
+    assert len(builder.facts) == 1
+    facts = builder.facts[0]
+    assert facts.operation.operation_id == running.id
+    assert facts.batch == result.batch
+    assert facts.slot == result.slots[0]
+    assert facts.approved_authority.route_decision_sha256 == result.batch.route_decision_sha256
+    assert facts.creative_plan.id == PLAN_VERSION_ID
+    assert facts.route_request.request_sha256 == result.batch.route_request_sha256
+    assert facts.endpoint_capability_version_id == CAPABILITY_VERSION_ID
+    assert len(dispatcher.dispatches) == 1
+    dispatch = dispatcher.dispatches[0]
+    assert dispatch.operation_id == running.id
+    assert isinstance(dispatch.provider_request, ImageGenerationProviderRequest)
+    assert dispatch.provider_request.provider_idempotency_key == (f"durable-operation:{running.id}")
+    assert dispatch.provider_request.media == ImageProviderMediaRequirements(
+        width=facts.route_request.width,
+        height=facts.route_request.height,
+        output_format=ImageProviderOutputFormat.PNG,
+    )
+    assert dispatch.provider_request.reference_images == ()
+    assert dispatch.provider_request.negative_prompt_text is None
+    assert dispatch.provider_request.deadline == min(
+        facts.route_request.deadline_at,
+        facts.batch.retention_deadline,
+        running.lease_expires_at,
+    )
+    assert dispatch.provider_request.prompt_text == "\n".join(
+        (
+            "CommerceVision approved image direction (creative-plan-image.v1)",
+            "Image role: MAIN",
+            "Execution purpose: Generate the approved main image candidate",
+            "Scene: Clean product studio",
+            "Composition: Centered hero composition",
+            "Camera: Front three-quarter view",
+            "Lighting: Soft commercial key light",
+            "Color direction: Neutral brand-safe palette",
+            "Product constraints:",
+            "- Preserve exact product geometry",
+            "Required elements:",
+            "- Single product",
+            "Prohibited elements:",
+            "- None",
+            "Quality targets:",
+            "- Sharp product detail",
+        )
+    )
+
+
+def test_generation_dispatch_attempt_is_durable_and_never_regrants_submission(
+    integration_database,
+) -> None:
+    definition, _generation, running, _claimed_at = _start_running_generation_dispatch(
+        integration_database,
+        suffix="attempt-fence",
+    )
+    authority = MySqlGenerationDispatchAuthority(
+        integration_database.session_factory,
+        approved_authority_factory=lambda session: _approved_generation_authority(
+            session,
+            definition=definition,
+            authorized_asset_version_ids=frozenset(),
+            rights_policy_version="rights-none.v1",
+        ),
+        dispatch_builder=StructuredGenerationDispatchBuilder(),
+    )
+    dispatch = authority.prepare_dispatch(OperationExecutionRequest.from_operation(running))
+    first_coordinator = MySqlGenerationDispatchAttemptCoordinator(
+        integration_database.session_factory
+    )
+
+    first = first_coordinator.claim(dispatch)
+    after_restart = MySqlGenerationDispatchAttemptCoordinator(
+        integration_database.session_factory
+    ).claim(dispatch)
+
+    assert first == GenerationDispatchAttemptClaim(
+        attempt_id=first.attempt_id,
+        submit_authorized=True,
+        provider_request_id=None,
+        provider_task_id=None,
+    )
+    assert after_restart == GenerationDispatchAttemptClaim(
+        attempt_id=first.attempt_id,
+        submit_authorized=False,
+        provider_request_id=None,
+        provider_task_id=None,
+    )
+    outcome = NormalizedImageProviderOutcome(
+        call_outcome=ImageProviderCallOutcome.CONFIRMED_SUCCESS,
+        task_state=ImageProviderTaskState.PENDING,
+        identity=ImageProviderRequestIdentity(
+            provider_request_id="provider-request-attempt-fence",
+            provider_task_id="provider-task-attempt-fence",
+        ),
+        result=None,
+        usage=None,
+        error=None,
+        latency_ms=50,
+    )
+    first_coordinator.record_outcome(
+        claim=first,
+        dispatch=dispatch,
+        outcome=outcome,
+    )
+
+    recorded = MySqlGenerationDispatchAttemptCoordinator(
+        integration_database.session_factory
+    ).claim(dispatch)
+    assert recorded == GenerationDispatchAttemptClaim(
+        attempt_id=first.attempt_id,
+        submit_authorized=False,
+        provider_request_id="provider-request-attempt-fence",
+        provider_task_id="provider-task-attempt-fence",
+    )
+    with integration_database.session_factory() as session:
+        attempt = session.get(
+            GenerationDispatchAttemptModel,
+            (WORKSPACE_ID, first.attempt_id),
+        )
+        assert attempt is not None
+        assert attempt.state == "OUTCOME_RECORDED"
+        assert attempt.outcome == "CONFIRMED_SUCCESS"
+        assert (
+            attempt.provider_request_id_sha256
+            == hashlib.sha256(b"provider-request-attempt-fence").hexdigest()
+        )
+
+    conflicting = replace(
+        outcome,
+        identity=ImageProviderRequestIdentity(
+            provider_request_id="provider-request-conflict",
+            provider_task_id=None,
+        ),
+    )
+    with pytest.raises(ConcurrencyError, match="Provider identity"):
+        first_coordinator.record_outcome(
+            claim=first,
+            dispatch=dispatch,
+            outcome=conflicting,
+        )
+
+
+def test_generation_dispatch_crash_before_outcome_record_never_resubmits(
+    integration_database,
+) -> None:
+    definition, _generation, running, _claimed_at = _start_running_generation_dispatch(
+        integration_database,
+        suffix="crash-after-provider",
+    )
+    dispatch = MySqlGenerationDispatchAuthority(
+        integration_database.session_factory,
+        approved_authority_factory=lambda session: _approved_generation_authority(
+            session,
+            definition=definition,
+            authorized_asset_version_ids=frozenset(),
+            rights_policy_version="rights-none.v1",
+        ),
+        dispatch_builder=StructuredGenerationDispatchBuilder(),
+    ).prepare_dispatch(OperationExecutionRequest.from_operation(running))
+
+    class CrashingAdapter:
+        def __init__(self) -> None:
+            self.submit_calls = 0
+
+        def submit(self, _request):
+            self.submit_calls += 1
+            raise TimeoutError("injected crash after possible dispatch")
+
+    class Resolver:
+        def __init__(self, adapter) -> None:
+            self.adapter = adapter
+
+        def resolve(self, **_kwargs):
+            return self.adapter
+
+    class MustNotRun:
+        def __getattr__(self, name: str):
+            raise AssertionError(f"{name} must not run after unknown dispatch")
+
+    adapter = CrashingAdapter()
+
+    def restarted_dispatcher() -> AtomicGenerationProviderDispatcher:
+        return AtomicGenerationProviderDispatcher(
+            attempts=MySqlGenerationDispatchAttemptCoordinator(
+                integration_database.session_factory
+            ),
+            adapters=Resolver(adapter),
+            admission=MustNotRun(),
+            storage=MustNotRun(),
+            converger=MustNotRun(),
+        )
+
+    with pytest.raises(UnknownOperationOutcome):
+        restarted_dispatcher().submit(dispatch)
+    with pytest.raises(UnknownOperationOutcome) as restarted:
+        restarted_dispatcher().submit(dispatch)
+
+    assert restarted.value.error.code == "GENERATION_DISPATCH_ALREADY_STARTED"
+    assert adapter.submit_calls == 1
+    with integration_database.session_factory() as session:
+        attempt = session.scalar(select(GenerationDispatchAttemptModel))
+        assert attempt is not None
+        assert attempt.state == "DISPATCHING"
+        assert attempt.outcome is None
+
+
+def test_generation_result_converges_asset_candidate_usage_event_and_operation_atomically(
+    integration_database,
+) -> None:
+    definition, generation, running, claimed_at = _start_running_generation_dispatch(
+        integration_database,
+        suffix="converge-success",
+    )
+    provider_request_id = "provider-request-converge-success"
+    commit = _generation_success_commit(
+        running=running,
+        claimed_at=claimed_at,
+        suffix="converge-success",
+    )
+    converger = MySqlGenerationResultConverger(
+        integration_database.session_factory,
+        approved_authority_factory=lambda session: _approved_generation_authority(
+            session,
+            definition=definition,
+            authorized_asset_version_ids=frozenset(),
+            rights_policy_version="rights-none.v1",
+        ),
+    )
+
+    with pytest.raises(ConcurrencyError, match="dispatch Attempt"):
+        converger.commit_success(commit)
+    dispatch = _record_generation_dispatch_attempt(
+        integration_database,
+        definition=definition,
+        running=running,
+        outcome=commit.provider_outcome,
+    )
+    commit = replace(commit, request_sha256=dispatch.request_sha256)
+
+    completed = converger.commit_success(commit)
+
+    assert completed.completion_committed is True
+    assert completed.operation_id == running.id
+    assert completed.provider_request_id == provider_request_id
+    with integration_database.session_factory() as session:
+        operation = session.get(DurableOperationModel, running.id)
+        assert operation is not None
+        assert operation.state == "SUCCEEDED"
+        assert operation.output_ref == completed.output_ref
+        assert session.scalar(select(func.count()).select_from(ProviderCallModel)) == 1
+        assert session.scalar(select(func.count()).select_from(UsageRecordModel)) == 1
+        assert session.scalar(select(func.count()).select_from(CandidateImageModel)) == 1
+        generated_version = session.scalar(
+            select(AssetVersionModel).where(
+                AssetVersionModel.workspace_id == WORKSPACE_ID,
+                AssetVersionModel.upload_session_id.is_(None),
+            )
+        )
+        assert generated_version is not None
+        assert generated_version.generation_provider_call_id is not None
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(OutboxEventModel)
+                .where(OutboxEventModel.event_type == "generation.candidate.ready")
+            )
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditEventModel)
+                .where(AuditEventModel.action == "generation-candidate.ready")
+            )
+            == 1
+        )
+        assert generation.slots[0].durable_operation_id == running.id
+        candidate = session.scalar(select(CandidateImageModel))
+        assert candidate is not None
+        ready_identity = {
+            "candidate_slot_id": candidate.candidate_slot_id,
+            "candidate_image_id": candidate.id,
+            "asset_version_id": candidate.task_asset_version_id,
+            "operation_id": running.id,
+            "usage_record_id": candidate.usage_record_id,
+        }
+
+    continuation = MySqlGenerationWorkflowContinuationAuthority(
+        integration_database.session_factory
+    ).claim_ready_batch(
+        workspace_id=WORKSPACE_ID,
+        workflow_id=WORKFLOW_ID,
+        generation_batch_id=generation.batch.id,
+        **ready_identity,
+    )
+
+    assert continuation is not None
+    assert continuation.workflow_id == WORKFLOW_ID
+    assert continuation.generation_batch_id == generation.batch.id
+    assert continuation.creative_plan_id == PLAN_ID
+    assert continuation.creative_plan_version_id == PLAN_VERSION_ID
+    assert continuation.generation_iteration == 0
+    assert continuation.candidate_refs == (
+        f"mysql://candidate-images/{ready_identity['candidate_image_id']}",
+    )
+    with pytest.raises(ConcurrencyError, match="does not match MySQL authority"):
+        MySqlGenerationWorkflowContinuationAuthority(
+            integration_database.session_factory
+        ).claim_ready_batch(
+            workspace_id=WORKSPACE_ID,
+            workflow_id=WORKFLOW_ID,
+            generation_batch_id=generation.batch.id,
+            **{**ready_identity, "usage_record_id": "019b0000-0000-7000-8000-000000000899"},
+        )
+    lifecycle = DurableNodeLifecycle(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(integration_database.session_factory),
+        lease_duration=timedelta(minutes=2),
+    )
+    evaluation_claim = lifecycle.begin_node(
+        workflow_id=WORKFLOW_ID,
+        expected_workflow_version=continuation.workflow_version,
+        step_key=f"evaluate_results:generation-batch:{generation.batch.id}",
+        step_type=StepType.EVALUATE_RESULTS,
+        running_state=WorkflowStatus.EVALUATING,
+        node_name="evaluate_results",
+        lease_owner="generation-workflow-worker",
+        trace_id="trace-generation-evaluation-restart",
+    )
+    restarted_continuation = MySqlGenerationWorkflowContinuationAuthority(
+        integration_database.session_factory
+    ).claim_ready_batch(
+        workspace_id=WORKSPACE_ID,
+        workflow_id=WORKFLOW_ID,
+        generation_batch_id=generation.batch.id,
+        **ready_identity,
+    )
+    assert restarted_continuation is not None
+    assert restarted_continuation.workflow_version == evaluation_claim.workflow_version
+
+    lifecycle.complete_node(
+        workflow_id=WORKFLOW_ID,
+        step_id=evaluation_claim.step_id,
+        lease_token=evaluation_claim.lease_token,
+        target_state=WorkflowStatus.AWAITING_RESULT_APPROVAL,
+        next_node="approve_results",
+        trace_id="trace-generation-evaluation-complete",
+        output_data={"evaluation_report_ref": "fixture://evaluation/ready"},
+        expected_workflow_version=evaluation_claim.workflow_version,
+    )
+    database_ahead_recovery = MySqlGenerationWorkflowContinuationAuthority(
+        integration_database.session_factory
+    ).claim_ready_batch(
+        workspace_id=WORKSPACE_ID,
+        workflow_id=WORKFLOW_ID,
+        generation_batch_id=generation.batch.id,
+        **ready_identity,
+    )
+    assert database_ahead_recovery is not None
+    assert database_ahead_recovery.workflow_version == evaluation_claim.workflow_version + 1
+
+    with integration_database.session_factory.begin() as session:
+        workflow = session.get(WorkflowModel, WORKFLOW_ID)
+        assert workflow is not None
+        workflow.status = "EXPORTING"
+        workflow.current_node = "export"
+        workflow.version += 1
+    assert (
+        MySqlGenerationWorkflowContinuationAuthority(
+            integration_database.session_factory
+        ).claim_ready_batch(
+            workspace_id=WORKSPACE_ID,
+            workflow_id=WORKFLOW_ID,
+            generation_batch_id=generation.batch.id,
+            **ready_identity,
+        )
+        is None
+    )
+
+
+def test_generation_result_database_fault_rolls_back_every_publishable_fact(
+    integration_database,
+) -> None:
+    definition, _generation, running, claimed_at = _start_running_generation_dispatch(
+        integration_database,
+        suffix="converge-rollback",
+    )
+    converger = MySqlGenerationResultConverger(
+        integration_database.session_factory,
+        approved_authority_factory=lambda session: _approved_generation_authority(
+            session,
+            definition=definition,
+            authorized_asset_version_ids=frozenset(),
+            rights_policy_version="rights-none.v1",
+        ),
+    )
+    commit = _generation_success_commit(
+        running=running,
+        claimed_at=claimed_at,
+        suffix="converge-rollback",
+    )
+    dispatch = _record_generation_dispatch_attempt(
+        integration_database,
+        definition=definition,
+        running=running,
+        outcome=commit.provider_outcome,
+    )
+    commit = replace(commit, request_sha256=dispatch.request_sha256)
+    with integration_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TRIGGER trg_test_candidate_insert_failure "
+                "BEFORE INSERT ON candidate_images FOR EACH ROW "
+                "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected candidate failure'"
+            )
+        )
+    try:
+        with pytest.raises(DBAPIError, match="injected candidate failure"):
+            converger.commit_success(commit)
+    finally:
+        with integration_database.engine.begin() as connection:
+            connection.execute(text("DROP TRIGGER IF EXISTS trg_test_candidate_insert_failure"))
+
+    with integration_database.session_factory() as session:
+        operation = session.get(DurableOperationModel, running.id)
+        assert operation is not None
+        assert operation.state == "RUNNING"
+        assert session.scalar(select(func.count()).select_from(ProviderCallModel)) == 0
+        assert session.scalar(select(func.count()).select_from(UsageRecordModel)) == 0
+        assert session.scalar(select(func.count()).select_from(CandidateImageModel)) == 0
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AssetVersionModel)
+                .where(AssetVersionModel.upload_session_id.is_(None))
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(OutboxEventModel)
+                .where(OutboxEventModel.event_type == "generation.candidate.ready")
+            )
+            == 0
+        )
+
+
+def test_generation_dispatch_denies_cancelled_workflow_before_provider_call(
+    integration_database,
+) -> None:
+    definition, _result, running, claimed_at = _start_running_generation_dispatch(
+        integration_database,
+        suffix="cancelled",
+    )
+    with integration_database.session_factory.begin() as session:
+        workflow = session.get(WorkflowModel, WORKFLOW_ID)
+        assert workflow is not None
+        workflow.cancellation_requested_at = claimed_at
+
+    builder = _NeverGenerationDispatchBuilder()
+    dispatcher = _NeverGenerationProviderDispatcher()
+    authority = MySqlGenerationDispatchAuthority(
+        integration_database.session_factory,
+        approved_authority_factory=lambda session: _approved_generation_authority(
+            session,
+            definition=definition,
+            authorized_asset_version_ids=frozenset(),
+            rights_policy_version="rights-none.v1",
+        ),
+        dispatch_builder=builder,
+    )
+    executor = GenerationOperationExecutor(
+        authority=authority,
+        dispatcher=dispatcher,
+    )
+
+    with pytest.raises(OperationExecutionFailure) as captured:
+        executor.execute(OperationExecutionRequest.from_operation(running))
+
+    assert captured.value.error.code == "GENERATION_AUTHORITY_DENIED"
+    assert captured.value.error.retryable is False
+    assert builder.calls == 0
+    assert dispatcher.calls == 0
 
 
 def test_generation_http_command_replays_reads_and_hides_foreign_workspace(

@@ -196,6 +196,7 @@ def _asset_version_from_model(model: AssetVersionModel) -> AssetVersion:
         asset_id=model.asset_id,
         version_number=model.version_number,
         upload_session_id=model.upload_session_id,
+        generation_provider_call_id=model.generation_provider_call_id,
         filename=model.filename,
         sha256=model.sha256,
         byte_size=model.byte_size,
@@ -422,7 +423,7 @@ class AssetRepository:
         self._loaded_asset_versions: dict[str, int] = {}
         self._loaded_object_versions: dict[str, int] = {}
 
-    def add_quarantined(
+    def _add(
         self,
         *,
         asset: Asset,
@@ -461,6 +462,7 @@ class AssetRepository:
             )
         )
         flush_with_integrity_classification(self._session)
+
         self._session.add(
             AssetVersionModel(
                 id=asset_version.id,
@@ -468,6 +470,7 @@ class AssetRepository:
                 asset_id=asset_version.asset_id,
                 version_number=asset_version.version_number,
                 upload_session_id=asset_version.upload_session_id,
+                generation_provider_call_id=asset_version.generation_provider_call_id,
                 filename=asset_version.filename,
                 sha256=asset_version.sha256,
                 byte_size=asset_version.byte_size,
@@ -525,6 +528,41 @@ class AssetRepository:
         )
         self._loaded_asset_versions[asset.id] = asset.version
         self._loaded_object_versions[object_fact.id] = object_fact.version
+
+    def add_quarantined(
+        self,
+        *,
+        asset: Asset,
+        asset_version: AssetVersion,
+        object_fact: AssetObject,
+    ) -> None:
+        if (
+            asset.status is not AssetState.QUARANTINED
+            or asset_version.upload_session_id is None
+            or asset_version.generation_provider_call_id is not None
+            or object_fact.state is not AssetObjectState.QUARANTINED
+            or object_fact.location is not StorageLocationClass.QUARANTINE
+        ):
+            raise ValueError("quarantined upload Asset facts are invalid")
+        self._add(asset=asset, asset_version=asset_version, object_fact=object_fact)
+
+    def add_controlled_generation(
+        self,
+        *,
+        asset: Asset,
+        asset_version: AssetVersion,
+        object_fact: AssetObject,
+    ) -> None:
+        if (
+            asset.status is not AssetState.AVAILABLE
+            or asset.retention_class is not RetentionClass.TASK
+            or asset_version.upload_session_id is not None
+            or asset_version.generation_provider_call_id is None
+            or object_fact.state is not AssetObjectState.CONTROLLED
+            or object_fact.location is not StorageLocationClass.TASK
+        ):
+            raise ValueError("controlled generation Asset facts are invalid")
+        self._add(asset=asset, asset_version=asset_version, object_fact=object_fact)
 
     def get(
         self,

@@ -34,6 +34,7 @@ from .workspace_identity import WorkspaceId
 class EventQueue(StrEnum):
     WORKFLOW = "workflow"
     ASSET = "asset"
+    GENERATION = "generation"
     INDEX = "index"
     MAINTENANCE = "maintenance"
 
@@ -75,6 +76,7 @@ class EventType(StrEnum):
     OPERATION_RECOVERY_REQUESTED = "operation.recovery.requested"
     DEAD_LETTER_REPLAY_RECORDED = "dead-letter.replay.recorded"
     GENERATION_CANDIDATE_REQUESTED = "generation.candidate.requested"
+    GENERATION_CANDIDATE_READY = "generation.candidate.ready"
 
 
 class CompatibleEventPayload(BaseModel):
@@ -166,6 +168,17 @@ class GenerationCandidateRequestedPayload(StrictEventPayload):
     candidate_slot_id: str = Field(pattern=UUID_PATTERN)
     operation_id: str = Field(pattern=UUID_PATTERN)
     operation_kind: Literal[OperationKind.IMAGE_GENERATION]
+
+
+class GenerationCandidateReadyPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    workflow_id: str = Field(pattern=UUID_PATTERN)
+    generation_batch_id: str = Field(pattern=UUID_PATTERN)
+    candidate_slot_id: str = Field(pattern=UUID_PATTERN)
+    candidate_image_id: str = Field(pattern=UUID_PATTERN)
+    asset_version_id: str = Field(pattern=UUID_PATTERN)
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    usage_record_id: str = Field(pattern=UUID_PATTERN)
 
 
 class CollectionRebuildCommand(StrEnum):
@@ -763,9 +776,16 @@ COLLECTION_REBUILD_COMPLETED_V1 = EventContract(
 GENERATION_CANDIDATE_REQUESTED_V1 = EventContract(
     EventType.GENERATION_CANDIDATE_REQUESTED,
     1,
-    EventQueue.ASSET,
+    EventQueue.GENERATION,
     GenerationCandidateRequestedPayload,
     EventHandling.COMMAND,
+)
+GENERATION_CANDIDATE_READY_V1 = EventContract(
+    EventType.GENERATION_CANDIDATE_READY,
+    1,
+    EventQueue.WORKFLOW,
+    GenerationCandidateReadyPayload,
+    EventHandling.OBSERVATION,
 )
 
 
@@ -797,6 +817,7 @@ PHASE2_EVENT_CONTRACTS = (
     COLLECTION_REBUILD_PROGRESSED_V1,
     COLLECTION_REBUILD_COMPLETED_V1,
     GENERATION_CANDIDATE_REQUESTED_V1,
+    GENERATION_CANDIDATE_READY_V1,
     ASSET_DELETE_REQUESTED_V1,
     ASSET_DELETE_COMPLETED_V1,
     _phase2_contract(

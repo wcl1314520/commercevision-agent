@@ -11,7 +11,10 @@ from commercevision_agent_core import (
     ResumeCheckpointConflictError,
     build_fixture_graph,
 )
-from commercevision_contracts.workflow import product_brief_checkpoint_generation
+from commercevision_contracts.workflow import (
+    generation_batch_checkpoint_generation,
+    product_brief_checkpoint_generation,
+)
 from commercevision_domain import ApprovalDecision, ApprovalType
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -105,8 +108,12 @@ def _build_human_wait_probe_graph(
 
 
 class _CheckpointHistoryLifecycle:
+    def __init__(self) -> None:
+        self.begun_step_keys: list[str] = []
+
     def begin_node(self, **kwargs: Any) -> SimpleNamespace:
         step_key = str(kwargs["step_key"])
+        self.begun_step_keys.append(step_key)
         return SimpleNamespace(
             workflow_version=int(kwargs["expected_workflow_version"]),
             step_id=f"{step_key}-id",
@@ -129,6 +136,86 @@ class _CheckpointHistoryLifecycle:
 
     def fail_node(self, **kwargs: Any) -> None:
         del kwargs
+
+
+def _generation_batch_state(
+    *,
+    workflow_id: str,
+    generation_batch_id: str,
+    candidate_ids: tuple[str, ...],
+) -> FixtureAgentState:
+    return FixtureAgentState(
+        workflow_id=workflow_id,
+        workflow_version=7,
+        workspace_id="checkpoint-entry",
+        actor_id="checkpoint-entry-test",
+        trace_id="checkpoint-generation-ready-trace",
+        product_brief_ref="mysql://product-brief-versions/product-brief-v1",
+        product_brief_version_id="product-brief-v1",
+        product_brief_version_number=1,
+        creative_plan_ref="mysql://creative-plans/creative-plan-v1",
+        creative_plan_version_id="creative-plan-version-v1",
+        creative_plan_version=1,
+        generation_batch_id=generation_batch_id,
+        generation_checkpoint_generation=generation_batch_checkpoint_generation(
+            workspace_id="checkpoint-entry",
+            generation_batch_id=generation_batch_id,
+        ),
+        candidate_refs=[
+            f"mysql://candidate-images/{candidate_id}" for candidate_id in candidate_ids
+        ],
+        current_node="evaluate_results",
+        initial_entry_reason="GENERATION_CANDIDATES_READY",
+    )
+
+
+def test_generation_ready_entry_starts_evaluation_once_across_runtime_restart() -> None:
+    checkpointer = InMemorySaver()
+    lifecycle = _CheckpointHistoryLifecycle()
+    graph = build_fixture_graph(
+        lifecycle=lifecycle,  # type: ignore[arg-type]
+        planner=_FixturePlanner(),  # type: ignore[arg-type]
+        tool_gateway=object(),  # type: ignore[arg-type]
+        checkpointer=checkpointer,
+        worker_id="generation-ready-entry-test",
+    )
+    state = _generation_batch_state(
+        workflow_id="checkpoint-generation-ready",
+        generation_batch_id="019b0000-0000-7000-8000-000000000811",
+        candidate_ids=("019b0000-0000-7000-8000-000000000812",),
+    )
+
+    first = FixtureAgentRuntime(graph, checkpointer).run(initial_state=state)
+    restarted = FixtureAgentRuntime(graph, checkpointer).run(initial_state=state)
+
+    assert "__interrupt__" in first
+    assert "__interrupt__" in restarted
+    assert lifecycle.begun_step_keys == [
+        "evaluate_results:generation-batch:019b0000-0000-7000-8000-000000000811"
+    ]
+
+
+def test_generation_ready_entry_requires_exact_batch_and_candidate_authority() -> None:
+    batch_id = "019b0000-0000-7000-8000-000000000821"
+    with pytest.raises(ValueError, match="candidate authority"):
+        _generation_batch_state(
+            workflow_id="checkpoint-generation-ready-empty",
+            generation_batch_id=batch_id,
+            candidate_ids=(),
+        )
+
+    with pytest.raises(ValueError, match="checkpoint generation"):
+        valid_state = _generation_batch_state(
+            workflow_id="checkpoint-generation-ready-mismatch",
+            generation_batch_id=batch_id,
+            candidate_ids=("019b0000-0000-7000-8000-000000000822",),
+        )
+        FixtureAgentState.model_validate(
+            {
+                **valid_state.model_dump(mode="json"),
+                "generation_checkpoint_generation": "generation-batch:v1:bad",
+            }
+        )
 
 
 class _FixturePlanner:

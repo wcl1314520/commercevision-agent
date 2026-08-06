@@ -43,6 +43,7 @@ StateUpdate = dict[str, Any]
 _SAFE_INITIAL_ENTRY_NODES = (
     "validate_input",
     "retrieve_references",
+    "evaluate_results",
 )
 _CHECKPOINT_GENERATION_KEY = "commercevision_checkpoint_generation"
 _CHECKPOINT_NAMESPACE_SEPARATOR = "|"
@@ -314,7 +315,11 @@ class _GenerationCheckpointSaver(BaseCheckpointSaver[Any]):
     def _generation_from_physical_config(config: RunnableConfig) -> str:
         namespace = str(config["configurable"].get("checkpoint_ns", ""))
         root_namespace = namespace.split(_CHECKPOINT_NAMESPACE_SEPARATOR, maxsplit=1)[0]
-        return root_namespace if root_namespace.startswith("product-brief:v1:") else ""
+        return (
+            root_namespace
+            if root_namespace.startswith(("product-brief:v1:", "generation-batch:v1:"))
+            else ""
+        )
 
     @classmethod
     def _logical_config(
@@ -446,6 +451,16 @@ def _initial_entry_node(state: FixtureAgentState | dict[str, Any]) -> str:
             "retrieve_references requires an exact confirmed ProductBrief "
             "when no durable checkpoint exists"
         )
+    if current_node == "evaluate_results" and (
+        values.initial_entry_reason != "GENERATION_CANDIDATES_READY"
+        or values.generation_batch_id is None
+        or values.generation_checkpoint_generation is None
+        or not values.candidate_refs
+    ):
+        raise ValueError(
+            "evaluate_results requires exact ready Generation Batch authority "
+            "when no durable checkpoint exists"
+        )
     return current_node
 
 
@@ -465,11 +480,15 @@ def _product_brief_continuation(
 
 
 def _checkpoint_namespace(state: FixtureAgentState) -> str:
-    if state.initial_entry_reason != "PRODUCT_BRIEF_CONFIRMED":
-        return ""
-    if state.product_brief_checkpoint_generation is None:
-        raise ValueError("confirmed ProductBrief checkpoint generation is unavailable")
-    return state.product_brief_checkpoint_generation
+    if state.initial_entry_reason == "PRODUCT_BRIEF_CONFIRMED":
+        if state.product_brief_checkpoint_generation is None:
+            raise ValueError("confirmed ProductBrief checkpoint generation is unavailable")
+        return state.product_brief_checkpoint_generation
+    if state.initial_entry_reason == "GENERATION_CANDIDATES_READY":
+        if state.generation_checkpoint_generation is None:
+            raise ValueError("ready Generation Batch checkpoint generation is unavailable")
+        return state.generation_checkpoint_generation
+    return ""
 
 
 class FixtureNodes:
@@ -792,15 +811,22 @@ class FixtureNodes:
 
     def evaluate_results(self, raw_state: FixtureAgentState) -> StateUpdate:
         state = _state_values(raw_state)
+        generation_identity = state.generation_batch_id or (
+            f"generation-{state.generation_iteration}"
+        )
         output = {
             "evaluation_report_ref": (
-                f"fixture://evaluation/{state.workflow_id}/generation-{state.generation_iteration}"
+                f"fixture://evaluation/{state.workflow_id}/{generation_identity}"
             ),
             "result_decision": None,
         }
         return self._durable_node(
             state=state,
-            step_key=f"evaluate_results:{state.generation_iteration}",
+            step_key=(
+                f"evaluate_results:generation-batch:{state.generation_batch_id}"
+                if state.generation_batch_id is not None
+                else f"evaluate_results:{state.generation_iteration}"
+            ),
             step_type=StepType.EVALUATE_RESULTS,
             running_state=WorkflowStatus.EVALUATING,
             target_state=WorkflowStatus.AWAITING_RESULT_APPROVAL,
@@ -1425,7 +1451,7 @@ class FixtureAgentRuntime:
     @staticmethod
     def _is_root_checkpoint_namespace(namespace: str) -> bool:
         return namespace == "" or (
-            namespace.startswith("product-brief:v1:")
+            namespace.startswith(("product-brief:v1:", "generation-batch:v1:"))
             and _CHECKPOINT_NAMESPACE_SEPARATOR not in namespace
         )
 

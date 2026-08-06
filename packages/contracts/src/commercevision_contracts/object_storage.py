@@ -96,6 +96,26 @@ class ConditionalWriteRequest(StorageContract):
         return self
 
 
+class GenerationMediaWriteRequest(StorageContract):
+    """Bounded, identity-fenced write for one generated image candidate."""
+
+    reference: ObjectReference
+    payload: bytes = Field(min_length=1, max_length=32 * 1024 * 1024, repr=False)
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_type: str = Field(pattern=r"^image/(png|jpeg|webp)$")
+    durable_operation_id: str = Field(min_length=1, max_length=36)
+    candidate_slot_id: str = Field(min_length=1, max_length=36)
+    provider_call_id: str = Field(min_length=1, max_length=36)
+
+    @model_validator(mode="after")
+    def require_unversioned_destination(self) -> GenerationMediaWriteRequest:
+        if self.reference.location is not StorageLocationClass.TASK:
+            raise ValueError("generation media writes require a controlled Task destination")
+        if self.reference.version_id is not None:
+            raise ValueError("generation media writes require an unversioned destination key")
+        return self
+
+
 class ConditionalDeleteRequest(StorageContract):
     reference: ObjectReference
     expected_etag: str
@@ -170,6 +190,11 @@ class ObjectStorage(Protocol):
     def copy_if_absent(self, request: ConditionalCopyRequest) -> ObjectStat: ...
 
     def write_if_absent(self, request: ConditionalWriteRequest) -> ObjectStat: ...
+
+    def write_generation_media_if_absent(
+        self,
+        request: GenerationMediaWriteRequest,
+    ) -> ObjectStat: ...
 
     def delete_if_match(self, request: ConditionalDeleteRequest) -> bool: ...
 

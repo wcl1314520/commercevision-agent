@@ -164,7 +164,8 @@ class AssetVersionResponseV1(BaseModel):
     workspace_id: WorkspaceId
     asset_id: str
     version_number: int
-    upload_session_id: str
+    upload_session_id: str | None
+    generation_provider_call_id: str | None
     filename: str
     sha256: str
     byte_size: int

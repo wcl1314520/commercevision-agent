@@ -491,6 +491,11 @@ class AssetVersionModel(Base):
         ),
         UniqueConstraint("upload_session_id", name="uq_asset_version_upload_session"),
         UniqueConstraint(
+            "workspace_id",
+            "generation_provider_call_id",
+            name="uq_asset_version_generation_provider_call",
+        ),
+        UniqueConstraint(
             "asset_id",
             "version_number",
             name="uq_asset_version_number",
@@ -506,6 +511,17 @@ class AssetVersionModel(Base):
             ["upload_sessions.workspace_id", "upload_sessions.id"],
             name="fk_asset_version_workspace_upload",
             ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "generation_provider_call_id"],
+            ["generation_provider_calls.workspace_id", "generation_provider_calls.id"],
+            name="fk_asset_version_generation_provider_call",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(upload_session_id IS NOT NULL AND generation_provider_call_id IS NULL) OR "
+            "(upload_session_id IS NULL AND generation_provider_call_id IS NOT NULL)",
+            name="ck_asset_version_exactly_one_origin",
         ),
         CheckConstraint("version_number > 0", name="ck_asset_version_number"),
         CheckConstraint("byte_size > 0", name="ck_asset_version_byte_size"),
@@ -533,7 +549,8 @@ class AssetVersionModel(Base):
     workspace_id: Mapped[str] = mapped_column(workspace_id_sql_type(), nullable=False)
     asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    upload_session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    upload_session_id: Mapped[str | None] = mapped_column(String(36))
+    generation_provider_call_id: Mapped[str | None] = mapped_column(exact_string_sql_type(36))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)

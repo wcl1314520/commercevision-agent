@@ -564,6 +564,7 @@ class Settings(BaseSettings):
     worker_stop_grace_period_seconds: int = Field(default=90, ge=1, le=3600)
     workflow_queue_name: str = "commercevision.workflow"
     asset_queue_name: str = "commercevision.asset"
+    generation_queue_name: str = "commercevision.generation"
     index_queue_name: str = "commercevision.index"
     maintenance_queue_name: str = "commercevision.maintenance"
     scheduler_poll_seconds: float = Field(default=2.0, gt=0.1, le=60)
@@ -725,6 +726,7 @@ class Settings(BaseSettings):
         "worker_readiness_path",
         "workflow_queue_name",
         "asset_queue_name",
+        "generation_queue_name",
         "index_queue_name",
         "maintenance_queue_name",
         "generation_rights_policy_version",
@@ -1103,6 +1105,7 @@ class Settings(BaseSettings):
         logical_queues = (
             self.workflow_queue_name,
             self.asset_queue_name,
+            self.generation_queue_name,
             self.index_queue_name,
             self.maintenance_queue_name,
         )
@@ -1642,6 +1645,7 @@ class Settings(BaseSettings):
         return (
             self.workflow_queue_name,
             self.asset_queue_name,
+            self.generation_queue_name,
             self.index_queue_name,
             self.maintenance_queue_name,
         )
@@ -1651,6 +1655,7 @@ class Settings(BaseSettings):
         return bool(
             {
                 self.asset_queue_name,
+                self.generation_queue_name,
                 self.index_queue_name,
                 self.maintenance_queue_name,
             }.intersection(self.configured_worker_queues)

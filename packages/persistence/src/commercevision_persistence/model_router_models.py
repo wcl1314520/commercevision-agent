@@ -95,6 +95,7 @@ class ModelRouteDecisionModel(Base):
     creative_plan_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     plan_approval_id: Mapped[str] = mapped_column(String(36), nullable=False)
     route_request_sha256: Mapped[str] = mapped_column(exact_string_sql_type(64), nullable=False)
+    route_request_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
     authorized_asset_version_ids_json: Mapped[list[str] | None] = mapped_column(JSON)
     route_candidate_count: Mapped[int | None] = mapped_column(Integer)
     policy_key: Mapped[str] = mapped_column(exact_string_sql_type(128), nullable=False)

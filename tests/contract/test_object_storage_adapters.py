@@ -26,6 +26,7 @@ from commercevision_contracts.object_storage import (
     ConditionalDeleteRequest,
     ConditionalWriteRequest,
     DeleteMarkerRequest,
+    GenerationMediaWriteRequest,
     ObjectReference,
     ObjectVersionListRequest,
     PresignPutRequest,
@@ -380,6 +381,21 @@ def _provider_write_request(
     )
 
 
+def _generation_media_write_request(payload: bytes) -> GenerationMediaWriteRequest:
+    return GenerationMediaWriteRequest(
+        reference=ObjectReference(
+            location=StorageLocationClass.TASK,
+            key="generation/operation-1/candidate-1.png",
+        ),
+        payload=payload,
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+        content_type="image/png",
+        durable_operation_id="019b0000-0000-7000-8000-000000000911",
+        candidate_slot_id="019b0000-0000-7000-8000-000000000912",
+        provider_call_id="019b0000-0000-7000-8000-000000000913",
+    )
+
+
 def _minio_provider_storage(client: _S3Client) -> MinioObjectStorage:
     return MinioObjectStorage(
         endpoint="https://minio.internal.invalid",
@@ -388,7 +404,10 @@ def _minio_provider_storage(client: _S3Client) -> MinioObjectStorage:
         secret_key="secret-key",
         session_token=None,
         region="us-east-1",
-        buckets={StorageLocationClass.PROVIDER_RESULT: "provider"},
+        buckets={
+            StorageLocationClass.PROVIDER_RESULT: "provider",
+            StorageLocationClass.TASK: "provider",
+        },
         verify_tls=True,
         force_path_style=True,
         require_encryption=False,
@@ -397,6 +416,18 @@ def _minio_provider_storage(client: _S3Client) -> MinioObjectStorage:
         client=client,
         signer=client,
     )
+
+
+def test_minio_generation_media_write_exceeds_checkpoint_bound_and_is_fenced() -> None:
+    client = _S3Client({})
+    storage = _minio_provider_storage(client)
+    payload = b"x" * (2 * 1024 * 1024 + 1)
+
+    written = storage.write_generation_media_if_absent(_generation_media_write_request(payload))
+
+    assert written.content_length == len(payload)
+    assert written.metadata["candidate-slot-id"].endswith("0912")
+    assert written.server_side_encryption == ServerSideEncryptionState.AES256
 
 
 def test_minio_conditional_write_classifies_preflight_outage_as_safe_to_retry() -> None:
@@ -1435,13 +1466,34 @@ def _oss_provider_storage(client: _OssBucket) -> OssObjectStorage:
         secret_key="secret-key",
         session_token=None,
         region="cn-hangzhou",
-        buckets={StorageLocationClass.PROVIDER_RESULT: "provider"},
+        buckets={
+            StorageLocationClass.PROVIDER_RESULT: "provider",
+            StorageLocationClass.TASK: "provider",
+        },
         force_path_style=False,
         require_encryption=False,
         connect_timeout=1,
-        clients={StorageLocationClass.PROVIDER_RESULT: client},
-        signers={StorageLocationClass.PROVIDER_RESULT: client},
+        clients={
+            StorageLocationClass.PROVIDER_RESULT: client,
+            StorageLocationClass.TASK: client,
+        },
+        signers={
+            StorageLocationClass.PROVIDER_RESULT: client,
+            StorageLocationClass.TASK: client,
+        },
     )
+
+
+def test_oss_generation_media_write_exceeds_checkpoint_bound_and_is_fenced() -> None:
+    client = _OssBucket("provider", {})
+    storage = _oss_provider_storage(client)
+    payload = b"x" * (2 * 1024 * 1024 + 1)
+
+    written = storage.write_generation_media_if_absent(_generation_media_write_request(payload))
+
+    assert written.content_length == len(payload)
+    assert written.metadata["candidate-slot-id"].endswith("0912")
+    assert written.server_side_encryption == ServerSideEncryptionState.AES256
 
 
 def test_oss_conditional_write_classifies_preflight_outage_as_safe_to_retry() -> None:

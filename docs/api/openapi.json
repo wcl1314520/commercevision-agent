@@ -11908,8 +11908,26 @@
             "title": "Version Number"
           },
           "upload_session_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Upload Session Id"
+          },
+          "generation_provider_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Provider Call Id"
           },
           "filename": {
             "type": "string",
@@ -12022,6 +12040,7 @@
           "asset_id",
           "version_number",
           "upload_session_id",
+          "generation_provider_call_id",
           "filename",
           "sha256",
           "byte_size",
