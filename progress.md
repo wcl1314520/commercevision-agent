@@ -2010,3 +2010,11 @@
   `in_progress`。
 - `audit_python.py` 首次在线查询因宿主网络瞬断失败；有界重试成功并报告 `No known vulnerabilities
   found`。OpenAPI 重新导出无漂移，未新增或修改依赖。
+- Ticket 01 实现权威提交为 `83d74e54327edd2f4dc48edb9622d02ba02e190f`，精确 GitHub Actions
+  `31068995538` 四路全绿：Python `2074 passed, 3 skipped`，Web unit `224 passed`、Playwright
+  `94 passed`，Container builds、Gitleaks/SBOM、依赖审计、迁移/schema drift、OpenAPI、Phase 2/3
+  acceptance 和 Retrieval/Planner eval 全部成功。Ticket 01 正式 `complete`，Ticket 02 解锁为
+  `ready-for-agent`。
+- 本机 Git HTTPS 代理端口不可达且直连被网络设备重置；没有请求沙箱许可。使用已连接的 GitHub Git
+  Objects API 上传并逐 blob/tree SHA 校验，非强制 fast-forward `main`；随后用公开 patch 的作者/时间重建
+  相同 commit object，本地 `main` 与 `origin/main` 均精确对齐远端 SHA。

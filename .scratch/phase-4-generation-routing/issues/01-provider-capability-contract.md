@@ -6,7 +6,7 @@ fail-closed invariants shared by every Phase 4 module.
 
 **Blocked by:** None — Phase 4 public test seams confirmed on 2026-08-06.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Capability versions pin provider/endpoint/model/region/protocol/adapter/configuration identity and never contain credentials.
 - [x] Generation, editing, planning, sync, async, query, cancel, multipart, JSON, input/output and pricing capabilities are explicit positive facts; unknown means disabled.
@@ -47,3 +47,7 @@ fail-closed invariants shared by every Phase 4 module.
   `git diff --check` pass.
   Ticket status stays `in_progress` until the exact implementation SHA is green in all GitHub
   Actions jobs.
+- Implementation commit `83d74e54327edd2f4dc48edb9622d02ba02e190f` is green in exact GitHub
+  Actions run `31068995538`: Python `2074 passed, 3 skipped`, Web unit `224 passed`, Web E2E
+  `94 passed`, Container builds, Gitleaks, SBOM, dependency audits, migrations, schema drift,
+  OpenAPI and prior release/evaluation gates all succeeded. Ticket 01 is complete.

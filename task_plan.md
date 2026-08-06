@@ -520,6 +520,7 @@
 | 2026-08-06 | Ticket 01 验证首轮发现两个新增文件需 Ruff format、根导出与测试 import 未排序；并行 fail-fast 使同组 Mypy/pytest 输出未返回 | 仅对三个目标文件执行 formatter/受控 import fix；后续用 `Promise.allSettled` 保留每个验证结果，不重复 fail-fast 组合 |
 | 2026-08-06 | Ticket 01 strict Mypy 发现 `__post_init__` 中两个 bool 验证循环复用了先前推断为 `str` 的函数级 loop variable | 将 bool 循环变量改为独立语义名称，不改变行为；目标 93 项回归与 diff-check 已通过，修后重跑 strict Mypy |
 | 2026-08-06 | Ticket 01 本地 `audit_python.py` 查询在线漏洞数据库时连接被宿主网络重置（WinError 10054） | 锁文件未变且许可证策略通过；不把外部网络失败误报为代码缺陷，保留精确 GitHub Actions `Python checks`/Security 作业作为权威门禁，并可在提交前做一次有界重试 |
+| 2026-08-06 | Ticket 01 首次 push 命中仓库本地 `127.0.0.1:10809` 代理关闭，临时直连也被网络设备重置 | 不请求沙箱许可、不改全局 Git 配置；通过 GitHub Connector Git Objects API 逐 blob/tree SHA 校验后非强制 fast-forward，并用公开 patch 元数据在本地重建同一 commit object，最终本地/远端精确一致 |
 
 ## Ticket 07 第十轮后端修复计划
 

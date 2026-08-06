@@ -5,7 +5,7 @@ and Usage Record contracts plus deterministic logical identities and lifecycle i
 
 **Blocked by:** 01.
 
-**Status:** pending
+**Status:** ready-for-agent
 
 - [ ] One batch binds exact Workflow, Plan, Approval, direction, authorized Tool Intent, policy versions, retention and actor facts.
 - [ ] Candidate indexes are contiguous and bounded; one slot derives one stable idempotency identity and owns one Durable Operation.
