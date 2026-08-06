@@ -219,7 +219,7 @@ def test_exact_approved_plan_command_creates_one_atomic_generation_batch() -> No
 
     result = service.start(
         command=_command(),
-        idempotency_key="approved-plan-generation-1",
+        idempotency_key="test-test-test",
         trace_id="trace-generation-1",
     )
 
