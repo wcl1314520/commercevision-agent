@@ -1448,6 +1448,7 @@ from . import indexing_models as _indexing_models  # noqa: E402, F401, I001
 from . import product_brief_models as _product_brief_models  # noqa: E402, F401, I001
 from . import planning_context_models as _planning_context_models  # noqa: E402, F401, I001
 from . import prompt_registry_models as _prompt_registry_models  # noqa: E402, F401, I001
+from . import provider_control_plane_models as _provider_control_plane_models  # noqa: E402, F401, I001
 from . import retention_models as _retention_models  # noqa: E402, F401, I001
 from . import retrieval_models as _retrieval_models  # noqa: E402, F401, I001
 

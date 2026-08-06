@@ -2037,3 +2037,33 @@
   Ruff format/check、strict touched-code Mypy、全仓 baseline、Python license policy 全绿。OpenAPI 幂等重导出，
   唯一预期变化为 `OperationKind` 新增 `IMAGE_GENERATION`/`IMAGE_EDITING`。Ticket 02 置为 `complete`，
   Ticket 03 置为 `ready-for-agent`。
+
+# 2026-08-06 Phase 4 Ticket 03 启动
+
+- Ticket 03 进入 `in_progress`；首个 public control-plane RED 因缺少
+  `ProviderEndpointCapabilityHead` 根接口稳定失败。
+- GREEN 新增只管理 current/latest pointer 与 CAS version 的 endpoint capability head aggregate；immutable
+  capability payload 继续复用 Ticket 01 类型，不复制 Provider 配置模型。
+- 第二个 RED 证明“降级后重新指向已发布新版本”会被早期 rollback 规则误拒；修正后 downgrade/re-upgrade
+  只移动 current pointer，latest immutable version 保持不变。目标与 routing 回归 `16 passed`，Ruff 与 strict
+  Mypy 全绿；下一切片为发布幂等/审计应用命令和 MySQL 映射。
+
+# 2026-08-06 Phase 4 Ticket 03 本地实现完成
+
+- Ticket 02 权威提交 `2a84d7468d4f24a9b1db4f8e5e91ba62b11704fc` 的 GitHub Actions
+  `31071442377` 四路全部成功；Python 全量测试约 19 分钟完成，Ticket 02 的 exact-SHA 门禁正式闭合。
+- 新增 Provider Identity、Endpoint Capability Head、Model Route Policy Head 三个窄聚合；capability 与 Route
+  Policy 发布只追加 immutable version 并 CAS 推进 current/latest，rollback/re-upgrade 只移动 current pointer。
+- Provider Control Plane 应用服务复用既有幂等与审计仓储，覆盖 Provider 注册、capability/Route Policy
+  发布回滚、discovery candidate 与 endpoint observation；所有命令在单一 MySQL 事务中完成。
+- 新增七张 MySQL 权威表和三个不可变 UPDATE trigger；租户表使用 workspace-first identity，调用方 ID 使用
+  binary-exact collation，时间为 `DATETIME(6)`，价格为 `DECIMAL(20,6)`。Alembic empty/upgrade/downgrade/
+  re-upgrade、SQLAlchemy metadata drift 与直接 UPDATE 拒绝均在真实 MySQL 通过。
+- Runtime discovery 仅创建 `PENDING_REVIEW` 候选，不移动 live capability；发现证据受 16 KiB JSON 上限与
+  credential-like 字段拒绝约束。Endpoint observation 以 workspace/idempotency 唯一追加 circuit/quota 事实。
+- Secret Reference 只在管理员控制面配置与独立数据库列中存在，不进入 capability JSON、应用响应或审计
+  metadata；raw credential-like `sk-*` 值在领域构造边界被拒绝。
+- Ticket 03 针对性门禁 `9 passed`，包括真实 MySQL 两线程同 expected version 竞争时恰好一个 CAS 胜者；
+  Ruff、touched-code Mypy、431 条既有 Mypy baseline 零漂移、Alembic check 与 `git diff --check` 全绿。
+  本机完整 pytest 两次分别被 5/15 分钟执行窗口终止且无失败输出；不冒充全量通过，等待 exact-SHA CI
+  使用约 20 分钟的正式窗口完成最终判定。

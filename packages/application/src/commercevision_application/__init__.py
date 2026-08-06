@@ -144,6 +144,14 @@ from .product_briefs import (
     ProductBriefPolicy,
 )
 from .prompt_registry import PromptRegistryApplicationService
+from .provider_control_plane import (
+    ModelRoutePolicyPointerResult,
+    ProviderCapabilityPointerResult,
+    ProviderControlPlaneApplicationService,
+    ProviderDiscoveryCandidateResult,
+    ProviderEndpointObservationResult,
+    ProviderIdentityResult,
+)
 from .reliability import InboxCoordinator, OutboxDispatcher, RecoveryService
 from .retrieval import (
     DenseEmbeddingCandidate,
@@ -304,6 +312,12 @@ __all__ = [
     "ProviderArtifactOwner",
     "ProviderArtifactReconciliationBatch",
     "ProviderArtifactReconciliationCursor",
+    "ProviderCapabilityPointerResult",
+    "ProviderDiscoveryCandidateResult",
+    "ProviderEndpointObservationResult",
+    "ModelRoutePolicyPointerResult",
+    "ProviderControlPlaneApplicationService",
+    "ProviderIdentityResult",
     "NullProductBriefObserver",
     "OperationApplicationService",
     "OperationCreateCommand",

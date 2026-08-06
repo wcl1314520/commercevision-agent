@@ -132,6 +132,15 @@ from .prompt_registry import (
     PromptRevisionStatus,
     PromptTemplateVariable,
 )
+from .provider_control_plane import (
+    ModelRoutePolicyHead,
+    ModelRoutePolicyVersion,
+    ProviderDiscoveryCandidate,
+    ProviderDiscoveryCandidateState,
+    ProviderEndpointCapabilityHead,
+    ProviderEndpointObservation,
+    ProviderIdentity,
+)
 from .provider_execution import (
     ProviderCall,
     ProviderCallOutcome,
@@ -283,6 +292,8 @@ __all__ = [
     "ModelRouteFailoverCause",
     "ModelRouteCandidateScore",
     "ModelRoutePolicy",
+    "ModelRoutePolicyHead",
+    "ModelRoutePolicyVersion",
     "ModelRouteRequest",
     "ModelRouteRejectionCode",
     "NoEligibleModelRouteError",
@@ -308,8 +319,13 @@ __all__ = [
     "ProviderCallOutcome",
     "ProviderCapability",
     "ProviderDataRetentionMode",
+    "ProviderDiscoveryCandidate",
+    "ProviderDiscoveryCandidateState",
     "ProviderEndpointCapabilityVersion",
+    "ProviderEndpointCapabilityHead",
+    "ProviderEndpointObservation",
     "ProviderExecutionMode",
+    "ProviderIdentity",
     "ProviderPricingUnit",
     "ProviderProtocol",
     "ProviderTrainingUsePolicy",
