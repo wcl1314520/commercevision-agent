@@ -5,7 +5,7 @@ outside transactions, validates result bytes, persists assets/candidates/usage a
 
 **Blocked by:** 02, 05, 06.
 
-**Status:** in_progress
+**Status:** complete
 
 ## Comments
 
@@ -65,6 +65,14 @@ outside transactions, validates result bytes, persists assets/candidates/usage a
   Mypy, full-workspace Mypy baseline reduced to `426` with zero drift, OpenAPI/Web generated types,
   Web typecheck/lint and `224` unit tests, lock/diff, Python licenses and vulnerability audit. Added
   diff secret-pattern scan found zero credentials; no live Provider call or user credential was used.
+- 2026-08-07: Release hardening fixed the full-suite migration table registry in
+  `d5b49b4522c901936d705292a61b6aed15c629ce`, pinned the patched `js-yaml==4.3.1` workspace
+  resolution in `9caed1bd3e7354d29cb56a791a2613a4c35b8be1`, and classified 13 historical deterministic
+  idempotency fixtures with exact Gitleaks fingerprints in
+  `e092732e7c2125711c7de7fb934c524392b35a2f`. GitHub Actions run `31128782236` then passed
+  Python checks, Web checks, Container builds, and Security/SBOM on that exact final SHA. Ticket 09
+  is complete; Ticket 10's dependency is unlocked, while its first production RED remains gated on
+  the release-state evidence commit receiving the same exact-SHA CI proof.
 
 - [x] Existing Worker/registry/lease/Outbox/Inbox/readiness framework owns the queue; no parallel job system or service framework is introduced.
 - [x] Authority is rechecked before dispatch and before late result availability.

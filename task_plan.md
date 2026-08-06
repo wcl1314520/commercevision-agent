@@ -290,7 +290,10 @@
   保持 blocked。
 - Ticket 09 五轴终审再以 RED/GREEN 收紧 TASK-only media write 与 Provider request hash 派生；最终本地
   unit+contract `1673 passed, 1 skipped`、真实 MySQL `105 passed`、Web `224 passed`，静态/供应链/秘密扫描
-  全绿。当前唯一放行 blocker 是实现提交的精确 GitHub Actions；Ticket 10 继续保持 blocked。
+  全绿。实现 SHA 链最终收敛到 `e092732e7c2125711c7de7fb934c524392b35a2f`，并由精确 GitHub Actions
+  `31128782236` 的 Python、Web、Container builds、Security 与 SBOM 四路全绿验证；Ticket 09 正式
+  `complete`，Ticket 10 的 blockers-first 依赖已解除。状态证据提交自身取得精确 CI 前不写 Ticket 10
+  生产代码，随后直接从对账/未知结果 no-resubmit 公共接缝进入首个 RED。
 
 ## 成功标准
 

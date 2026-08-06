@@ -2351,3 +2351,24 @@
 - 最终本地证据：unit+contract `1673 passed, 1 skipped`，真实 MySQL Ticket 09 矩阵 `105 passed`，
   Web `224 passed`，Ruff `512 files`，Mypy baseline `426` 零漂移，OpenAPI/types、lock、diff、许可证、
   漏洞与新增差异 secret scan 全绿。未读取或使用真实 Provider 凭据，未发起任何付费调用。
+
+# 2026-08-07 Phase 4 Ticket 09 精确 CI 放行
+
+- 全量 Python 顺序执行暴露迁移 contract registry 漏列 Ticket 09 workspace 表；提交
+  `d5b49b4522c901936d705292a61b6aed15c629ce` 补齐四张表，真实 MySQL upgrade/downgrade/re-upgrade
+  矩阵 `6 passed`，本地 unit+contract 复验 `1673 passed, 1 skipped`。
+- Web audit 新暴露 `js-yaml >=4.0.0 <4.3.1` 安全公告；提交
+  `9caed1bd3e7354d29cb56a791a2613a4c35b8be1` 在 pnpm workspace override 精确锁定
+  `js-yaml==4.3.1`，frozen install、唯一依赖解析、完整 Web 224 unit + 94 E2E 与 audit 全绿。
+- `workflow_dispatch` 的全历史 Gitleaks 扫描暴露 13 个确定性的历史测试 idempotency fixture 假阳性；
+  提交 `e092732e7c2125711c7de7fb934c524392b35a2f` 只增加 commit/path/rule/line 精确 fingerprints，
+  不增加宽泛 allowlist，也未发现真实凭据。
+- GitHub Actions 官方 critical outage 期间，run `31128344341` 的 runner/job 状态回传异常并被平台取消；
+  所有取消的 Python/Security job 都是零步骤，Web 的 19 个步骤实际全部成功。没有把基础设施取消冒充
+  代码通过或失败。官方部署 runner 恢复修复后，重新 `workflow_dispatch` 同一 SHA。
+- 权威 GitHub Actions run `31128782236` 在精确 SHA
+  `e092732e7c2125711c7de7fb934c524392b35a2f` 上正式完成：Python checks、Web checks、Container
+  builds、Security 与 SBOM 全部 `success`。Ticket 09 置为 `complete`，Ticket 10 依赖解除；状态证据
+  提交自身取得精确 CI 后，直接进入 reconciliation/failover/cancel 的首个 blockers-first RED。
+- 全程未读取、使用、持久化或输出用户提供的 Provider 凭据，未发起任何 live/付费 Provider 调用；
+  `.scratch/retrieval-explorer-mobile.png` 仍为用户自有未跟踪文件，未触碰、未暂存。
