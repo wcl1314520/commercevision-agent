@@ -13,6 +13,7 @@ from .image_provider import (
     DeterministicImageProviderAdapter,
     DeterministicImageProviderScenario,
 )
+from .kuaipao_image import KuaipaoSyncImageAdapter
 from .malware import ClamdMalwareScanner, DeterministicMalwareScanner
 from .provenance import C2paProvenanceAdapter, DeterministicProvenanceAdapter
 from .vision import (
@@ -38,6 +39,7 @@ __all__ = [
     "DeterministicEmbeddingScenario",
     "DeterministicImageProviderAdapter",
     "DeterministicImageProviderScenario",
+    "KuaipaoSyncImageAdapter",
     "DeterministicMalwareScanner",
     "DeterministicProvenanceAdapter",
     "DeterministicVisionAnalyzer",

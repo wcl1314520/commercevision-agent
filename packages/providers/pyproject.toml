@@ -8,6 +8,7 @@ dependencies = [
   "c2pa-python==0.36.0",
   "commercevision-contracts",
   "httpx>=0.28,<1",
+  "pillow>=11,<13",
 ]
 
 [tool.uv.sources]

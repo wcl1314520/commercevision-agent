@@ -2184,3 +2184,67 @@
 - Ticket 06 发布级本地门禁全绿：完整 unit+contract `1544 passed, 1 skipped`（仅 opt-in OSS live）、全仓
   Ruff format/check `501 files`、strict touched-code Mypy、全工作区 Mypy baseline `431` 零漂移、Python license、
   lock consistency、漏洞审计（`No known vulnerabilities found`）与 `git diff --check` 全部通过。
+
+# 2026-08-06 Phase 4 Ticket 06 放行与 Ticket 07 RED
+
+- Ticket 06 契约提交 `b7621e2277c5ecc52a04928d90941876a7cd3f9e` 已由精确 GitHub Actions
+  `31099374416` 四路全绿验证；Python、Web、Container builds、Security 与 SBOM 全部成功。
+- Ticket 06 的公共契约实现已放行；最后一项 unchanged bounded-HTTP parity 将由 Ticket 07 Adapter
+  加入同一契约套件时联合闭环，不把尚未发生的下游证明虚报为完成。
+- Ticket 07 解除实现门禁并进入 `in_progress`。首个纵向切片只锁定同步 JSON generation 的有界
+  `b64_json` 成功映射、固定 HTTPS Endpoint、服务端模型和 request-id 证据；不启用 editing、异步或 URL 输出。
+- Ticket 07 RED 1 已稳定建立：`tests/contract/test_kuaipao_image_adapter.py` 在公共导入处因
+  `commercevision_providers.kuaipao_image` 不存在而失败；GREEN 只实现该同步成功行为。
+- Ticket 07 GREEN 1 通过：固定同步生成路径、已证请求字段、submit-time Bearer 解析、request-id 和
+  bounded Base64 result 已映射到共享 outcome（`1 passed`）。RED 2 开始锁定 pre-dispatch 连接失败分类。
+- Ticket 07 RED/GREEN 2 已闭合：连接/连接池/凭证等明确 pre-dispatch transport failure 归一化为
+  `SAFE_TO_RETRY_PRE_DISPATCH`，不携带 identity。聚焦套件 `2 passed`；RED 3 锁定响应丢失 unknown 语义。
+- Ticket 07 RED/GREEN 3 已闭合：dispatch 后的 read/write interruption 归一化为
+  `UNKNOWN_AFTER_POSSIBLE_DISPATCH`，无 retry hint 且 `must_reconcile=true`；聚焦套件 `3 passed`。
+- Ticket 07 RED/GREEN 4 已闭合：响应 body 超限时停止读取，不解析截断 JSON，保留合法 request-id 并进入
+  `UNKNOWN_AFTER_POSSIBLE_DISPATCH`；聚焦套件 `4 passed`。RED 5 锁定 redirect fail-closed。
+- Ticket 07 RED/GREEN 5–6 已闭合：3xx 不跟随并进入 unknown；预配置 `follow_redirects=true` 的客户端在
+  runtime 启动前被拒绝。聚焦套件 `6 passed`；RED 7 锁定 malformed success body 脱敏归一化。
+- Ticket 07 RED/GREEN 7–8 已闭合：非法 JSON、缺失/多结果、错误类型及非法 Base64 均不泄露原 body，
+  保留合法 request-id 后进入 unknown；聚焦套件 `13 passed`。RED 9 锁定可确认 4xx 分类。
+- Ticket 07 RED/GREEN 9 已闭合：明确 400/401/403/413 映射为 typed confirmed failure，既不解析/回显
+  Provider body，也不猜测未证实的 safety code；聚焦套件 `17 passed`。RED 10 锁定 429/5xx unknown。
+- Ticket 07 RED/GREEN 10 已闭合：429/500/503 即使携带 `Retry-After` 也保持 unknown、无 retry hint，
+  不将“可能已执行”伪装成安全重投；聚焦套件 `20 passed`。RED 11 锁定成功 request identity。
+- Ticket 07 RED/GREEN 11 已闭合：缺失或 URL-like request-id 的 200 响应无法形成成功 result，统一进入
+  malformed unknown；聚焦套件 `22 passed`。下一检查验证 mounted-secret submit-time 轮换。
+- Mounted-file credential reuse test is green without production changes: the existing bounded credential provider is
+  resolved independently for each submit, observes rotation, and keeps both values out of Adapter/outcome repr (`23 passed`).
+- RED 12 starts the shared Protocol parity: synchronous query/cancel must return explicit disabled outcomes without HTTP.
+- Ticket 07 RED/GREEN 12 已闭合：production Adapter 满足共享 runtime Protocol，query/cancel 返回 typed
+  synchronous-disabled failure 且不触网；聚焦套件 `24 passed`。RED 13 锁定 editing capability disabled。
+- Ticket 07 RED/GREEN 13 已闭合：editing 请求在 JSON/multipart 尚无鉴权证据时返回 typed disabled，且
+  不触网；聚焦套件 `25 passed`。RED 14 锁定 negative prompt/reference/seed 的 fail-closed 行为。
+- Ticket 07 RED/GREEN 14 已闭合：negative prompt、reference image 与 seed 均作为未证 capability
+  typed failure，既不静默丢弃也不触网；聚焦套件 `28 passed`。RED 15 锁定 Endpoint port/path。
+- Ticket 07 RED/GREEN 15 已闭合：API Endpoint 除 HTTPS exact host/region 外再锁定 443 与 `/v1`；
+  strict touched-code Mypy 及 Image/Vision 共享回归 `118 passed`。RED 16 启动 URL result 内部下载。
+- Ticket 07 RED/GREEN 16 已闭合：允许的 HTTPS result URL 由同一 bounded runtime 内部无鉴权 GET，
+  共享 deadline/concurrency/redirect policy，且不向上返回 URL；聚焦套件 `31 passed`。RED 17 锁定媒体类型。
+- Ticket 07 RED/GREEN 17 已闭合：URL result 的 Content-Type 必须与请求格式一致；聚焦套件
+  `33 passed` 且 strict touched-code Mypy 全绿。继续验证 SSRF/redirect/oversize 故障矩阵。
+- URL result 的 6 类 SSRF、下载 redirect 与 byte-bound 矩阵直接复用安全 seam 全绿，聚焦套件
+  `42 passed`。RED 18 锁定结果字节的真实格式/尺寸解码，禁止任意字节伪装媒体事实。
+- Ticket 07 RED/GREEN 18 已闭合：Base64/URL 结果均需完整解码为单帧、精确格式与尺寸，并受固定
+  decoded-pixel budget 约束；Provider package 显式声明 Pillow，聚焦套件 `44 passed`。RED 19 锁定 HTTP 200。
+- Ticket 07 RED/GREEN 19 已闭合：仅 HTTP 200 可形成同步 success，意外 2xx 与其他未建模状态均
+  保守进入 unknown；聚焦套件 `47 passed`。下一 RED 将 URL 自身纳入字节预算。
+- Result URL byte budget RED/GREEN 已闭合，4096 UTF-8 bytes 之外不进入 HTTP client；聚焦套件
+  `48 passed`。下一检查以同一参数化 success contract 证明 deterministic/bounded-HTTP parity。
+- Deterministic 与 bounded-HTTP Adapter 已通过同一参数化同步 success contract；两份 Image Adapter
+  契约套件合计 `68 passed`。Ticket 06 最后一项 parity 正式闭合并置为 `complete`。
+- Ticket 07 five-axis review found one Required: a complete-looking response with failed stream cleanup could still
+  form success despite `completion_uncertain`. A RED now requires the same UNKNOWN semantics as the existing Vision Adapter.
+- The review Required is closed: incomplete response read/cleanup now becomes `PROVIDER_RESPONSE_INCOMPLETE`
+  unknown. Post-fix Image/Vision shared regression is `139 passed`; strict touched-code Mypy is green.
+- Ticket 07 local release gates are green: full unit+contract `1595 passed, 1 skipped`, Ruff format/check
+  `503 files`, tightened full-workspace Mypy baseline `427` with zero drift, Python license, lock, vulnerability
+  and diff checks. Staged Gitleaks scanned about 83.43 KB and found no leaks; the user-owned untracked screenshot
+  remains excluded.
+- Public CI uses deterministic and mock-HTTP Adapters only. No live Kuaipao call was added; any future live smoke
+  remains explicit opt-in and must use a mounted secret, so the exposed user credential was never consumed or persisted.

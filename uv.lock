@@ -785,6 +785,7 @@ dependencies = [
     { name = "c2pa-python" },
     { name = "commercevision-contracts" },
     { name = "httpx" },
+    { name = "pillow" },
 ]
 
 [package.metadata]
@@ -793,6 +794,7 @@ requires-dist = [
     { name = "c2pa-python", specifier = "==0.36.0" },
     { name = "commercevision-contracts", editable = "packages/contracts" },
     { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "pillow", specifier = ">=11,<13" },
 ]
 
 [[package]]

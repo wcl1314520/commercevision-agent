@@ -974,6 +974,22 @@
 - Existing `ProviderCallOutcome` freezes the five dispatch meanings, but it is persistence/domain evidence tied to a
   Candidate Slot and Durable Operation. Reusing it as the external Adapter request/response would leak application identity
   and invert the boundary, so Ticket 06 needs a narrower transport-neutral contract that later Worker code can translate.
+
+## Phase 4 Ticket 07 Kuaipao Adapter invariants
+
+- Kuaipao's authenticated public contract proves only synchronous JSON generation today. The production Adapter therefore
+  sends only `model`, `prompt`, `n=1`, `size` and `response_format=b64_json`; editing, async query/cancel, negative prompt,
+  reference images and seed remain explicit typed-disabled capabilities rather than guessed fields.
+- A connection/credential/capacity failure proven before POST dispatch is the only automatic-resubmission-safe class.
+  Read/write interruption, 429/5xx, redirect, partial cleanup, malformed success and result-download failure all remain
+  unknown because the Provider may already have generated or charged for the image.
+- The existing bounded Vision HTTP runtime is deepened with a controlled request path and unauthenticated result GET,
+  preserving one event loop, semaphore, deadline, response bound, cancellation and cleanup implementation. Result URLs
+  require HTTPS, exact allowlisted host, default port, no credentials/fragment and a 4096-byte bound; Bearer is never sent.
+- Both Base64 and URL results are internalized as bytes and fully decoded as one exact-format, exact-dimension, single-frame
+  image under byte and decoded-pixel budgets. Provider URLs and raw bodies never enter the public result or error contract.
+- Mounted credentials are resolved for every submit, enabling coherent file rotation without restart. Public CI remains
+  deterministic/mock-only; no exposed credential is used and any future live smoke must be explicit opt-in.
 - A single normalized call outcome still needs an orthogonal task state. In particular, query `NOT_FOUND` is a successful
   query state with no retry/failover signal; representing it as `CONFIRMED_FAILURE` would violate the locked reconciliation
   rule and could authorize duplicate submission.
