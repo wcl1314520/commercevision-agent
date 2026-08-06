@@ -2160,3 +2160,27 @@
 - A monolithic full pytest run exceeded the 15-minute local tool cap without emitting a failure; all orphaned child processes were terminated and the relevant real-MySQL plus complete unit/contract groups were run observably. Remote CI will provide the authoritative unbounded full-suite result.
 - Pre-commit five-axis review split the 1,898-line mixed integration module into a 697-line Model Router suite and a dedicated Generation Command suite. Ruff removed 53 mechanically stale imports and all 23 real-MySQL tests across both modules pass after the split.
 - Final post-review gates are green: full-repo Ruff (`498` files), strict generation Mypy, exact 431-diagnostic baseline, `162` generation/settings/API-health tests, lock consistency and diff hygiene. Web generated API type drift check also passes.
+
+# 2026-08-06 Phase 4 Ticket 05 放行与 Ticket 06 RED
+
+- Ticket 05 权威提交 `0c87b93ead5b56f62153528d6e5ca1f77ba8915f` 已由精确 GitHub Actions
+  `31095178065` 四路全绿验证；Python、Web、Container builds、Security 与 SBOM 全部成功，Ticket 05
+  正式完成。
+- Ticket 06 解除门禁并进入 `in_progress`。首个 TDD 纵切锁定共享 Image Provider Adapter contract：
+  只允许规范化媒体需求与受控输入句柄，统一 submit/query/cancel 的有界类型结果，并明确排除 Secret、
+  任意 URL、业务授权、路由选择和 Candidate 持久化。
+- Ticket 06 RED 1 已稳定建立：`tests/contract/test_image_provider_adapters.py` 在公共导入处因
+  `commercevision_contracts.image_provider` 不存在而失败；下一步只实现规范化 generation request 所需的
+  不可变值对象与边界校验。
+- Ticket 06 已完成 11 轮细粒度 RED/GREEN：generation/editing 独立请求、五类 dispatch 结果、typed
+  identity/result bytes/usage/error、submit/query/cancel Port、同步与异步 deterministic fixtures、URL/credential
+  拒绝、repr redaction、UNKNOWN/NOT_FOUND/failover 分类和终态 replay/cancel 不变量均已闭合。
+- 五轴审查发现并用 RED 修复 `ASYNC_SUCCESS` 可被后续 cancel 改写为 `CANCELLED` 的状态问题；fixture 现在以锁
+  保护 PENDING/SUCCEEDED/CANCELLED 终态，查询、取消与 submit replay 一致收敛。
+- 当前聚焦门禁：Image Adapter contract `18 passed`；新契约与既有候选/路由/依赖边界 `57 passed`；既有
+  Vision transport/content-safety Adapter `111 passed`；Ruff 与 strict touched-code Mypy 全绿。
+- Ticket 06 前五项验收已闭合；最后一项 bounded-HTTP parity 将由 Ticket 07 的真实 Kuaipao mock-HTTP Adapter
+  对同一共享 contract 证明，当前不虚报完成。
+- Ticket 06 发布级本地门禁全绿：完整 unit+contract `1544 passed, 1 skipped`（仅 opt-in OSS live）、全仓
+  Ruff format/check `501 files`、strict touched-code Mypy、全工作区 Mypy baseline `431` 零漂移、Python license、
+  lock consistency、漏洞审计（`No known vulnerabilities found`）与 `git diff --check` 全部通过。

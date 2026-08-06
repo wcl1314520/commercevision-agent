@@ -5,11 +5,23 @@ and a deterministic implementation that exercises identical typed outcomes in pu
 
 **Blocked by:** 01, 02.
 
-**Status:** pending
+**Status:** in_progress
 
-- [ ] Adapter requests carry only normalized typed media requirements and controlled input handles.
-- [ ] Outcomes distinguish success, confirmed failure, content rejection, safe pre-dispatch retry and unknown possible dispatch.
-- [ ] Provider request/task identity, usage, result references and errors are bounded and typed.
-- [ ] Secrets, arbitrary URLs, business authorization, route choice and Candidate persistence remain outside the Adapter Interface.
-- [ ] Deterministic adapter supports reproducible success/failure/rejection/unknown/query/cancel fixtures.
+- [x] Adapter requests carry only normalized typed media requirements and controlled input handles.
+- [x] Outcomes distinguish success, confirmed failure, content rejection, safe pre-dispatch retry and unknown possible dispatch.
+- [x] Provider request/task identity, usage, result references and errors are bounded and typed.
+- [x] Secrets, arbitrary URLs, business authorization, route choice and Candidate persistence remain outside the Adapter Interface.
+- [x] Deterministic adapter supports reproducible success/failure/rejection/unknown/query/cancel fixtures.
 - [ ] Contract tests run unchanged against deterministic and bounded HTTP adapters.
+
+## Comments
+
+- 2026-08-06: Ticket 01/02 blockers are complete. Ticket 05 exact commit
+  `0c87b93ead5b56f62153528d6e5ca1f77ba8915f` passed GitHub Actions
+  `31095178065`; Ticket 06 entered TDD at the shared Image Provider Adapter contract seam.
+- 2026-08-06: Shared immutable request/outcome/identity/result/usage/error contracts and the deterministic
+  sync/async fixture Adapter are locally green. URL/credential rejection, repr redaction, five dispatch
+  meanings, reconciliation-safe `NOT_FOUND`, terminal success/cancellation and submit replay are covered.
+  The unchanged bounded-HTTP parity box remains open for the Ticket 07 Adapter implementation.
+- 2026-08-06: Local release gates are green: unit+contract `1544 passed, 1 skipped`, full Ruff `501 files`,
+  strict touched-code Mypy, full-workspace 431-diagnostic baseline, license, lock, vulnerability and diff checks.

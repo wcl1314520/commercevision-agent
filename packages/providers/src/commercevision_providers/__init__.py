@@ -9,6 +9,10 @@ from .embedding import (
     DeterministicEmbeddingProvider,
     DeterministicEmbeddingScenario,
 )
+from .image_provider import (
+    DeterministicImageProviderAdapter,
+    DeterministicImageProviderScenario,
+)
 from .malware import ClamdMalwareScanner, DeterministicMalwareScanner
 from .provenance import C2paProvenanceAdapter, DeterministicProvenanceAdapter
 from .vision import (
@@ -32,6 +36,8 @@ __all__ = [
     "DeterministicContentSafetyAdapter",
     "DeterministicEmbeddingProvider",
     "DeterministicEmbeddingScenario",
+    "DeterministicImageProviderAdapter",
+    "DeterministicImageProviderScenario",
     "DeterministicMalwareScanner",
     "DeterministicProvenanceAdapter",
     "DeterministicVisionAnalyzer",

@@ -264,6 +264,10 @@
 - 每个循环只增加一个公开行为：RED -> 最小 GREEN；实现期不预建 Phase 5 Evaluator/Reflection/Replay
 - 逐 Ticket 完成受影响测试、静态检查、真实 MySQL、Provider Contract/故障注入、OpenAPI/Web、迁移、容器、安全、许可证、SBOM、审查、提交与精确 GitHub Actions
 - 最终在同一 Git SHA 证明兼容端点切换、内容安全不可绕过、逻辑执行唯一、未知结果先对账、成本/用量可观测和 public-demo/private 隔离
+- Ticket 01–04 的 capability/candidate/control-plane/router 基线与 Ticket 05 exact approved-plan generation
+  command 已完成；Ticket 05 提交 `0c87b93` 由 GitHub Actions `31095178065` 四路全绿放行。
+- Ticket 06 已进入 Image Provider Adapter contract 与 deterministic Adapter 的 TDD 纵切；首个 RED 从共享
+  contract seam 开始，Ticket 07 及后续工单保持未启动。
 
 ## 成功标准
 
@@ -607,3 +611,12 @@
 - A combined schema command kept `CV_MIGRATION_MYSQL_DSN` set while running migration tests that intentionally monkeypatch `CV_MYSQL_DSN` to temporary databases. The higher-priority migration DSN redirected Alembic away from those databases, causing false missing-table failures. Rerun those tests in a fresh process without the override.
 - Full `uv run pytest` produced no buffered progress and exceeded the 15-minute tool limit, leaving three child processes from the timed-out invocation. The exact start-time/PID set was verified and terminated without touching unrelated Python services. Use observable unit/contract and scoped integration groups locally; remote CI remains the authoritative full-suite run.
 - The review hygiene command ended with `rg` exit 1 because the final credential-pattern scan found no matches. This is the desired security result, not a product failure; use explicit no-match handling if repeated.
+
+### Recovery/error note — Ticket 06
+
+- Three incremental test insertions used a generic closing-bracket anchor and initially landed the tail of an adjacent test
+  inside the new test. Each was detected by immediate bounded file inspection or the focused RED run and fixed before
+  production behavior was evaluated. Subsequent edits use unique surrounding field names or exact function boundaries.
+- The first combined Ruff/strict-Mypy/test orchestration returned only the Ruff import-order failure in its direct output.
+  Import sorting was fixed mechanically, then Ruff, Mypy and pytest were rerun as separate parallel checks with explicit
+  green summaries; no result was inferred from the incomplete combined display.

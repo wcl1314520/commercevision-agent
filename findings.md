@@ -961,3 +961,27 @@
 - Pre-commit five-axis review found no persisted API credential (`rg -l` secret-pattern scan returned no files). The main structural review signal is the 1,898-line real-MySQL routing/generation integration module; this is a cohesive end-to-end authority fixture but should be evaluated for a safe split before submission.
 - Five-axis review confirms the 1,898-line integration file contains two clear test domains with contiguous blocks: shared router fixtures, Model Router tests, and Generation Command tests. Split the Generation blocks into a dedicated integration module that reuses the established router fixture helpers, then let Ruff remove unused imports. This reduces file-level cognitive load without changing behavior.
 - Post-split review found no Critical/Required correctness, security, architecture, or performance issue. Generation responses do not reference provider request IDs, endpoint hosts, secret references, raw arguments, leases, or operation idempotency keys; the repository credential-pattern scan has no matches.
+
+## Ticket 06 contract seam discovery
+
+- Ticket 06 is blocked only by the completed capability and generation-candidate contracts; the checked-in spec fixes the
+  public seam as Image Generation/Image Editing Adapter contracts exercised unchanged by deterministic and bounded HTTP
+  implementations.
+- The dependency direction is already suitable: `commercevision-providers` depends on `commercevision-contracts`, while
+  business authorization and persistence live in application/domain packages. The normalized request/outcome values and
+  Adapter `Protocol` therefore belong in `commercevision_contracts`; deterministic behavior belongs in
+  `commercevision_providers`.
+- Existing `ProviderCallOutcome` freezes the five dispatch meanings, but it is persistence/domain evidence tied to a
+  Candidate Slot and Durable Operation. Reusing it as the external Adapter request/response would leak application identity
+  and invert the boundary, so Ticket 06 needs a narrower transport-neutral contract that later Worker code can translate.
+- A single normalized call outcome still needs an orthogonal task state. In particular, query `NOT_FOUND` is a successful
+  query state with no retry/failover signal; representing it as `CONFIRMED_FAILURE` would violate the locked reconciliation
+  rule and could authorize duplicate submission.
+- Production HTTP Adapters must consume temporary result URLs internally and return bounded verified bytes plus typed result
+  identity/hash/media facts. Carrying the remote URL through the shared contract would make it an accidental Candidate or
+  browser identity and create an SSRF/persistence seam.
+- Adapter request/result/identity dataclasses require repr-redaction even when values are bounded: prompt text, Provider raw
+  IDs, idempotency keys and up-to-32-MiB result bytes must not be copied into logs or exceptions through default dataclass
+  representations.
+- Deterministic async fixtures need an explicit locked task state, not a boolean cancellation flag. Once query establishes
+  `SUCCEEDED`, cancel and submit replay must return the same terminal result; only a still-pending task may become cancelled.
