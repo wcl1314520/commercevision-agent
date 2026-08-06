@@ -169,6 +169,25 @@ def _transport(
     )
 
 
+@pytest.mark.parametrize(
+    "protected_header",
+    ["Authorization", "Content-Type", "Host", "Accept-Encoding"],
+)
+def test_request_headers_cannot_override_transport_security_headers(
+    protected_header: str,
+) -> None:
+    with pytest.raises(ValueError, match="protected headers"):
+        AsyncVisionHttpTransport(
+            credential_provider=StaticVisionApiKeyProvider("secret-api-key"),
+            endpoint="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            connect_timeout_seconds=0.1,
+            read_timeout_seconds=0.1,
+            maximum_concurrency=1,
+            maximum_response_bytes=64,
+            request_headers={protected_header: "attacker-controlled"},
+        )
+
+
 def test_close_does_not_swallow_active_response_cancellation() -> None:
     stream = _BlockingReadStream()
     transport = _transport(lambda _: httpx.Response(200, stream=stream))

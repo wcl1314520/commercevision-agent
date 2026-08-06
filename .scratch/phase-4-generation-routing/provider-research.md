@@ -267,3 +267,162 @@ POST /v1beta/models/{model}:generateContent
 - [模型列表](https://kuaipao.apifox.cn/api-443891971)
 - [HTTP 状态码](https://kuaipao.apifox.cn/doc-8542915)
 - [错误响应 schema](https://kuaipao.apifox.cn/schema-291388948)
+
+## 13. Alibaba Wan 2.7（2026-08-06，第一方资料核验）
+
+本节只依据阿里云百炼 / Model Studio 官方文档整理，未使用任何凭据，也未发起可能计费的调用。核心来源为 [Wan 2.7 图像生成与编辑 API 参考](https://help.aliyun.com/en/model-studio/wan-image-generation-and-editing-api-reference)、[图像模型总览](https://help.aliyun.com/en/model-studio/image-model/)、[文生图指南](https://help.aliyun.com/en/model-studio/text-to-image)、[限流](https://help.aliyun.com/en/model-studio/rate-limit)、[限流最佳实践](https://help.aliyun.com/en/model-studio/rate-limiting-best-practices) 和 [错误码](https://help.aliyun.com/en/model-studio/error-code)。
+
+### 13.1 模型、地域与 HTTP 契约
+
+当前 Wan 2.7 图像模型 ID 为：
+
+- `wan2.7-image-pro`：文生图（非组图）最高 4K；编辑、参考图和组图最高 2K。
+- `wan2.7-image`：同类生成/编辑能力，最高 2K，官方定位为更快版本。
+
+官方 Wan 2.7 API 参考明确给出的业务空间专属 HTTP 地址如下；`{WorkspaceId}` 是实际百炼业务空间 ID：
+
+| 操作 | 华北 2（北京） | 新加坡 |
+| --- | --- | --- |
+| 同步生成/编辑 | `POST https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` | `POST https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` |
+| 异步提交 | `POST https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/image-generation/generation` | `POST https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/image-generation/generation` |
+| 异步查询 | `GET https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/tasks/{task_id}` | `GET https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/tasks/{task_id}` |
+
+鉴权和 headers：
+
+- 同步：`Content-Type: application/json`、`Authorization: Bearer <api-key>`。
+- 异步提交：除以上两项外，必须传 `X-DashScope-Async: enable`。官方明确说明，缺少该 header 会返回 `current user api does not support synchronous calls`。
+- 异步查询：只要求 `Authorization: Bearer <api-key>`；`task_id` 在 path 中。
+- 北京和新加坡的 API Key、请求地址均按地域隔离，不可混用；跨地域混用会导致鉴权失败或服务错误。
+
+同步和异步不是同一路径上的开关：同步使用 `multimodal-generation/generation`，一次请求直接返回结果且不产生供客户端轮询的 `task_id`；异步使用 `image-generation/generation`，先返回任务身份，再由 `/tasks/{task_id}` 查询。适配器必须将二者建成不同 transport flow，不能仅靠是否存在异步 header 猜测响应形态。官方 Python/Java SDK 同时提供同步与异步封装，但 HTTP 契约仍以上述两条独立路径为准。
+
+### 13.2 请求 envelope 与字段约束
+
+同步与异步提交使用相同的请求主体结构：
+
+```json
+{
+  "model": "wan2.7-image-pro",
+  "input": {
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"image": "<public-url-or-data-url>"},
+          {"text": "<prompt>"}
+        ]
+      }
+    ]
+  },
+  "parameters": {
+    "size": "2K",
+    "n": 1,
+    "watermark": false
+  }
+}
+```
+
+已确认的输入契约：
+
+- `model` 必填，只接受上面两个 Wan 2.7 ID。
+- `input.messages` 必填且只支持单轮；`role` 必须为 `user`；`content` 是由 `text` 和零到多个独立 `image` 对象组成的数组，多图顺序具有语义。
+- `text` 支持中文和英文，最多 5,000 个字符；超长部分会被截断，而不是明确拒绝。
+- 可输入 0–9 张图片。图片可为 HTTP(S) 公网 URL 或完整 Base64 data URL；格式为 JPEG/JPG、PNG（不支持 alpha）、BMP、WEBP；宽高各 240–8,000 px、宽高比 1:8–8:1、单张不超过 20 MB。
+- `bbox_list` 用于交互式编辑，外层长度必须等于输入图片数；无框图片传 `[]`；坐标为原图绝对像素 `[x1,y1,x2,y2]`，每张图最多两个框。
+
+已确认的 `parameters`：
+
+| 字段 | 契约 |
+| --- | --- |
+| `enable_sequential` | 默认 `false`；`true` 启用组图。 |
+| `size` | `wan2.7-image-pro` 支持 `1K`、默认 `2K`；只有无输入图且非组图的文生图可用 `4K`。自定义尺寸时文生图总像素范围为 768×768 到 4096×4096，其他场景到 2048×2048，宽高比 1:8–8:1。`wan2.7-image` 仅支持 `1K`、默认 `2K`，所有场景自定义尺寸上限 2048×2048。输出像素可能与指定值有轻微差异。 |
+| `n` | 非组图范围 1–4，默认 1；组图范围 1–12，默认 12，模型决定实际数量且不超过 `n`。成功图片数直接影响费用。 |
+| `thinking_mode` | 默认 `true`；仅在非组图且没有图片输入时有效，会增加耗时。 |
+| `color_palette` | 仅非组图可用；3–10 个颜色（官方建议 8 个），每项为 HEX 与两位小数百分比，比例合计必须为 100.00%。 |
+| `watermark` | 默认 `false`；`true` 时在右下角加入固定 `AI Generated` 标识。 |
+| `seed` | 可选整数 `[0,2147483647]`；相同 seed 只保证相似，不保证完全一致。 |
+
+Wan 2.7 的两个模型均**不支持** `negative_prompt` 和 `prompt_extend`；排除内容应写入正向 prompt，质量增强使用 `thinking_mode`。组图模式下 `thinking_mode` 和 `color_palette` 均不可用。
+
+### 13.3 异步身份、查询状态与终态映射
+
+异步提交成功响应返回两类身份：
+
+```json
+{
+  "output": {
+    "task_status": "PENDING",
+    "task_id": "<provider-task-id>"
+  },
+  "request_id": "<provider-request-id>"
+}
+```
+
+- `output.task_id` 是后续查询的 provider job identity，官方声明可查询 24 小时。
+- `request_id` 是本次 HTTP 请求的唯一追踪/排障 ID。提交和每次查询都应分别保存自己的 `request_id`，不能把它当作 `task_id`。
+- 创建失败没有 `task_id`，使用顶层 `code`、`message`、`request_id` error envelope。
+
+查询响应的 `output` 可包含 `task_id`、`task_status`、`submit_time`、`scheduled_time`、`end_time`、`finished`、`choices`；顶层继续有本次查询的 `request_id`。官方状态枚举为 `PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELED`、`UNKNOWN`，并明确常规转换为 `PENDING → RUNNING → SUCCEEDED | FAILED`。
+
+以下是面向 CommerceVision 的推荐映射；其中“内部语义”是基于官方状态定义的工程推论，不是阿里云字段：
+
+| Provider 状态 | 推荐内部语义 | 处理原则 |
+| --- | --- | --- |
+| `PENDING` | 非终态 / queued | 继续有界轮询，不得重复提交。 |
+| `RUNNING` | 非终态 / running | 继续有界轮询，不得重复提交。 |
+| `SUCCEEDED` | 终态成功 | 解析并立即持久化所有 `choices[].message.content[]` 图片。 |
+| `FAILED` | 终态失败 | 读取 `code/message` 后分类；只有明确瞬态 provider 错误才允许创建新任务，参数、安全、鉴权类错误不可自动改投。 |
+| `CANCELED` | 终态取消 | 不自动重建任务。Wan 2.7 专页没有给出取消动作或该状态的完整转换路径。 |
+| `UNKNOWN` | 对账不确定 | 官方定义为任务不存在或状态未知；可能与 ID 错误、24 小时过期或后端未知有关，不能直接等同于业务失败，更不能据此盲目重提。 |
+
+官方还返回 `finished`（默认 `false`），但生产状态机应以 `task_status` 的枚举与上述终态集合为主，并把字段冲突记录为 provider protocol violation，而不是静默选择其一。
+
+### 13.4 结果、时效与计费事实
+
+成功查询的实际媒体位于 `output.choices[].message.content[]`：`message.role` 固定为 `assistant`，内容项可能为 `type=image` 或 `type=text`；图片字段为 `image`，格式为 PNG。`finish_reason=stop` 表示自然完成。
+
+图片 URL 是带过期参数的阿里云对象存储 URL，官方只保证 24 小时有效；任务数据（状态与图片 URL）也只保留 24 小时，之后自动清理。因此成功终态处理必须先下载到 CommerceVision 自有持久存储，再提交业务成功；不能把 provider URL 当作长期资产 URL。
+
+`usage` 可包含 `size`、`image_count`、`input_tokens`、`output_tokens`、`total_tokens`。官方说明 token 只作统计、不用于图片计费，费用按成功生成的图片数计算；失败调用和处理错误不收费，也不消耗新用户免费额度。多图时 `usage` 只统计成功结果，但 Wan 2.7 专页没有定义逐图部分失败的 error item 形态，见未知项。
+
+### 13.5 限流、错误与重试边界
+
+官方限流页当前给出的 Wan 2.7 额度如下：
+
+| 模型 | 北京：提交 RPS / 处理中并发 | 新加坡：提交 RPS / 处理中并发 |
+| --- | --- | --- |
+| `wan2.7-image-pro` | 5 / 5 | 5 / 5 |
+| `wan2.7-image` | 5 / 5 | 5 / 5 |
+
+限流在阿里云主账号维度聚合该账号下所有 RAM 用户、业务空间和 API Key，并按模型分别计算。官方称通常一分钟内自动恢复，但还可能有每秒控制和动态突发保护：即使尚未达到表面总量，流量骤增也可能触发限制。生产客户端应以本地队列、每模型并发信号量、平滑限速和带抖动的指数退避共同约束，而不是把“5 RPS”当作可以瞬时突发 5 个请求的保证。
+
+官方通用错误页确认的主要类别：
+
+- `400 InvalidParameter`：请求字段/值不合法；修正请求，不重试原 payload。
+- `401 InvalidApiKey`、`403 AccessDenied.*` / `Model.AccessDenied`、`404 WorkSpaceNotFound` / `NotFound`：鉴权、权限、工作空间、资源或路由问题；不做自动 provider failover，先修复配置或权限。
+- `429 Throttling`、`Throttling.RateQuota`、`Throttling.BurstRate`、`Throttling.AllocationQuota`：分别覆盖一般限流、请求速率、突发增长和配额维度；可以有界退避，但不能假定响应必带 `Retry-After`。
+- `500 InternalError`、`InternalError.Timeout`、`SystemError`、`ModelServiceFailed`、`RequestTimeOut`，以及 `503 ModelUnavailable` / `ModelServingError`：可能是瞬态服务或超时错误。官方说明异步任务超过 3 小时可能产生 `InternalError.Timeout`。
+- 文生图官方指南明确 `DataInspectionFailed` 表示输入触发内容审核。该类是输入/安全终态：修订内容后由用户重新发起，不得自动跨模型或跨 provider 绕过审核。
+
+HTTP 客户端收到明确未创建任务的 429/5xx 时可以按策略有限重试；一旦提交响应丢失而“不知道是否已经创建任务”，则属于 unknown outcome。公开 Wan 2.7 文档没有幂等键或重复提交去重保证，所以此时不得盲目重发 POST，否则可能重复出图与重复计费。
+
+### 13.6 明确未知、冲突与不可推断项
+
+1. Wan 2.7 API 专页只公布北京、新加坡的精确业务空间主机；新的模型详情页同时列出日本（东京）的模型价格/限流，但没有在 Wan 2.7 API 参考中给出东京专属 host/path/key 契约。东京地址必须视为 `unknown`，不得按地域命名规律自行拼接。
+2. 官方未公布提交幂等键、去重窗口、unknown-outcome 对账接口或响应重放保证。
+3. Wan 2.7 专页未给出推荐轮询间隔、最大轮询时长、退避曲线、`Retry-After` 或 rate-limit response headers。
+4. 通用异步任务文档公开了非业务空间域名上的取消 API，且仅能取消 `PENDING`；Wan 2.7 专页未确认业务空间专属取消 URL，也未说明 `CANCELED` 的完整转换。因此不能从查询 URL 机械推导取消 URL。
+5. 未发现 Wan 2.7 的 webhook/callback 完成通知契约；当前只能按异步查询流程设计。
+6. Wan 2.7 专页未定义 `n > 1` 时部分图片失败的逐项 schema、整体 `task_status` 或计费边界；只能以实际 `choices` 和 `usage.image_count` 保存观察结果，不能预设与旧 Wan API 相同。
+7. 图片 URL 的响应 `Content-Type`、`Content-Length`、checksum、下载限流、出口费用及续签方式未形成 Wan 2.7 契约；下载器需校验真实媒体并在 24 小时内持久化。
+8. `UNKNOWN` 无法区分“不存在”“已过期”和 provider 暂时无法确认；`CANCELED` 也没有专页级转换规则。二者都应保留原始响应用于人工/运维对账。
+9. Wan 2.7 专页没有模型专属完整错误矩阵；`DataInspectionFailed` 来自官方文生图指南，其他内容安全/IP 错误 code 不应从 Wan 2.6 或其他编辑模型类推。
+10. 官方声明 prompt 超过 5,000 字符会截断，但未精确定义 Unicode 计数单位或是否返回截断标志。生产侧应在发送前自行限制并记录规范化后的 prompt 摘要。
+
+### 13.7 Phase 4 适配结论
+
+- 为 `wan2.7-image-pro` / `wan2.7-image` 建独立的 Model Studio 原生 adapter，不把它伪装成 OpenAI Images 协议。
+- endpoint 配置应是“地域 + WorkspaceId”不可分割的 typed configuration；API Key 必须通过 secret store 注入，禁止进入仓库、日志、任务 payload 或研究文档。
+- 异步提交成功后立即持久化 `task_id`、提交 `request_id`、地域、workspace、模型和请求摘要；轮询每次另存 query `request_id` 与原始状态。
+- provider 成功只代表生成完成；只有媒体下载、内容校验并写入自有持久存储成功后，CommerceVision 才能提交资产成功。
+- 重试/路由必须按“限流/瞬态服务、输入参数、鉴权权限、内容安全、unknown outcome”分类，不能仅按 HTTP 4xx/5xx 粗分。

@@ -1,5 +1,11 @@
 """Production and deterministic provider adapters."""
 
+from .alibaba_wan_image import (
+    AlibabaWanAsyncImageAdapter,
+    AlibabaWanEndpointIdentity,
+    ControlledImageInputResolver,
+    ControlledImageInputUnavailableError,
+)
 from .content_safety import (
     AlibabaImageModerationAdapter,
     DeterministicContentSafetyAdapter,
@@ -30,6 +36,10 @@ from .vision_credentials import (
 
 __all__ = [
     "AlibabaImageModerationAdapter",
+    "AlibabaWanAsyncImageAdapter",
+    "AlibabaWanEndpointIdentity",
+    "ControlledImageInputResolver",
+    "ControlledImageInputUnavailableError",
     "AlibabaEmbeddingProvider",
     "AlibabaVisionAnalyzer",
     "C2paProvenanceAdapter",

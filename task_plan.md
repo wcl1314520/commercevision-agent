@@ -270,6 +270,8 @@
   正式完成。
 - Ticket 07 Kuaipao 同步 Images Adapter 提交 `1158f88` 已由 GitHub Actions `31103788945`
   四路全绿放行并正式完成；Ticket 08 Alibaba Wan production Adapter 是下一 blockers-first 目标。
+- Ticket 07 状态提交 `2d79d97` 已由 GitHub Actions `31105556687` 四路全绿验证；Ticket 08 已解除
+  门禁并进入 `in_progress`，首个 RED 前只核对 Alibaba 官方 async submit/query 契约。
 
 ## 成功标准
 
@@ -625,3 +627,15 @@
 - The first combined Ruff/strict-Mypy/test orchestration returned only the Ruff import-order failure in its direct output.
   Import sorting was fixed mechanically, then Ruff, Mypy and pytest were rerun as separate parallel checks with explicit
   green summaries; no result was inferred from the incomplete combined display.
+
+### Recovery/error note — Ticket 08
+
+- The first async-submit GREEN run correctly returned confirmed `PENDING`, but the new test incorrectly expected
+  `must_reconcile=true`. That shared property is reserved for unknown-after-possible-dispatch; confirmed pending tasks
+  continue through normal query. The assertion was corrected without changing production state semantics.
+- A generic assertion anchor inserted the async-submit test's two trailing properties after the new parameterized
+  terminal-status test. The focused run exposed the misplaced `must_reconcile` expectation for provider `UNKNOWN`;
+  the submit assertions were restored to their own test and the terminal matrix now asserts reconciliation by outcome.
+- The first shared Wan/Kuaipao/Vision regression command guessed `tests/contract/test_vision_provider_adapter.py`;
+  pytest rejected the nonexistent path before running tests. Repository enumeration located the actual Vision suites
+  under `tests/unit`, and the corrected exact file set is used for the real regression result.

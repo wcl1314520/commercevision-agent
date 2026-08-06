@@ -67,6 +67,7 @@ class AsyncVisionHttpTransport:
         maximum_concurrency: int,
         maximum_response_bytes: int,
         request_path: str = "/chat/completions",
+        request_headers: dict[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._credential_provider = credential_provider
@@ -79,6 +80,14 @@ class AsyncVisionHttpTransport:
         if not request_path.startswith("/") or request_path.startswith("//"):
             raise ValueError("Vision HTTP request path must be absolute")
         self._request_path = request_path
+        controlled_headers = request_headers or {}
+        protected_headers = {"accept-encoding", "authorization", "content-type", "host"}
+        if any(name.lower() in protected_headers for name in controlled_headers):
+            raise ValueError("Vision HTTP request headers cannot override protected headers")
+        try:
+            self._request_headers = dict(httpx.Headers(controlled_headers))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Vision HTTP request headers are invalid") from exc
         self._provided_client = client
         self._client: httpx.AsyncClient | None = None
         self._client_close_task: asyncio.Task[None] | None = None
@@ -169,6 +178,41 @@ class AsyncVisionHttpTransport:
             self._wait_for_cancellation(completed)
             raise VisionSubmissionOutcomeUnknownError(
                 "Vision HTTP result fetch was cancelled"
+            ) from exc
+
+    def send_get(
+        self,
+        request_path: str,
+        *,
+        deadline_at: float,
+    ) -> VisionHttpResponseEvidence:
+        if not request_path.startswith("/") or request_path.startswith("//"):
+            raise ValueError("Vision HTTP GET path must be absolute")
+        completed = threading.Event()
+        with self._state_lock:
+            self._assert_healthy_locked()
+            future = asyncio.run_coroutine_threadsafe(
+                self._get_with_completion(
+                    request_path,
+                    deadline_at=deadline_at,
+                    completed=completed,
+                ),
+                self._loop,
+            )
+
+        guard_timeout = max(0.0, deadline_at - time.monotonic()) + 0.5
+        try:
+            return future.result(timeout=guard_timeout)
+        except TimeoutError:
+            future.cancel()
+            self._wait_for_cancellation(completed)
+            raise VisionSubmissionOutcomeUnknownError(
+                "Vision HTTP GET completion was interrupted"
+            ) from None
+        except CancelledError as exc:
+            self._wait_for_cancellation(completed)
+            raise VisionSubmissionOutcomeUnknownError(
+                "Vision HTTP GET request was cancelled"
             ) from exc
 
     def assert_ready(self) -> str:
@@ -271,6 +315,53 @@ class AsyncVisionHttpTransport:
         finally:
             completed.set()
 
+    async def _get_with_completion(
+        self,
+        request_path: str,
+        *,
+        deadline_at: float,
+        completed: threading.Event,
+    ) -> VisionHttpResponseEvidence:
+        try:
+            return await self._get(
+                request_path,
+                deadline_at=deadline_at,
+            )
+        finally:
+            completed.set()
+
+    async def _get(
+        self,
+        request_path: str,
+        *,
+        deadline_at: float,
+    ) -> VisionHttpResponseEvidence:
+        remaining = deadline_at - time.monotonic()
+        if remaining <= 0:
+            raise VisionSafeToRetryTransportError("Vision HTTP GET deadline expired")
+        assert self._capacity is not None
+        try:
+            async with asyncio.timeout(remaining):
+                await self._capacity.acquire()
+        except TimeoutError as exc:
+            raise VisionSafeToRetryTransportError("Vision HTTP GET capacity expired") from exc
+        try:
+            remaining = deadline_at - time.monotonic()
+            if remaining <= 0:
+                raise VisionSafeToRetryTransportError("Vision HTTP GET deadline expired")
+            self._assert_dispatch_allowed()
+            try:
+                async with asyncio.timeout(remaining):
+                    return await self._get_authenticated_bounded(request_path)
+            except (VisionSafeToRetryTransportError, VisionSubmissionOutcomeUnknownError):
+                raise
+            except TimeoutError as exc:
+                raise VisionSubmissionOutcomeUnknownError(
+                    "Vision HTTP GET deadline expired after dispatch"
+                ) from exc
+        finally:
+            self._capacity.release()
+
     async def _fetch(
         self,
         url: str,
@@ -329,6 +420,7 @@ class AsyncVisionHttpTransport:
                 "Accept-Encoding": "identity",
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                **self._request_headers,
             },
             timeout=httpx.Timeout(
                 connect=self._connect_timeout,
@@ -363,6 +455,36 @@ class AsyncVisionHttpTransport:
         return await self._request_bounded(
             request,
             maximum_response_bytes=maximum_response_bytes,
+        )
+
+    async def _get_authenticated_bounded(
+        self,
+        request_path: str,
+    ) -> VisionHttpResponseEvidence:
+        assert self._client is not None
+        try:
+            api_key = self._credential_provider.resolve()
+        except VisionApiKeyUnavailableError as exc:
+            raise VisionCredentialUnavailableTransportError(
+                "Vision credential is unavailable before GET"
+            ) from exc
+        request = self._client.build_request(
+            "GET",
+            f"{self._endpoint}{request_path}",
+            headers={
+                "Accept-Encoding": "identity",
+                "Authorization": f"Bearer {api_key}",
+            },
+            timeout=httpx.Timeout(
+                connect=self._connect_timeout,
+                read=self._read_timeout,
+                write=self._read_timeout,
+                pool=self._connect_timeout,
+            ),
+        )
+        return await self._request_bounded(
+            request,
+            maximum_response_bytes=self._maximum_response_bytes,
         )
 
     async def _request_bounded(

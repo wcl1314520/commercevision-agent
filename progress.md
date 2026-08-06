@@ -2255,3 +2255,30 @@
   `31103788945` 四路全绿验证：Python、Web、Container builds、Security 与 SBOM 全部成功。
 - Ticket 07 六项验收全部闭合并置为 `complete`。Ticket 08 Alibaba Wan production Adapter 已按
   blockers-first 解锁；状态证据提交取得精确 CI 前不写 Ticket 08 生产代码。
+
+# 2026-08-06 Phase 4 Ticket 08 启动
+
+- Ticket 07 状态提交 `2d79d97af3ee5612b4643df2761eb734b0125ae4` 已由精确 GitHub Actions
+  `31105556687` 四路全绿验证；Ticket 08 正式解除门禁并置为 `in_progress`。
+- 首个 RED 前先通过 research skill 限定核对 Alibaba 官方 Wan 2.7 async submit/query schema、
+  region endpoint、task identity/status 和 result URL 语义；不使用凭证、不发起付费调用、不预建未证能力。
+- 官方一手资料契约已写入 provider research：北京/新加坡 workspace-specific host、异步独立
+  `image-generation/generation` 路径、必需 `X-DashScope-Async: enable` 及 submit 的
+  `request_id + task_id + PENDING` 双重身份均已确认；东京 endpoint、幂等、取消与 webhook 保持 unknown。
+- Ticket 08 RED 1 已稳定建立：新契约测试在导入处因 `commercevision_providers.alibaba_wan_image`
+  不存在而失败。GREEN 仅实现 region-bound async 文生图提交、受控 header 与双重 identity 映射。
+- GREEN 首跑发现测试把已确认 `PENDING` 误断言为 `must_reconcile`；公共契约中该属性仅代表
+  unknown-after-dispatch。测试已改为正常 query 语义（非 unknown、不可自动重投），不改变生产状态映射。
+- Ticket 08 已完成 10 轮纵向 RED/GREEN：workspace/region/model/protocol/config identity、原生异步
+  submit 双重 identity、同域 authenticated query、PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED/UNKNOWN
+  映射、内部 OSS 下载与真实 PNG/usage 校验、内容审核终态、部分结果/状态冲突、显式 cancel-disabled、
+  受控 reference resolver、seed/thinking_mode、官方尺寸域及 deadline-before-resolver 均已闭合。
+- 五轴审查通过 RED 修复三项 Required：read timeout 进入配置 SHA、过期 reference 请求不再读取资产、
+  `task_status` 与 `finished` 冲突进入对账；共享 transport 的附加 header 不能覆盖 Authorization、Host、
+  Content-Type 或 Accept-Encoding。精确 mask-to-bbox 修复仍由 Ticket 12 承担，当前不猜测、不扩权。
+- Ticket 08 adversarial contract 覆盖 task expiry/UNKNOWN、malformed status、partial content、429 throttling、
+  region/workspace mismatch、mounted-secret rotation、SSRF/redirect/MIME/byte/pixel/hash/alpha 和同步 envelope
+  混入；Wan + Kuaipao + Vision/Embedding 共享回归 `212 passed`。
+- Ticket 08 本地发布门禁全绿：unit+contract `1653 passed, 1 skipped`（仅 opt-in OSS live）、全仓 Ruff
+  format/check `505 files`、strict touched-code Mypy、全工作区 Mypy baseline `427` 零漂移、lock、Python
+  license、漏洞审计和 diff check。未使用任何真实凭据或付费调用。
