@@ -266,10 +266,10 @@
 - 最终在同一 Git SHA 证明兼容端点切换、内容安全不可绕过、逻辑执行唯一、未知结果先对账、成本/用量可观测和 public-demo/private 隔离
 - Ticket 01–04 的 capability/candidate/control-plane/router 基线与 Ticket 05 exact approved-plan generation
   command 已完成；Ticket 05 提交 `0c87b93` 由 GitHub Actions `31095178065` 四路全绿放行。
-- Ticket 06 公共 contract 与 deterministic Adapter 提交 `b7621e2` 已由 GitHub Actions `31099374416`
-  四路全绿放行；唯一剩余的 bounded-HTTP parity 与 Ticket 07 联合闭环。
-- Ticket 07 已进入同步 Kuaipao Images Adapter 的 TDD 纵切；首个 RED 只锁定有界 `b64_json`
-  generation 成功通路，editing、URL 下载和失败分类由各自后续 RED 驱动。
+- Ticket 06 公共 contract/deterministic Adapter 与 Ticket 07 bounded-HTTP parity 均已闭环；Ticket 06
+  正式完成。
+- Ticket 07 Kuaipao 同步 Images Adapter 提交 `1158f88` 已由 GitHub Actions `31103788945`
+  四路全绿放行并正式完成；Ticket 08 Alibaba Wan production Adapter 是下一 blockers-first 目标。
 
 ## 成功标准
 
@@ -521,6 +521,7 @@
 | 2026-08-06 | Phase 4 continuation 将 session catchup 与三个大型规划文件读取放入同一 20 秒命令，整体超时 | 拆分操作：使用仓库 `uv run python` 单独执行 catchup，再按需读取计划片段；不重复一次输出全部历史文件 |
 | 2026-08-06 | Ticket 07 未证 generation capability 参数化测试首次使用 pytest 保留名 `request`，收集阶段被拒绝 | 在触达生产行为前改名为 `generation_request` 并重跑；仅后续真实生产失败计作 RED 14 |
 | 2026-08-06 | Ticket 07 首轮并行发布命令引用了已不存在的 license 脚本名，并直接调用 Windows 下会受本地化输出影响的 `pip-audit` | 确认无遗留测试进程后改用 CI 权威入口 `scripts/audit_licenses.py` 与 `scripts/audit_python.py`；两项均通过 |
+| 2026-08-06 | Ticket 07 放行后首次按推测文件名读取 Ticket 08，实际工单名不同 | 未改动文件；用 `rg --files` 定位真实 `08-alibaba-wan-adapter.md`，后续只按已发现路径读取 |
 | 2026-08-06 | 首次 Phase 4 工单依赖校验器把 Ticket 01 的说明文本 `Confirmed Phase 4...` 中数字 4 误解析成工单依赖 | 只在 `Blocked by` 值以数字开头时解析依赖；说明文本与 `None` 一律视为无数值依赖，然后重跑拓扑校验 |
 | 2026-08-06 | Ticket 01 首次 GREEN 将新领域文件与根导出合并成一个 patch，`__all__` 锚点顺序不匹配导致整包未应用 | 已确认没有部分文件落盘；拆为“新增领域模块”和“按真实行位添加根导出”两个小 patch，不重复脆弱组合锚点 |
 | 2026-08-06 | Ticket 01 首个 GREEN 的 Ruff format check 报告新 `provider_routing.py` 需要机械格式化 | 业务测试、Ruff check 与 strict Mypy 已通过；仅对该新文件执行 Ruff formatter，再重跑相同门禁 |
