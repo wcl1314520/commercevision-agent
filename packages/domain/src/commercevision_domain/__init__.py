@@ -59,6 +59,15 @@ from .creative_plans import (
     ImageRole,
     ToolIntentProposal,
 )
+from .generation_candidates import (
+    CandidateImage,
+    CandidateSlot,
+    GenerationBatch,
+    ImageEditingRequest,
+    ImageGenerationRequest,
+    create_candidate_slots,
+    validate_candidate_request_authority,
+)
 from .ids import UUID_PATTERN, canonicalize_uuid, new_uuid7
 from .indexing import (
     CollectionRebuildState,
@@ -122,6 +131,13 @@ from .prompt_registry import (
     PromptRevision,
     PromptRevisionStatus,
     PromptTemplateVariable,
+)
+from .provider_execution import (
+    ProviderCall,
+    ProviderCallOutcome,
+    UsageEvidenceSource,
+    UsageRecord,
+    UsageResolutionStatus,
 )
 from .provider_routing import (
     CircuitState,
@@ -234,6 +250,8 @@ __all__ = [
     "CreativePlanVersion",
     "CollectionState",
     "CircuitState",
+    "CandidateSlot",
+    "CandidateImage",
     "CurrentUsabilityDecision",
     "DataIntegrityError",
     "DomainError",
@@ -245,6 +263,9 @@ __all__ = [
     "InvalidDataError",
     "InvalidTransitionError",
     "ImageRole",
+    "GenerationBatch",
+    "ImageEditingRequest",
+    "ImageGenerationRequest",
     "LeaseConflictError",
     "NormalizedOperationError",
     "NotFoundError",
@@ -283,6 +304,8 @@ __all__ = [
     "ProductBriefState",
     "ProductBriefVersion",
     "ProductBriefVersionSource",
+    "ProviderCall",
+    "ProviderCallOutcome",
     "ProviderCapability",
     "ProviderDataRetentionMode",
     "ProviderEndpointCapabilityVersion",
@@ -290,6 +313,9 @@ __all__ = [
     "ProviderPricingUnit",
     "ProviderProtocol",
     "ProviderTrainingUsePolicy",
+    "UsageEvidenceSource",
+    "UsageRecord",
+    "UsageResolutionStatus",
     "ProvenanceStatus",
     "ReferenceConstraintError",
     "RetentionClass",
@@ -337,6 +363,8 @@ __all__ = [
     "WorkspaceAccessError",
     "canonicalize_uuid",
     "canonical_task_retention_deadline",
+    "create_candidate_slots",
+    "validate_candidate_request_authority",
     "CATEGORY_SCHEMA_VERSIONS",
     "COMMON_SCHEMA_VERSION",
     "DEFAULT_PRODUCT_BRIEF_SENSITIVE_CLAIM_PATHS",

@@ -13766,7 +13766,9 @@
           "ASSET_INDEXING",
           "ASSET_DELETION",
           "RECONCILIATION",
-          "COLLECTION_REBUILD"
+          "COLLECTION_REBUILD",
+          "IMAGE_GENERATION",
+          "IMAGE_EDITING"
         ],
         "title": "OperationKind"
       },

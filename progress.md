@@ -2018,3 +2018,22 @@
 - 本机 Git HTTPS 代理端口不可达且直连被网络设备重置；没有请求沙箱许可。使用已连接的 GitHub Git
   Objects API 上传并逐 blob/tree SHA 校验，非强制 fast-forward `main`；随后用公开 patch 的作者/时间重建
   相同 commit object，本地 `main` 与 `origin/main` 均精确对齐远端 SHA。
+
+# 2026-08-06 Phase 4 Ticket 02 完成
+
+- 以五组独立 RED/GREEN 切片完成 Generation Batch、Candidate Slot、generation/editing request、Candidate
+  Image、Provider Call 与 Usage Record 的不可变领域契约；公共根接口累计 `23 passed`。
+- 每批次绑定精确 Workflow/Plan/Approval/Tool Intent、Prompt/Context、授权 Asset Version、策略、actor 及
+  Workflow/Rights/retention 截止时间；每个连续槽位稳定映射唯一 Durable Operation，canonical hash 与 UUID5
+  身份已用字面值冻结。
+- 编辑批次显式绑定唯一 source/mask Asset Version 与批准 repair scope；公共 authority validator 会拒绝
+  kind、slot、Prompt/Context、引用、source/mask 或 repair scope 的任何漂移，不能把任意对象引用下推给 Adapter。
+- Candidate Image 只引用受控 Task Asset Version 和完整 provenance/Moderation/Usage 事实，不保存 Provider
+  URL、bucket/object key，也不内嵌会在取消或 Rights 撤销后陈旧的当前可用性判断。
+- Provider Call 的五种 outcome 明确 unknown/reconciliation 与 safe pre-dispatch retry 围栏；Usage Record
+  仅接受 bounded Decimal/规范币种，校验估算公式，分离 Provider、pricing、final evidence，缺失用量保持
+  unresolved 并阻止预算释放。
+- 质量门禁：相关领域 `138 passed`；完整 unit/contract `1513 passed, 1 skipped`；全仓 472 个 Python 文件
+  Ruff format/check、strict touched-code Mypy、全仓 baseline、Python license policy 全绿。OpenAPI 幂等重导出，
+  唯一预期变化为 `OperationKind` 新增 `IMAGE_GENERATION`/`IMAGE_EDITING`。Ticket 02 置为 `complete`，
+  Ticket 03 置为 `ready-for-agent`。
