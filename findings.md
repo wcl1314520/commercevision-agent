@@ -785,3 +785,111 @@
   安全性由 workspace-first lookup、server-owned Tool Policy、Prompt Injection 失败关闭和聚合脱敏报告支撑；可靠性由
   幂等、Outbox/Inbox、LangGraph/MySQL 重启、SSE 重连与 retention 收敛支撑；维护性由领域/应用/持久化/传输边界和
   versioned fixture/manifest 支撑；运维性由四路 CI、Compose、OpenAPI、Eval、审计、容器与 SBOM 门禁支撑。
+
+## Phase 4 启动边界
+
+- 现有 `DurableOperation` 已保存逻辑身份、Lease、执行/对账预算、不可覆盖的 Provider Request ID、恢复代次和终态；Phase 4 应新增生成/编辑 Operation Kind 与专属执行模块，而不是建立第二套 Provider Job 状态机。
+- 现有 `OperationExecutor`/Registry/Worker 已把外部调用放在事务外，并对 Worker 在提交前后崩溃、未知结果、重试和 Reconciliation 提供公共接缝；Phase 4 的 Provider Adapter 应坐在这个 true-external seam 后面。
+- Phase 3 Tool Policy 已把 Planner 的 Tool Intent 限定为不可信提议，并在执行前重验 exact Plan Approval、Rights、资源、Provider、quota 与 budget；Phase 4 必须消费授权后的服务端事实，不能让模型参数直接选择 URL、凭证、Endpoint 或扩大预算。
+- 路线图的 Phase 4 退出条件固定为：兼容 Endpoint 安全切换、内容拒绝不可跨 Provider 绕过、同一幂等键只有一个有效结果、未知结果先对账、模型能力与费用可观测。Phase 5 的 Evaluator/Reflection/Replay 和 Phase 6 导出仍不在范围内。
+- `kuaipao.pro` 的具体模型、端点、异步/查询、错误、限流、计费和内容安全语义在第一方研究完成前均视为 unknown；不得仅凭 `/v1` 或 key 前缀推断它完整兼容 OpenAI Images API。
+- 已有 Provider 适配层采用 `contracts` 中的类型化请求/结果、deterministic 与 production 两种 Adapter、受界 `httpx` transport、每次提交重读的挂载 Secret 文件、配置快照哈希、原始请求/响应 artifact ledger 和脱敏错误分类；Phase 4 应复用这些经大量测试验证的安全模式，不新增 SDK 依赖或通用 HTTP 客户端抽象。
+- 已有生产配置会校验 HTTPS endpoint、规范 host、Endpoint Region/Host 出境 allowlist、不可变 model snapshot、外部 Secret 文件和完整 timeout/response/concurrency 预算。新的图片 Provider 配置必须保持相同失败关闭口径，并把 base URL 当作服务端配置而不是 Tool Intent 参数。
+- 当前 `ToolExecutionGateway` 能验证 typed input/output 与结果身份，但它是同步直接执行接口，不拥有 Durable Operation、Provider reconciliation 或 Candidate Image 事实；Phase 4 不应直接把真实生图 Adapter 塞进该 Gateway，而应由授权决策创建 Durable Generation Operation，再由 Worker 的事务外执行边界调用 Adapter。
+- 正式文档已经锁定 Adapter 的窄职责：协议转换、结果规范化、错误分类、timeout/cancel/poll、Provider Request ID、用量与成本；业务场景、用户权限、Creative Plan 修改和内容安全绕过均不属于 Adapter。
+- 当前只有 workflow/asset/index/maintenance 四类队列，没有专属 generation queue；Phase 4 需要把生成负载从 Workflow 控制面隔离，但应继续复用同一 Worker 二进制、Executor discovery、RabbitMQ/Outbox/Inbox 和 readiness 机制，不新增微服务框架。
+- MySQL 文档已预留 `provider_configs`、`model_endpoints`、`generation_attempts` 与 `Numeric(20,6)` 金额类型，但当前代码未落地这些权威表。Provider 配置/Endpoint 能力、生成尝试/候选资产与 usage/cost 必须作为 Phase 4 新事实建模，并保持 workspace-first 身份与 `DATETIME(6)`。
+- Workflow 状态机已有 `GENERATING`/`EVALUATING` 等未来状态，Creative Plan direction 已携带有界 `candidate_count`；Phase 4 应深化审批后的 `GENERATING` 路径，不另建平行 Workflow 或从 UI 直接调用 Provider。
+
+### 快跑 Provider 公开事实基线（2026-08-06）
+
+- 公开文档与无凭证路由探测共同确认同步 OpenAI Images 风格端点：
+  `POST /v1/images/generations`、`POST /v1/images/edits`（另有 `/v1/edits` 别名）以及
+  `GET /v1/models`；具体令牌可见模型与成功响应仍须受控的已鉴权契约探测确认。
+- 官方文档声明的 `POST/GET /v1/images/generations/async` 当前部署均返回
+  `404 Invalid URL`，因此 capability registry 必须默认 `async_submit=false`、
+  `async_reconcile=false`，不能实现为可用能力。
+- 图片编辑文档同时出现 multipart prose 与 JSON schema，媒体类型、mask、多图、大小和 MIME
+  上限未形成一致契约；JSON 与 multipart 必须作为独立 capability，经已鉴权契约测试后分别启用。
+- 公开契约没有 Provider 幂等保证、去重窗口、精确限流、`Retry-After`、安全拒绝 code、unknown
+  outcome 对账或退款语义。连接超时/断连后的同步 POST 必须进入人工/operator wait，不能自动重发或
+  跨 Provider failover。
+- 公开响应提供 `X-Oneapi-Request-Id`，应保存为诊断关联事实；不得保存 Authorization、完整 Prompt、
+  参考图或未裁剪的 Provider body。
+- `/api/pricing` 只能作为非权威目录/价格提示；令牌级模型能力以 `/v1/models` 和受控契约探测为准，
+  最终账务真值与配置价格证据必须分开记录。
+- 快跑公开图片文档没有可依赖的安全分类或输入保留/训练政策，因此 CommerceVision 本地输入/输出安全门、
+  Rights/region/retention hard filters 不得降级，Provider 未知字段一律 fail closed。
+- 完整证据与第一方来源保存在 `.scratch/phase-4-generation-routing/provider-research.md`；调研没有使用、
+  记录或输出任何凭证。
+
+### 第二生产图片 Provider 选择
+
+- Adapter B 锁定为 Alibaba Cloud Model Studio Wan 2.7 独立协议，而不是把同一快跑网关下的第二个模型
+  误算成第二 Provider。官方当前文档列出 `wan2.7-image` / `wan2.7-image-pro` 的图片生成与编辑，并提供
+  同步和异步 HTTP 协议；区域 API key 与 endpoint 不可互换。
+- 生产集成优先实现异步 submit/query：成功提交返回 task ID，查询端点返回终态与短期结果 URL；这为
+  Durable Operation 的 `RECONCILING` 提供真实 Provider identity。同步协议只作为独立 capability，不能
+  和异步解析器混用。
+- Provider 返回的临时 URL 不是 Candidate 身份，必须在有效期内经 exact-host/SSRF/字节/像素/MIME 校验
+  下载到受控对象存储后才创建 Asset Version/Candidate Image。
+- Endpoint capability 必须钉住 region、workspace-specific host、model、adapter version、同步/异步模式、
+  输入/输出限制与价格版本；SDK 示例或 mutable model alias 不能代替服务器端版本化事实。
+- 官方依据：`https://help.aliyun.com/en/model-studio/wan-image-generation-and-editing-api-reference`、
+  `https://help.aliyun.com/en/model-studio/wan-image-api-reference/` 与
+  `https://help.aliyun.com/en/model-studio/image-model/`（2026-08-06 检索）。
+
+### 生产 Planning Provider 选择
+
+- Phase 4 的生产 Planning Adapter 锁定为 Alibaba Model Studio Qwen OpenAI-compatible Chat
+  Completions JSON mode；官方要求 `response_format={"type":"json_object"}` 且消息包含 JSON 指令，区域
+  endpoint/API key 不可混用。
+- JSON mode 只保证可解析 JSON，不保证符合 Creative Plan schema 或业务安全；Adapter 之外仍须执行有界
+  解析、既有 Creative Plan Contract、Tool Intent Policy、Prompt/Context provenance 与失败关闭。
+- mutable model alias 只用于文档示例；生产 Provider Endpoint Capability Version 必须钉住经审核的 region、
+  workspace-specific endpoint、model identity、adapter/configuration hash，运行时 discovery 不得自动换模型。
+- 官方依据：`https://help.aliyun.com/en/model-studio/qwen-structured-output` 与
+  `https://help.aliyun.com/en/model-studio/qwen-api-via-openai-chat-completions`（2026-08-06 检索）。
+
+### Ticket 01 接缝勘察
+
+- 现有框架无关领域 Interface 集中在 `packages/domain/src/commercevision_domain`，根 `__init__.py` 以显式
+  import/`__all__` 暴露；Provider Capability 与 Route Contract 应延续该单一公共 seam，而不是先放进 HTTP
+  contracts、application ports 或 persistence models。
+- 已有不可变聚合模式可复用：frozen dataclass、受界字段/集合、canonical JSON + SHA-256、typed `StrEnum`、
+  UTC 时间验证与 public root export。Ticket 01 不需要新依赖、Repository、Factory 或 Provider Adapter。
+- `DurableOperation` 的逻辑键和状态机已经独立存在；Ticket 01 只表达路由前的不可变能力/策略/决定，不能提前
+  加 `IMAGE_GENERATION` Operation Kind、Provider 调用或 MySQL 映射，这些分别属于后续 Ticket 02/03/05/06。
+- Money 的生产持久化已有 `Decimal`/`DECIMAL(20,6)` 约束，但领域层尚无通用 Money value object；Ticket 01
+  应只引入路由所需的有界 Decimal 价格/预算事实，避免为全仓预建货币框架。
+- `creative_plans.py` 已验证本仓领域习惯：领域对象自己拒绝不规范 UUID/token/hash/UTC、对集合稳定排序并
+  通过 `to_canonical_data()` 形成独立 hash；Ticket 01 应在一个高内聚 `provider_routing.py` 中复用这套
+  Interface 形状，等 Capability/Policy/Decision 职责实际增长后再拆包。
+- 当前 domain 根导出为显式白名单，新增类型必须同时从 `commercevision_domain` 根可用；首个 RED 应只从该
+  根 Interface import，避免测试私有 helper 或文件布局。
+- Ticket 01 的最小 tracer bullet 应创建两条能力版本，构造一个同时受 Rights/provider 与 region 约束的 Route
+  Request，再从一个 public route function/aggregate method 观察“只选择完全满足硬过滤的 endpoint”；其已知
+  expected endpoint/hash 必须是冻结 literal，不可在测试中重复实现排序/hash 算法。
+- Rights 已以 `RightsRecord.allowed_providers` 保存业务许可，现有 Vision/Embedding/Validation transfer policy
+  另以 `allowed_endpoint_regions` 保存部署出境约束。Route Request 应接收已解析的两组 trusted facts 并取交集，
+  不直接依赖 `RightsRecord`、Settings 或复制权限判断到 Provider Adapter。
+- 现有 domain tests 从 `commercevision_domain` 根 import，以固定 UTC/UUID/hash literal 构建 aggregate，并只观察
+  public 属性、返回值和稳定异常。Ticket 01 的 RED 文件应沿用 `tests/unit/test_provider_routing_domain.py`，不 mock
+  自有模块、不查私有字段、不通过数据库旁路验证。
+- Region/provider hard filter 已在多个 application transfer 模块以重复条件存在；Ticket 01 不应重构这些既有
+  Phase 2/3 路径。新 Router 深模块先为 Phase 4 提供唯一决策 Interface，后续只有出现真实复用收益时再收敛旧代码。
+
+### Ticket 01 生产审查结论
+
+- circuit、quota 和 score observation 是外部运行态事实；仅验证 UTC 而不限制年龄会让陈旧 `CLOSED`/quota
+  观测授权付费 dispatch。最大 observation age 属于 versioned Route Policy，未来时间与超龄时间使用同一稳定
+  `OBSERVATION_STALE` 原因失败关闭，恰好落在边界上的观测仍有效。
+- Provider output format 不能限定为 `image/*`：同一 frozen capability set 包含 `PLAN`，生产 Qwen path 要求
+  `application/json`。契约因此验证有界通用 MIME；exact protocol 仍区分 Chat JSON、Images JSON、multipart
+  与 Wan async JSON，避免仅靠 MIME 混用 Adapter。
+- `reference_image_count` 不能代替来源身份。Route Request 现在保存有序、唯一、规范 UUID 的 exact authorized
+  Asset Version IDs，数量必须一致且进入 domain-separated canonical hash；不同授权输入不再产生相同 input hash。
+- fallback history 是审计/重放事实而不是无序集合。`attempted_endpoint_capability_version_ids` 必须严格等于
+  immutable selected+fallback route 的非空前缀，既不能跳过也不能重排；unsafe cause 仍只返回 `None`。
+- 选择算法是内部 collaborator，不是第八个测试 seam。将其从不可变契约模块提取到私有模块后，公共根
+  `select_model_route` Interface 保持不变，职责从一个 1024 行文件收敛为 847 行契约和 260 行选择器。

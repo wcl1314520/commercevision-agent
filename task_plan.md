@@ -2,7 +2,7 @@
 
 ## 本轮目标
 
-在 `D:\个人项目\电商生图agent\CommerceVision Agent` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。Phase 2 已完成；当前按既有 `领域澄清 -> to-spec -> blockers-first tickets -> TDD implement` 流程推进 Phase 3：Planning 与 Human-in-the-loop。
+在 `D:\个人项目\电商生图agent\CommerceVision Agent` 中建立面向公开 GitHub、在线 Demo 和 Agent 应用开发求职的完整可上线系统。Phase 3 已完成；当前按既有 `领域澄清 -> to-spec -> blockers-first tickets -> TDD implement` 流程推进 Phase 4：图片生成、编辑与模型路由。
 
 ## 输入
 
@@ -251,6 +251,20 @@
   `2043 passed, 3 skipped`，Web、Container builds、Gitleaks 与 SBOM 全部成功。Ticket 13 正式完成，
   Ticket 14 已按 blockers-first 解锁并进入 Phase 3 chaos/E2E/release acceptance。
 
+### Phase 15：Phase 4 领域澄清、Provider 核验、规格锁定与 blockers-first 工单
+**Status:** complete
+- 复用 Phase 1–3 的 Durable Operation、Outbox/Inbox、Lease、Retry、Reconciliation、Tool Policy、exact Plan Approval、Rights、Asset retention 与 Worker 接缝，不建立平行执行框架
+- 仅通过第一方公开资料核实 `kuaipao.pro` 的真实能力；用户提供的开发凭证只允许外部 Secret 注入，不进入仓库、命令、日志、测试、Artifact 或 Git 历史
+- 锁定 Provider Capability、Provider Endpoint、Provider Execution、Candidate Image、Usage Record 与 Reconciliation 的统一领域语言和失败语义
+- 确认公开测试接缝：领域/应用命令、Provider Adapter Contract、真实 MySQL Durable Worker/Event、故障对账、HTTP/SSE、候选图 Web、计费/遥测与 release acceptance
+- 生成 `.scratch/phase-4-generation-routing/spec.md` 与 blockers-first 工单；在规格锁定和依赖审查完成前不写 Phase 4 生产实现
+
+### Phase 16：Phase 4 blockers-first TDD 实现与退出验收
+**Status:** in_progress
+- 每个循环只增加一个公开行为：RED -> 最小 GREEN；实现期不预建 Phase 5 Evaluator/Reflection/Replay
+- 逐 Ticket 完成受影响测试、静态检查、真实 MySQL、Provider Contract/故障注入、OpenAPI/Web、迁移、容器、安全、许可证、SBOM、审查、提交与精确 GitHub Actions
+- 最终在同一 Git SHA 证明兼容端点切换、内容安全不可绕过、逻辑执行唯一、未知结果先对账、成本/用量可观测和 public-demo/private 隔离
+
 ## 成功标准
 
 1. `README.md` 是公开项目入口。
@@ -494,6 +508,18 @@
 | 2026-07-29 | 首失败诊断使用 15 分钟窗口，在未复现任何失败时被工具超时终止 | 不再用短窗口诊断完整套件；最终干净全量使用 33 分钟窗口，超过此前约 23 分钟最慢运行 |
 | 2026-07-29 | 首次高置信凭证扫描把 tracked diff 与 untracked 输出包装成两个嵌套数组，只统计到 2 个元素 | 不采用该结果；改用 PowerShell 数组语句逐行收集并去重，再对实际全部变更文件扫描 |
 | 2026-07-29 | 并行 worker 进度探针中一个 `rg` 暂无匹配并返回 1，导致 `Promise.all` 丢弃其他只读结果 | 未修改文件；改用 `Promise.allSettled` 分别保留 ledger 与 pre-analysis 探针结果 |
+| 2026-08-06 | Provider 研究首次请求了不存在的 `research` agent type | 未修改仓库；按 research skill 要求改用可用的 `default` 后台 Agent，并限定只写 Phase 4 provider research 文件 |
+| 2026-08-06 | PowerShell 下把 `*.py` 作为 `rg` 位置参数导致 Windows 路径语法错误 | 未修改文件；后续先用 `rg --files`/`Get-ChildItem` 枚举真实文件，再把结果交给内容检索 |
+| 2026-08-06 | 再次把 `infra/public-demo/*.example` 作为 Windows `rg` 位置参数，产生同类路径语法错误 | 停止使用位置参数 glob；后续只传真实目录并用 `-g '*.example'` 过滤，避免重复该失败模式 |
+| 2026-08-06 | 架构探针假定根目录存在 `alembic/`，`rg` 对不存在路径返回错误 | 已确认迁移位于 `packages/persistence/alembic/`；后续先用 `rg --files` 确认真实路径，不重复假定 |
+| 2026-08-06 | Phase 4 continuation 将 session catchup 与三个大型规划文件读取放入同一 20 秒命令，整体超时 | 拆分操作：使用仓库 `uv run python` 单独执行 catchup，再按需读取计划片段；不重复一次输出全部历史文件 |
+| 2026-08-06 | 首次 Phase 4 工单依赖校验器把 Ticket 01 的说明文本 `Confirmed Phase 4...` 中数字 4 误解析成工单依赖 | 只在 `Blocked by` 值以数字开头时解析依赖；说明文本与 `None` 一律视为无数值依赖，然后重跑拓扑校验 |
+| 2026-08-06 | Ticket 01 首次 GREEN 将新领域文件与根导出合并成一个 patch，`__all__` 锚点顺序不匹配导致整包未应用 | 已确认没有部分文件落盘；拆为“新增领域模块”和“按真实行位添加根导出”两个小 patch，不重复脆弱组合锚点 |
+| 2026-08-06 | Ticket 01 首个 GREEN 的 Ruff format check 报告新 `provider_routing.py` 需要机械格式化 | 业务测试、Ruff check 与 strict Mypy 已通过；仅对该新文件执行 Ruff formatter，再重跑相同门禁 |
+| 2026-08-06 | Ticket 01 第九个 RED patch 假定测试已 import `ModelRouteDecision`，实际没有该锚点，整包未应用 | 改为在真实 `ModelRoutePolicy` import 附近加入新 Failover enum，并在文件末尾独立追加测试 |
+| 2026-08-06 | Ticket 01 验证首轮发现两个新增文件需 Ruff format、根导出与测试 import 未排序；并行 fail-fast 使同组 Mypy/pytest 输出未返回 | 仅对三个目标文件执行 formatter/受控 import fix；后续用 `Promise.allSettled` 保留每个验证结果，不重复 fail-fast 组合 |
+| 2026-08-06 | Ticket 01 strict Mypy 发现 `__post_init__` 中两个 bool 验证循环复用了先前推断为 `str` 的函数级 loop variable | 将 bool 循环变量改为独立语义名称，不改变行为；目标 93 项回归与 diff-check 已通过，修后重跑 strict Mypy |
+| 2026-08-06 | Ticket 01 本地 `audit_python.py` 查询在线漏洞数据库时连接被宿主网络重置（WinError 10054） | 锁文件未变且许可证策略通过；不把外部网络失败误报为代码缺陷，保留精确 GitHub Actions `Python checks`/Security 作业作为权威门禁，并可在提交前做一次有界重试 |
 
 ## Ticket 07 第十轮后端修复计划
 

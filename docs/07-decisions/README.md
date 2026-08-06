@@ -16,6 +16,7 @@
 - [ADR-006：任务资产与基础资产采用不同保留边界](ADR-006-asset-retention-boundary.md)
 - [ADR-007：ProductBrief continuation 由消费时权威事实授权](ADR-007-product-brief-continuation-authority.md)
 - [ADR-008：Collection 升级采用候选构建与原子策略指针切换](ADR-008-collection-rebuild-pointer-switch.md)
+- [ADR-009：每个候选槽位复用一个持久操作](ADR-009-candidate-slot-durable-operation.md)
 
 ## 状态
 

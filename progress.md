@@ -1912,3 +1912,101 @@
   Planner 报告 SHA-256 保持 `733a399576c676e4344618332408d954f6673b4712577d24227c74ece4f0cc38`。
 - 审计仅发现根计划 Phase 14 标题仍残留 `in_progress` 的记录漂移；已修正为 `complete`。未修改生产代码，
   未触碰用户未跟踪的 `.scratch/retrieval-explorer-mobile.png`。
+
+# 2026-08-06 Phase 4 启动
+
+- 建立 Phase 4 持续目标：真实图片生成/编辑、多供应商能力路由、可靠执行与对账、候选图、成本/用量和发布验收。
+- 用户提供的 API Key 已按敏感凭证隔离：不写入任何仓库文件、命令、日志、测试、Artifact 或 Git 历史；正式生产使用前应轮换已经出现在对话正文中的开发凭证。
+- 已恢复 Phase 3 权威上下文并确认当前 `main` 与 `origin/main` 一致；唯一未跟踪文件仍为用户的 `.scratch/retrieval-explorer-mobile.png`，继续不触碰。
+- 启动无凭证的第一方 Provider 能力研究；同时开始审计既有 Durable Operation、Operation Executor Registry、Tool Policy、Provider Artifact Ledger 与 Worker composition，Phase 4 不建立平行可靠性框架。
+- Phase 15 进入 `in_progress`；规格和公开测试接缝锁定前不写生产实现，锁定后再以 TDD 开始首个纵向切片。
+
+# 2026-08-06 Phase 4 规格与 blockers-first 拆分
+
+- 无凭证 Provider 研究完成并固化到 `.scratch/phase-4-generation-routing/provider-research.md`：快跑当前只
+  声明同步 generation/edit/model discovery；文档异步路由线上为 404，编辑 media type、幂等、限流、
+  safety 和 unknown outcome 计费均保留为 unknown/fail closed。
+- 第二生产图片 Provider 选择 Alibaba Model Studio Wan 2.7 独立协议，优先以 async submit/query 提供真实
+  Provider task reconciliation；同一快跑网关下的多个模型不虚报为多个 Provider。
+- Phase 4 proposed spec 已深化五个高内聚模块、六组领域契约、持久化原子边界、两生产 Adapter、真实 Planning
+  路径、候选交付、安全/可靠性和发布退出条件；公开测试只经 7 个行为接缝观察。
+- 新增 16 个 blockers-first Ticket，覆盖 Domain → Control Plane/MySQL → Router → Approved Command →
+  Adapter → Kuaipao/Wan → Worker Convergence → Reconciliation → Safety/Edit/Planning → Web/SSE →
+  Observability → Release Acceptance；格式与依赖检查通过。
+- `CONTEXT.md` 增加 Provider Endpoint Capability Version、Model Route Decision、Generation Batch、Candidate
+  Slot、Candidate Image、Usage Record 统一语言；ADR-009 提议每个 Candidate Slot 复用一个现有 Durable
+  Operation，拒绝第二套 Provider Job 状态机。
+- 当前只等待公共测试接缝确认；确认后将 spec 置为 `locked`、ADR-009 置为 `accepted`、Ticket 01 置为
+  `ready-for-agent` 并立即开始第一个 RED。
+
+# 2026-08-06 Phase 4 Ticket 01 预实施勘察
+
+- 在不越过 TDD seam-confirmation 门槛的前提下，已追踪 Domain 根导出、Creative Plan 不可变版本、Rights
+  provider 许可、出境 region policy、Durable Operation 与现有单元测试风格。
+- Ticket 01 收敛为一个高内聚纯领域模块：`select_model_route` 是唯一公开行为 Interface；内部完成 positive
+  capability hard filter 与确定性 route，Repository/Transport/HTTP/DB 均留在后续工单。
+- 首个 RED 场景已冻结：两个生成 endpoint 中低价 endpoint 被 Rights/provider 或 region hard filter 排除，
+  Router 必须选择唯一完全合规 endpoint，并返回独立 literal 验证的不可变 Decision/hash。
+- 16 票依赖拓扑已用独立校验器复核：`issues=16`、`dependency_errors=0`；`git diff --check` 通过。
+- 未写测试或生产代码，未触碰用户的 `.scratch/retrieval-explorer-mobile.png`，凭证仍未进入文件或工具命令。
+
+# 2026-08-06 Phase 4 规格锁定与 Ticket 01 启动
+
+- 用户明确确认 7 个公共测试接缝；Phase 4 spec 已从 `proposed` 置为 `locked`，对应标题改为
+  `Confirmed Test Seams`。
+- ADR-009 已从 `proposed` 置为 `accepted`；Ticket 01 解除前置条件并进入 `in_progress`。
+- 根计划 Phase 15 正式 `complete`，Phase 16 进入 `in_progress`；下一动作是只写首个 public domain RED，
+  观察缺失的 `select_model_route` Interface 后再做最小 GREEN。
+- Ticket 01 首个 RED 已按确认 seam 写入 `tests/unit/test_provider_routing_domain.py`；目标命令在 collection
+  阶段稳定失败，原因为 `commercevision_domain` 根 Interface 尚未导出 `ModelRoutePolicy`。这是预期 RED，
+  没有生产副作用。
+- 首个 GREEN 已通过：框架无关 `provider_routing.py` 现在提供 immutable capability/request/policy/decision 与
+  `select_model_route` 根 Interface；硬过滤后按价格与稳定 ID 排序，目标 `1 passed`，Ruff 与 strict Mypy 通过。
+- 第二个 RED 先因缺少 `EndpointRouteObservation` 根导出而稳定失败；最小 GREEN 增加受界 0..1 观测和
+  versioned weighted score。质量优先策略能够选择更高质量端点并保留低价兼容 fallback，目标累计 `2 passed`。
+- 第三个 RED 先因缺少 `ProviderExecutionMode` 根导出而稳定失败；GREEN 增加显式 SYNC/ASYNC、task query/
+  cancel 与 Provider idempotency positive facts。需要异步 query 的路由会排除更便宜但仅同步的 Kuaipao
+  capability，选择 Wan async capability；目标累计 `3 passed`。
+- 第四个 RED 先因缺少 `CircuitState` 根导出而稳定失败；GREEN 增加 circuit/quota authority、缺失观测
+  fail-closed，以及 `NoEligibleModelRouteError.rejection_counts` 稳定聚合原因。OPEN circuit 与 quota 不足均在
+  scoring/fallback 前被剔除，目标累计 `4 passed`。
+- 第五个 RED 以 capability factory 的新增字段触发稳定 `TypeError`；GREEN 增加 category/image role/MIME/
+  dimensions/candidate count/safety policy positive facts 和相应 request hard filters。六类不兼容端点均不会进入
+  首选或 fallback，并返回稳定聚合原因；目标累计 `5 passed`。
+- 第六个 RED 先因缺少 `ProviderDataRetentionMode` 根导出而稳定失败；GREEN 增加 data region、zero/bounded/
+  unknown retention、prohibited/permitted/unknown training policy 与 opaque Secret Reference。未知数据治理的
+  快跑 capability 被 fail closed，Decision 不暴露 Secret Reference；目标累计 `6 passed`。
+- 第七个 RED 在已完成路由后以缺少 `capability_sha256` 稳定失败；GREEN 增加 capability/request/decision
+  domain-separated canonical SHA-256。capability/observation 输入顺序重建不改变 Decision identity，决定时间变化
+  会改变 identity，Decision 保持 frozen；目标累计 `7 passed`。
+- 第八个 RED 先因缺少 `ModelRouteCandidateScore` 根导出而稳定失败；GREEN 在成功 Decision 中记录按 route
+  顺序排列的六位 Decimal score 与 aggregate-only rejection counts，并把两者纳入 canonical hash。被拒 Endpoint
+  identity 与 Secret Reference 不进入 Decision repr；目标累计 `8 passed`。
+- 第九个 RED 先因缺少 `ModelRouteFailoverCause` 根导出而稳定失败；GREEN 让 immutable Decision 仅对
+  `SAFE_PRE_DISPATCH_FAILURE` 和 `CONFIRMED_RETRYABLE_FAILURE` 返回原决定中的下一个兼容 endpoint。
+  content/policy/invalid/unknown outcome 均返回无 fallback；目标累计 `9 passed`。
+- 第十个 RED 先因缺少 `ProviderPricingUnit` 根导出而稳定失败；GREEN 增加独立 Provider protocol、reference/
+  mask/seed/LoRA、request/result byte budgets 和 pricing unit positive facts。JSON edit 与 multipart edit 不再因
+  同 Provider/endpoint 近似而混用，exact protocol 进入 capability/request hash；目标累计 `10 passed`。
+- 第十一个 RED 证明仅比较单价会把 `0.40 × 3 > 1.00` 的 endpoint 错放进 fallback；GREEN 按 pricing unit
+  计算完整请求估算成本，IMAGE 使用 candidate count，token 类使用 required quota units，并让预算 hard filter
+  与 price score 共用同一成本语义；目标累计 `11 passed`。
+- 第十二个 RED 以 `ModelRouteRequest` 缺少 reference/feature/byte facts 稳定失败；GREEN 把 reference image
+  count、mask/seed/LoRA、estimated request bytes 与 required result byte limit 接入 canonical request 和 hard
+  filters。六类输入/字节不兼容均在 scoring 前拒绝；目标累计 `12 passed`。
+- 第十三个 RED 证明普通 token 校验会接受形似 API Key 的 Secret Reference；GREEN 将引用收窄为独立
+  `secret-ref:` namespace，raw credential-like value 在 immutable capability 构造时直接拒绝。测试只使用动态
+  假值，未写入用户凭证；目标累计 `13 passed`。
+- 生产级五轴审查用三个追加 RED 暴露并闭合契约缺口：陈旧/未来 circuit-quota 观测现在按 versioned Route
+  Policy 的最大年龄失败关闭；PLAN endpoint 可显式声明 `application/json`；Route Request canonical hash
+  绑定 exact authorized Asset Version IDs，且引用数量、UUID 和去重保持一致。
+- fallback 审查 RED 证明乱序 attempted history 原会被接受；GREEN 将其收敛为 immutable route 的严格连续
+  前缀，safe pre-dispatch/confirmed-retryable 之外仍永不产生跨 Provider fallback。
+- `code-simplification` 复核把 1024 行混合模块拆为 847 行不可变契约与 260 行私有选择算法；公共根 seam、
+  测试断言与错误语义保持不变，重构后目标累计 `15 passed`。
+- Ticket 01 本地预推送门禁：相关领域 `95 passed`；完整 unit/contract `1490 passed, 1 skipped`；全仓 469 个
+  Python 文件 Ruff format/check 全绿；strict touched-code Mypy、全工作区 baseline、Python license policy、
+  credential-like count `0` 与 `git diff --check` 均通过。精确 GitHub Actions 全绿前 Ticket 仍为
+  `in_progress`。
+- `audit_python.py` 首次在线查询因宿主网络瞬断失败；有界重试成功并报告 `No known vulnerabilities
+  found`。OpenAPI 重新导出无漂移，未新增或修改依赖。
