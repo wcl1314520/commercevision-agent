@@ -73,6 +73,12 @@ from .fixture_planner import (
     FixturePlannerRequest,
     FixturePlanningAuthority,
 )
+from .generation_commands import (
+    ApprovedGenerationAuthority,
+    ApprovedPlanGenerationCommand,
+    ApprovedPlanGenerationResult,
+    ApprovedPlanGenerationService,
+)
 from .indexing import (
     EmbeddingProviderPort,
     ExactImageReferencePort,
@@ -204,6 +210,10 @@ from .workflows import (
 )
 
 __all__ = [
+    "ApprovedGenerationAuthority",
+    "ApprovedPlanGenerationCommand",
+    "ApprovedPlanGenerationResult",
+    "ApprovedPlanGenerationService",
     "DurableNodeLifecycle",
     "ProductBriefContinuation",
     "ProductBriefContinuationAuthorityError",

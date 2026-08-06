@@ -527,6 +527,18 @@ class Settings(BaseSettings):
         max_length=128,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
+    generation_rights_policy_version: str = Field(
+        default="asset-rights.v1",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    generation_actor_id: str = Field(
+        default="generation-service",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
     tool_intent_granted_scopes: list[str] = Field(
         default_factory=lambda: ["image.generate"],
         max_length=64,
@@ -715,6 +727,8 @@ class Settings(BaseSettings):
         "asset_queue_name",
         "index_queue_name",
         "maintenance_queue_name",
+        "generation_rights_policy_version",
+        "generation_actor_id",
     )
     @classmethod
     def _trim_required_identity(cls, value: str) -> str:

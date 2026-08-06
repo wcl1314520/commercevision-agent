@@ -28,6 +28,8 @@ WORKSPACE_ID_TABLES = {
     "dead_letter_messages",
     "dead_letter_replays",
     "durable_operations",
+    "generation_batches",
+    "candidate_slots",
     "embedding_records",
     "model_route_policy_heads",
     "model_route_policy_versions",

@@ -5,7 +5,7 @@ authority, applies hard filters, scores eligible capabilities and persists one i
 
 **Blocked by:** 01, 03.
 
-**Status:** in_progress
+**Status:** complete
 
 - [x] Caller supplies trusted requirements and identities only; provider, URL, credential, price and quota authority are resolved server-side.
 - [x] Stable policy inputs and observations produce the same ordered route with stable identity as final tie-breaker.
@@ -32,4 +32,5 @@ authority, applies hard filters, scores eligible capabilities and persists one i
   against that immutable row and never returns a Secret Reference, endpoint host or credential.
 - Local acceptance is complete, including `1521 passed, 1 skipped` unit/contract, strict touched
   Mypy, the 431-diagnostic no-drift baseline, and real-MySQL route/migration/concurrency gates.
-  Status remains `in_progress` until the exact implementation SHA is green in GitHub Actions.
+- Implementation SHA `c30835e89b03166fe8ac732e68a4b50e1a42cc87` is verified by exact GitHub
+  Actions run `31082236868`: Python, Web, Container builds, Security and SBOM all passed.

@@ -2090,3 +2090,73 @@
   收敛为单次 locking anti-join query。
 - 完整 unit/contract `1521 passed, 1 skipped`；全仓 Ruff、strict touched-code Mypy 与 431 条 baseline 零漂移。
   Ticket 04 验收项已闭合，但在 exact-SHA GitHub Actions 四路全绿前保持 `in_progress`，Ticket 05 不启动。
+
+# 2026-08-06 Phase 4 Ticket 04 放行与 Ticket 05 RED
+
+- Ticket 04 权威提交 `c30835e89b03166fe8ac732e68a4b50e1a42cc87` 已由精确 GitHub Actions
+  `31082236868` 四路全绿验证；Python、Web、Container builds、Security 与 SBOM 全部成功，Ticket 04
+  正式完成。
+- Ticket 05 blockers-first 门禁解除并进入 `in_progress`。首个 public application RED 锁定同一事务内
+  重验 exact Plan/Approval/Tool Intent 与当前 Workflow/Tool Policy/Rights/retention/budget/route authority，
+  并原子创建 Generation Batch、Candidate Slots、Durable Operations、Outbox、Audit 与 Idempotency。
+
+# 2026-08-06 Phase 4 Ticket 05 首批纵向切片
+
+- 首个 public application RED 以缺少 Approved Generation 根接口稳定失败；GREEN 新增窄 Generation
+  Command/UoW Port，精确 Plan/Approval/direction/Tool Intent/Route Decision 身份进入服务，服务端 authority
+  snapshot 生成单一 immutable Batch、连续 Slot、PENDING Operation、typed Outbox、Audit 与 Idempotency。
+- 第二个 RED 证明 completed 幂等记录无法重放；GREEN 从持久 Batch/Slot/Operation 交叉校验并重建原聚合，
+  不信任幂等 response JSON。相同逻辑请求换幂等键返回原聚合，Route Decision 偷换稳定冲突。
+- 第三个 schema RED 以缺少 Generation MySQL models/tables 稳定失败；GREEN 新增 tenant-first
+  `generation_batches`/`candidate_slots`、exact Plan/Approval/Route/Operation 外键、逻辑唯一键、UTC(6)、
+  bounded JSON/hash checks 和双 immutable UPDATE trigger，fresh upgrade/downgrade/re-upgrade 已通过。
+- 真实 MySQL 首轮分别暴露并修复 FK collation 不一致、幂等 scope 超长及 ORM flush 父子顺序；最终 public
+  command round trip、immutable update rejection、事件路由与迁移矩阵合计 `33 passed`，Ruff 与 strict Mypy
+  全绿。Ticket 05 仍为 `in_progress`，下一 RED 为双幂等键并发逻辑唯一收敛。
+## 2026-08-06 — Ticket 05 continuation
+
+- Restored repository instructions, domain vocabulary, and the active Phase 4/Ticket 05 planning context.
+- Planning catch-up helper timed out after 14 seconds on its first attempt; authoritative recovery continues from the current planning files plus `git diff` instead of repeating the same failing invocation.
+- Next TDD slice remains the confirmed public command/UOW seam: two real MySQL transactions, distinct idempotency keys, one logical Plan Intent must converge on the same Generation Batch without duplicate dispatch facts.
+- RED added at the confirmed application/UOW seam and executed against `commercevision_test`: it failed as intended because the unique-key loser leaked `UniqueConstraintError` from `uow.flush()` instead of returning the winning aggregate.
+- GREEN completed: the application command now exits the rolled-back loser UOW, opens exactly one fresh UOW, loads and validates the logical winner, completes the distinct idempotency record, and returns the immutable aggregate replay. The exact real-MySQL concurrency test passes (`1 passed`).
+- A combined multi-file absolute Windows patch for the planning logs was rejected because the second path was resolved incorrectly; no partial write occurred. Subsequent planning-log updates use separate patches.
+- The first focused-matrix command collected no tests because it used the wrong remembered event test filename. Repository enumeration identified the authoritative path as `tests/unit/test_event_routing.py`; the matrix will be rerun once with that exact path.
+- The combined corrected matrix exceeded the 180-second tool window while running full migration suites and returned no buffered pytest result. Do not repeat the oversized grouping; verify no residual process, then split fast unit/application tests from each real-MySQL migration group.
+- Process check confirmed no residual repository pytest/uv process. Split unit/application/domain/schema/event regression is green: `31 passed in 2.24s`.
+- Post-format real-MySQL command regression is green: `2 passed in 7.85s`, including exact aggregate replay and distinct-key concurrency convergence. Ruff format/check, strict Mypy on the application/persistence seam, and `git diff --check` are green.
+- The first production-authority RED insertion used the pre-format multiline assertion as its anchor and was rejected atomically. The actual one-line anchor was read and the test is inserted at that exact boundary next.
+- Production-authority RED is established at the public command seam: collection fails because `MySqlApprovedGenerationAuthority` does not yet exist. The test seeds a valid canonical Plan Tool Intent, post-approval Workflow/Approval, immutable Route Decision, server policy and budget facts.
+- Production-authority GREEN 1 passes against real MySQL (`1 passed`): the same Generation UOW locks/revalidates Workflow, current Plan head/version, exact Approval, Route Decision/Endpoint and deterministic Tool Policy/limits before materializing the aggregate. Resource-bearing intents remain explicitly denied until the next Rights RED.
+- First strict Mypy run found only the new policy helper's missing `CreativePlanVersion` parameter and `ToolAuthorizationDecision` return annotations; both were added without changing behavior.
+- Production-authority core regression is green: exact three-command MySQL matrix `3 passed in 37.36s`; Ruff format/check, strict Mypy and diff whitespace gate are green.
+- The reference-capability fixture parameter was first inserted into the adjacent no-source test because the shared seed call anchor matched earlier; inspection caught it before execution. The parameter is moved to the Rights test only.
+- First Rights RED run stopped in fixture setup because permissions were inserted after an already-sealed Rights row; this correctly triggered the immutable-permissions database trigger. The fixture now inserts uses/providers before sealing, matching production lifecycle, then reruns the intended command RED.
+- Rights RED then hit the intended explicit production denial; GREEN now locks current Asset/Version/Rights rows and validates AVAILABLE/current pointer, sealed GRANT, active interval, derivative permission, required use and exact routed Provider. Exact real-MySQL test passes and clamps Batch retention to the finite Rights deadline (`1 passed`).
+- Route/asset-binding RED is stable: a zero-reference Route Decision for the same Plan/Approval was incorrectly accepted for a Plan whose authorized Tool Intent resolves one source Asset Version. This proves the immutable decision needs a safe authorized-asset projection in addition to its request hash.
+- First inline read-only schema probe was rejected by PowerShell nested quoting; a stdin script avoided the parser ambiguity and verified exact target `commercevision_test`, revision `fa7d3c8e1204`, and projection-column count `0` before any DDL.
+- Guarded one-time test-schema alignment added the nullable Route Decision authorized-asset projection only after exact DB/revision/absence checks. New Router writes the ordered projection; legacy `NULL` decisions fail closed. Asset-mismatch rejection and valid source-Rights paths are both green (`2 passed`).
+- Candidate-count binding RED is stable: a Route Decision priced/routed for two candidates was incorrectly accepted for a one-candidate approved direction. The safe immutable request projection must include candidate count and legacy missing values must fail closed.
+- Candidate-count GREEN adds the nullable immutable Route Decision projection, writes it for new decisions, rejects legacy/mismatched values, and passes the exact real-MySQL denial test (`1 passed`). The guarded test schema alignment was limited to the verified `commercevision_test` revision.
+- Latest-observation RED is stable: after the Route Decision, an OPEN/zero-quota circuit transition was ignored and the command created work. Generation authority must lock the latest exact-endpoint observation and fail closed before materialization.
+- Latest-observation GREEN joins the enabled Provider identity and locks the newest exact Endpoint observation; missing/non-CLOSED/insufficient-quota facts now fail before any Batch. Exact real-MySQL circuit regression passes (`1 passed`).
+- Core authority/projection code is mechanically clean after formatting/import fixes: strict Mypy on four touched source modules, Ruff format/check on seven touched files, and `git diff --check` are green.
+- Focused regression is green after all authority slices: `32 passed` unit/domain/schema/event and `7 passed, 6 deselected` real-MySQL generation-command tests, including concurrency, exact approval/policy/route, Rights retention, route asset/count mismatch and latest circuit/quota.
+- Fresh provider-control-plane migration contract now asserts the two nullable fail-closed Route Decision projections and passes full upgrade/downgrade/re-upgrade with immutable triggers (`1 passed in 26.21s`).
+## Ticket 05 REST seam continuation
+
+- Located the API package at `services/api/src/commercevision_api`.
+- A combined file read exceeded the useful output window; continuing with bounded reads per file.
+- RED: `tests/unit/test_generation_routes.py` failed at collection because the generation router did not exist.
+- GREEN: added strict generation request/aggregate response contracts, workspace-scoped POST/GET routes, safe provider-neutral projections, OpenAPI header assertions, and a public application `get()` that reuses aggregate validation. Exact route tests pass (`2 passed`).
+- RED/GREEN: a valid Rights-backed source Asset was denied when static entitlements contained no asset IDs. Authority now binds Tool authorization to the immutable Route Decision asset projection, then independently locks and revalidates exact MySQL Rights; the real MySQL source-rights test passes with an empty static resource allowlist.
+- Added server-owned generation Rights policy/service actor settings and began production Control API composition. Focused Ruff is green after mechanical import sorting.
+- Real MySQL + HTTP proof is green: POST creates one atomic batch/operation, exact replay and GET return the same safe aggregate, and a foreign-workspace GET returns stable `404 NOT_FOUND` without exposing existence.
+- RED/GREEN: a stale but CLOSED/quota-positive endpoint observation was accepted. Generation authority now joins the exact immutable Route Policy version and revalidates its observation-age bound (including future timestamps); open and stale endpoint cases both fail closed.
+- The real-MySQL denial matrix now uses schema-valid authority mutations, including an immutable Rights `REVOKE` successor plus Asset pointer advance. The injected Outbox failure rolls back all generation facts.
+- Ticket 05 focused regression is green: `29` generation unit/API/schema tests and `16` real-MySQL generation tests passed. Added an explicit current Tool budget exhaustion case to the denial matrix before final gates.
+- Full unit + contract regression is green: `1526 passed, 1 skipped` (only opt-in live OSS).
+- Python license audit, Phase 2/3 release acceptance, retrieval/Planner release fixtures and evaluation gates, Python security audit, OpenAPI export, Ruff, release-critical Mypy, full Mypy baseline, Alembic drift, and scoped migration tests are green.
+- A monolithic full pytest run exceeded the 15-minute local tool cap without emitting a failure; all orphaned child processes were terminated and the relevant real-MySQL plus complete unit/contract groups were run observably. Remote CI will provide the authoritative unbounded full-suite result.
+- Pre-commit five-axis review split the 1,898-line mixed integration module into a 697-line Model Router suite and a dedicated Generation Command suite. Ruff removed 53 mechanically stale imports and all 23 real-MySQL tests across both modules pass after the split.
+- Final post-review gates are green: full-repo Ruff (`498` files), strict generation Mypy, exact 431-diagnostic baseline, `162` generation/settings/API-health tests, lock consistency and diff hygiene. Web generated API type drift check also passes.

@@ -70,6 +70,12 @@ from .creative_plans import (
 from .endpoint_identity import validate_canonical_endpoint_host
 from .errors import ErrorResponse
 from .events import EventContract, EventHandling, EventQueue, EventType
+from .generation import (
+    ApprovedPlanGenerationRequestV1,
+    GenerationBatchResponseV1,
+    GenerationCandidateSlotResponseV1,
+    GenerationOperationResponseV1,
+)
 from .health import HealthResponse, ServiceMetadata
 from .indexing import (
     AssetIndexStatusResponseV1,
@@ -208,6 +214,7 @@ __all__ = [
     "AssetValidationStageResponseV1",
     "AssetValidationStatusResponseV1",
     "AssetVersionResponseV1",
+    "ApprovedPlanGenerationRequestV1",
     "BrandColorV1",
     "BrandProfileCreateRequestV1",
     "BrandProfileDraftV1",
@@ -253,6 +260,9 @@ __all__ = [
     "EventType",
     "EventResponse",
     "HealthResponse",
+    "GenerationBatchResponseV1",
+    "GenerationCandidateSlotResponseV1",
+    "GenerationOperationResponseV1",
     "MilvusAnnSearchHitV1",
     "MilvusAnnSearchRequestV1",
     "MilvusCollectionCreateRequestV1",

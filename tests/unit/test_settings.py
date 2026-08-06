@@ -19,6 +19,8 @@ def test_tool_intent_policy_configuration_is_bounded_and_server_owned() -> None:
         tool_intent_quota_units=8,
         tool_intent_budget_units=7,
         tool_intent_maximum_intents=6,
+        generation_rights_policy_version="asset-rights.v2",
+        generation_actor_id="generation-command-service",
     )
 
     assert settings.tool_intent_policy_version == "tool-intent-policy-v2"
@@ -26,6 +28,8 @@ def test_tool_intent_policy_configuration_is_bounded_and_server_owned() -> None:
     assert settings.tool_intent_quota_units == 8
     assert settings.tool_intent_budget_units == 7
     assert settings.tool_intent_maximum_intents == 6
+    assert settings.generation_rights_policy_version == "asset-rights.v2"
+    assert settings.generation_actor_id == "generation-command-service"
 
     for invalid in (
         {"tool_intent_policy_version": "policy with spaces"},
@@ -33,6 +37,8 @@ def test_tool_intent_policy_configuration_is_bounded_and_server_owned() -> None:
         {"tool_intent_budget_units": -1},
         {"tool_intent_maximum_intents": 193},
         {"tool_intent_allowed_cost_classes": ["unbounded"]},
+        {"generation_rights_policy_version": "policy with spaces"},
+        {"generation_actor_id": "actor with spaces"},
     ):
         with pytest.raises(ValidationError):
             Settings(**invalid)

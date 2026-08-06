@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import cast
 
 from commercevision_application import (
+    ApprovedPlanGenerationService,
     AssetDeletionPolicy,
     AssetRegistryApplicationService,
     AssetRetentionApplicationService,
@@ -26,6 +27,8 @@ from commercevision_application import (
     ProductBriefViewApplicationService,
     PromptRegistryApplicationService,
     RetrievalApplicationService,
+    ToolAuthorizationEntitlements,
+    ToolAuthorizationPolicy,
     ValidationDataTransferPolicy,
     VisionDataTransferPolicy,
     WorkflowApplicationService,
@@ -36,6 +39,9 @@ from commercevision_application.asset_cleanup_dispatch import UploadCleanupPolic
 from commercevision_application.asset_integrity import UploadIntegrityVerifier
 from commercevision_application.asset_validation_dispatch import AssetValidationPolicy
 from commercevision_application.creative_plan_ports import CreativePlanUnitOfWorkPort
+from commercevision_application.generation_command_ports import (
+    ApprovedGenerationUnitOfWorkPort,
+)
 from commercevision_application.prompt_registry_ports import PromptRegistryUnitOfWorkPort
 from commercevision_contracts import Settings
 from commercevision_object_storage import (
@@ -46,9 +52,11 @@ from commercevision_object_storage import (
 from commercevision_observability import ProductBriefTelemetry
 from commercevision_persistence import (
     Database,
+    MySqlApprovedGenerationAuthority,
     MySqlCollectionRebuildControl,
     MySqlRetrievalPreviewService,
     MySqlRetrievalRunStore,
+    SqlAlchemyApprovedGenerationUnitOfWork,
     SqlAlchemyAssetUnitOfWork,
     SqlAlchemyBrandProfileUnitOfWork,
     SqlAlchemyCatalogUnitOfWork,
@@ -62,6 +70,12 @@ from commercevision_persistence import (
     SqlAlchemyUnitOfWork,
     create_database,
     is_unit_of_work_active,
+)
+from commercevision_tool_runtime import (
+    ToolCostClass,
+    ToolIntentAuthorizer,
+    ToolRegistry,
+    fixture_image_intent_definition,
 )
 
 from .identity import PrincipalAccessPolicy, SignedTrustedPrincipalResolver
@@ -157,6 +171,7 @@ class ApiContainer:
     retrieval_runs: MySqlRetrievalRunStore
     retrieval_previews: MySqlRetrievalPreviewService
     collection_rebuilds: MySqlCollectionRebuildControl
+    generation: ApprovedPlanGenerationService
     retrieval_closeables: tuple[object, ...]
 
     @classmethod
@@ -201,6 +216,53 @@ class ApiContainer:
 
         def product_brief_uow_factory() -> SqlAlchemyProductBriefUnitOfWork:
             return SqlAlchemyProductBriefUnitOfWork(database.session_factory)
+
+        generation_definition = fixture_image_intent_definition()
+        generation_provider = generation_definition.provider
+        if generation_provider is None:
+            raise RuntimeError("generation Tool Definition must bind one Provider")
+        generation_authorizer = ToolIntentAuthorizer(
+            registry=ToolRegistry([generation_definition]),
+            policy_version=settings.tool_intent_policy_version,
+        )
+        generation_policy = ToolAuthorizationPolicy(
+            version=settings.tool_intent_policy_version,
+            node="execute_tool",
+            maximum_intents=settings.tool_intent_maximum_intents,
+        )
+        generation_entitlements = ToolAuthorizationEntitlements(
+            granted_scopes=frozenset(settings.tool_intent_granted_scopes),
+            authorized_resource_ids=frozenset(),
+            allowed_providers=frozenset(settings.tool_intent_allowed_providers),
+            allowed_cost_classes=frozenset(
+                ToolCostClass(value) for value in settings.tool_intent_allowed_cost_classes
+            ),
+            remaining_quota_units=settings.tool_intent_quota_units,
+            remaining_budget_units=settings.tool_intent_budget_units,
+        )
+
+        def generation_uow_factory() -> ApprovedGenerationUnitOfWorkPort:
+            return cast(
+                ApprovedGenerationUnitOfWorkPort,
+                SqlAlchemyApprovedGenerationUnitOfWork(
+                    database.session_factory,
+                    lambda session: MySqlApprovedGenerationAuthority(
+                        session,
+                        authorizer=generation_authorizer,
+                        policy=generation_policy,
+                        entitlements=generation_entitlements,
+                        generation_tools={
+                            (
+                                generation_definition.name,
+                                generation_definition.version,
+                            ): generation_provider
+                        },
+                        rights_policy_version=settings.generation_rights_policy_version,
+                        safety_policy_version=settings.content_safety_policy_version,
+                        actor_id=settings.generation_actor_id,
+                    ),
+                ),
+            )
 
         access_policy = PrincipalAccessPolicy()
         principal_resolver = SignedTrustedPrincipalResolver(
@@ -362,6 +424,7 @@ class ApiContainer:
                     seconds=settings.collection_rebuild_retirement_delay_seconds
                 ),
             ),
+            generation=ApprovedPlanGenerationService(generation_uow_factory),
             retrieval_closeables=built_retrieval.closeables,
         )
 

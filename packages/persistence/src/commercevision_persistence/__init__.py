@@ -15,6 +15,7 @@ from .database import (
     is_unit_of_work_active,
 )
 from .fixture_planner import MySqlFixturePlanningAuthority
+from .generation import MySqlApprovedGenerationAuthority, SqlAlchemyApprovedGenerationUnitOfWork
 from .indexing import MySqlExactImageReference, MySqlIndexingAuthority
 from .indexing_requests import (
     ImageIndexNotApplicable,
@@ -59,6 +60,7 @@ __all__ = [
     "MySqlCollectionRebuildRepository",
     "MySqlIndexingAuthority",
     "MySqlFixturePlanningAuthority",
+    "MySqlApprovedGenerationAuthority",
     "MySqlAssetDeletionCoordinator",
     "MySqlImageIndexRequestService",
     "MySqlIndexRequestService",
@@ -85,6 +87,7 @@ __all__ = [
     "SqlAlchemyBrandProfileUnitOfWork",
     "SqlAlchemyCatalogUnitOfWork",
     "SqlAlchemyCreativePlanUnitOfWork",
+    "SqlAlchemyApprovedGenerationUnitOfWork",
     "SqlAlchemyOperationUnitOfWork",
     "SqlAlchemyModelRouterUnitOfWork",
     "SqlAlchemyOperatorUnitOfWork",

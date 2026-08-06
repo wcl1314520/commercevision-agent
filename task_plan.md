@@ -574,3 +574,36 @@
 - Ticket 14 实现提交 `17afc58c01d5c59477092f5facbdf045ff9d6994` 的精确 GitHub Actions
   `31053250005` 四路全绿；Python `2059 passed, 3 skipped`，Web、Container、Gitleaks/SBOM 全部成功。
   Ticket 14 与 Phase 3 正式 `complete`。
+## Errors Encountered — 2026-08-06 Ticket 05 continuation
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| `planning-with-files` session catch-up helper timed out after 14 seconds | 1 | Do not repeat the same invocation; recover from the authoritative planning files and `git diff --stat`/`git status` instead. |
+| Combined multi-file `apply_patch` with absolute Windows paths resolved the second planning file outside the project | 1 | Patch `progress.md` and `findings.md` separately; verification failure caused no partial write. |
+| Focused matrix referenced nonexistent `tests/unit/test_event_queue_routing.py` | 1 | Enumerated repository files and corrected the path to `tests/unit/test_event_routing.py`; no tests had run. |
+| Combined focused tests plus both full migration suites exceeded the 180-second tool window | 1 | Do not repeat the oversized group; verify process cleanup and split unit/application, generation MySQL, and migration checks into bounded commands. |
+| Production-authority RED patch used a pre-format multiline assertion anchor | 1 | Patch was rejected atomically; read the formatted boundary and insert against the exact one-line assertion. |
+| First strict Mypy run found missing annotations on the new private Tool Policy helper | 1 | Added exact `CreativePlanVersion` input and `tuple[ToolAuthorizationDecision, ...]` output annotations. |
+| Reference-image capability parameter matched the adjacent no-source seed call first | 1 | Inspected exact test boundaries before execution; moved the override to the source-Rights test only. |
+| Rights RED fixture inserted permissions after setting `permissions_sealed_at` | 1 | Database trigger correctly rejected it; fixture now inserts use/provider rows first and seals last, matching the real lifecycle. |
+| Local `mysql` CLI lookup returned no executable | 1 | Use repository-locked SQLAlchemy for a guarded one-time `commercevision_test` schema alignment; do not install or add dependencies. |
+| First SQLAlchemy schema probe used nested PowerShell quoting around `DATABASE()` and failed to parse | 1 | Switched to a PowerShell literal here-string piped to Python stdin; verified exact test DB/revision/column state. |
+| API discovery assumed Python service code lived under `apps/`; the combined `rg` returned nonzero after listing only Web files | 1 | Use repository-wide file enumeration to locate the actual FastAPI package before reading route modules. |
+### Recovery/error note — Ticket 05 REST seam
+
+- Avoid repeating the oversized combined API read: it truncated before the route/container details were usable. Read each API file in bounded sections instead.
+- A read guessed `generation_ports.py`; the actual module is `generation_command_ports.py`. Use the discovered module name for subsequent inspection.
+- A read guessed `commercevision_domain/operations.py`; operation types live in a different module path. Discover the exact file with `rg --files` before reading it.
+- A fixture read guessed `tests/conftest.py`; integration fixtures are in `tests/integration/conftest.py`. Use the discovered path.
+- Focused Ruff initially reported four import-order violations after adding the REST/contracts/container modules; `ruff check --fix` resolved only those mechanical import issues, and the focused Ruff check is now green.
+- Direct focused Mypy found two new typing issues (untyped test payload expansion and generation UOW factory invariance) plus the container's existing baseline errors. The two new issues were fixed with an explicit test command and a port-typed cast; validate through the repository's exact Mypy baseline gate.
+- A combined Ruff/config search returned exit 1 because PowerShell passed the invalid literal glob `Makefile*` to `rg`; avoid that Windows glob pattern and inspect only explicit paths.
+- A semicolon-chained Ruff/test command ended with pytest success even though the intermediate Ruff check failed import ordering. The import was fixed and Ruff was rerun as the final command. Do not infer all intermediate commands passed from the combined exit code.
+- The first denial-matrix run had two fixture-mutation errors, not product failures: deleting an Approval violated the Route Decision FK, and `rights_records` has no `status` column. Represent unapproved authority with a non-approve decision value that satisfies schema constraints, and revoke Rights through the actual revocation fields discovered from the model.
+- The first replacement for the unapproved fixture used invalid enum value `PENDING`, causing mapper failure before the authority check. It now changes the record to a valid non-Creative-Plan approval type, preserving schema validity while proving the exact plan has no matching approval.
+- The first policy-import patch used a nonexistent `ModelRoutePolicyHeadModel` anchor in `generation.py`; the import was reapplied against the actual provider-control-plane import block.
+- A PowerShell `rg` verification pattern containing escaped quotes was parsed as an unclosed regex; the adjacent bounded file read verified the budget fixture patch. Prefer fixed-string searches or simpler patterns for quoted Python expressions.
+- Exact Mypy baseline gate reported the same 431 known diagnostics with a changed digest after `container.py` line shifts. New/touched generation modules pass focused strict Mypy, and the direct container run showed only its pre-existing baseline class; refresh the baseline hash, then rerun the exact gate.
+- A combined schema command kept `CV_MIGRATION_MYSQL_DSN` set while running migration tests that intentionally monkeypatch `CV_MYSQL_DSN` to temporary databases. The higher-priority migration DSN redirected Alembic away from those databases, causing false missing-table failures. Rerun those tests in a fresh process without the override.
+- Full `uv run pytest` produced no buffered progress and exceeded the 15-minute tool limit, leaving three child processes from the timed-out invocation. The exact start-time/PID set was verified and terminated without touching unrelated Python services. Use observable unit/contract and scoped integration groups locally; remote CI remains the authoritative full-suite run.
+- The review hygiene command ended with `rg` exit 1 because the final credential-pattern scan found no matches. This is the desired security result, not a product failure; use explicit no-match handling if repeated.

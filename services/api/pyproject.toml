@@ -14,6 +14,7 @@ dependencies = [
   "commercevision-persistence",
   "commercevision-providers",
   "commercevision-retrieval",
+  "commercevision-tool-runtime",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "sqlalchemy[asyncio]>=2.0,<3",
@@ -33,6 +34,7 @@ commercevision-observability = { workspace = true }
 commercevision-persistence = { workspace = true }
 commercevision-providers = { workspace = true }
 commercevision-retrieval = { workspace = true }
+commercevision-tool-runtime = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

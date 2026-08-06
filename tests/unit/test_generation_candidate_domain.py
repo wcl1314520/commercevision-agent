@@ -49,6 +49,7 @@ def _generation_batch(
         tool_intent_sha256="a" * 64,
         prompt_sha256="c" * 64,
         context_sha256="d" * 64,
+        route_decision_sha256="e" * 64,
         route_request_sha256="b" * 64,
         operation_kind=operation_kind,
         authorized_asset_version_ids=authorized_asset_version_ids,
@@ -97,16 +98,16 @@ def test_generation_batch_derives_contiguous_candidate_slot_operation_identities
     assert tuple(slot.operation_idempotency_key for slot in slots) == tuple(
         slot.operation_idempotency_key for slot in reconstructed
     )
-    assert batch.batch_sha256 == "c556354962613ae0c82255787c5676c9fb32fc4403f401c919c4a8e83ece1fac"
+    assert batch.batch_sha256 == "cf9af90903596feab56f45137a803528e4d263da3073e3f9886d5afa011dc26c"
     assert tuple(slot.id for slot in slots) == (
-        "fa699a06-f843-573a-b346-a78ff0aa6281",
-        "d345862c-a16e-576d-91ef-34bf429f2fe2",
-        "35f655a0-e8e7-5b51-be3d-b69d2606c9a1",
+        "876342c3-f521-5524-8c30-47cbfecfe075",
+        "d51f1371-97f6-5a11-a640-7e8cadac142c",
+        "fcaf0449-118d-5f15-b5ca-f6d63b51d6f5",
     )
     assert tuple(slot.logical_identity_sha256 for slot in slots) == (
-        "fc53bfd18cda4cc851860872af9cdd8dfb8bc34056668932963663613a7678bb",
-        "d05dc48048e004bde92cfdc3590adb9683805e751a6a738d80a160d69d0f2276",
-        "1c0fced62640c354ef228957d910b2d86867a9f5e9e9b3f143d2c75fd5946d20",
+        "bf61dc6c227853803dc69716fd0a95f8017dbedb08690d8c7450d563f23dc916",
+        "18ccb4547fcf1dcaa5da59e1a4d90aa4eab45958a2cdc16c159733e09f0c403b",
+        "0c96b7c9ca689eec9eafeaaf6e50725f1ad73a564db23968f5349a6c4c89f6a5",
     )
     with pytest.raises(FrozenInstanceError):
         slots[0].candidate_index = 7  # type: ignore[misc]

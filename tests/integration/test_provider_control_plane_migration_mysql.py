@@ -24,6 +24,8 @@ _TABLES = {
     "model_route_policy_heads",
     "provider_endpoint_observations",
     "model_route_decisions",
+    "generation_batches",
+    "candidate_slots",
 }
 
 
@@ -68,6 +70,11 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
     assert tuple(
         inspector.get_pk_constraint("provider_endpoint_observations")["constrained_columns"]
     ) == ("workspace_id", "id")
+    route_columns = {
+        column["name"]: column for column in inspector.get_columns("model_route_decisions")
+    }
+    assert route_columns["authorized_asset_version_ids_json"]["nullable"] is True
+    assert route_columns["route_candidate_count"]["nullable"] is True
 
     with engine.begin() as connection:
         rows = connection.execute(
@@ -121,6 +128,8 @@ def test_provider_control_plane_schema_is_exact_immutable_and_reversible(
             "trg_model_route_policy_versions_immutable",
             "trg_provider_endpoint_observations_immutable",
             "trg_model_route_decisions_immutable",
+            "trg_generation_batches_immutable",
+            "trg_candidate_slots_immutable",
         }.issubset(triggers)
 
         connection.execute(

@@ -74,6 +74,7 @@ class EventType(StrEnum):
     RECONCILIATION_REQUESTED = "reconciliation.requested"
     OPERATION_RECOVERY_REQUESTED = "operation.recovery.requested"
     DEAD_LETTER_REPLAY_RECORDED = "dead-letter.replay.recorded"
+    GENERATION_CANDIDATE_REQUESTED = "generation.candidate.requested"
 
 
 class CompatibleEventPayload(BaseModel):
@@ -156,6 +157,15 @@ class DeadLetterReplayRecordedPayload(CompatibleEventPayload):
     replay_id: str = Field(min_length=1, max_length=36)
     workspace_id: WorkspaceId
     replay_attempt: int = Field(ge=1)
+
+
+class GenerationCandidateRequestedPayload(StrictEventPayload):
+    workspace_id: WorkspaceId
+    workflow_id: str = Field(pattern=UUID_PATTERN)
+    generation_batch_id: str = Field(pattern=UUID_PATTERN)
+    candidate_slot_id: str = Field(pattern=UUID_PATTERN)
+    operation_id: str = Field(pattern=UUID_PATTERN)
+    operation_kind: Literal[OperationKind.IMAGE_GENERATION]
 
 
 class CollectionRebuildCommand(StrEnum):
@@ -750,6 +760,13 @@ COLLECTION_REBUILD_COMPLETED_V1 = EventContract(
     CollectionRebuildCompletedPayload,
     EventHandling.OBSERVATION,
 )
+GENERATION_CANDIDATE_REQUESTED_V1 = EventContract(
+    EventType.GENERATION_CANDIDATE_REQUESTED,
+    1,
+    EventQueue.ASSET,
+    GenerationCandidateRequestedPayload,
+    EventHandling.COMMAND,
+)
 
 
 def _phase2_contract(
@@ -779,6 +796,7 @@ PHASE2_EVENT_CONTRACTS = (
     COLLECTION_REBUILD_REQUESTED_V1,
     COLLECTION_REBUILD_PROGRESSED_V1,
     COLLECTION_REBUILD_COMPLETED_V1,
+    GENERATION_CANDIDATE_REQUESTED_V1,
     ASSET_DELETE_REQUESTED_V1,
     ASSET_DELETE_COMPLETED_V1,
     _phase2_contract(

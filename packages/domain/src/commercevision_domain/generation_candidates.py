@@ -88,6 +88,7 @@ class GenerationBatch:
     tool_intent_sha256: str
     prompt_sha256: str
     context_sha256: str
+    route_decision_sha256: str
     route_request_sha256: str
     operation_kind: OperationKind
     authorized_asset_version_ids: tuple[str, ...]
@@ -129,6 +130,7 @@ class GenerationBatch:
         _validate_sha256(self.tool_intent_sha256, "Tool Intent hash")
         _validate_sha256(self.prompt_sha256, "Prompt hash")
         _validate_sha256(self.context_sha256, "Context hash")
+        _validate_sha256(self.route_decision_sha256, "Route Decision hash")
         _validate_sha256(self.route_request_sha256, "Route Request hash")
         object.__setattr__(self, "operation_kind", OperationKind(self.operation_kind))
         if self.operation_kind not in _GENERATION_OPERATION_KINDS:
@@ -209,6 +211,7 @@ class GenerationBatch:
                 "tool_intent_sha256": self.tool_intent_sha256,
                 "prompt_sha256": self.prompt_sha256,
                 "context_sha256": self.context_sha256,
+                "route_decision_sha256": self.route_decision_sha256,
                 "route_request_sha256": self.route_request_sha256,
                 "operation_kind": self.operation_kind.value,
                 "authorized_asset_version_ids": list(self.authorized_asset_version_ids),

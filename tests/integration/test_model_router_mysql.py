@@ -7,10 +7,13 @@ from decimal import Decimal
 from threading import Event
 
 import pytest
-from commercevision_application import ModelRouterApplicationService
+from commercevision_application import (
+    ModelRouterApplicationService,
+)
 from commercevision_domain import (
     CircuitState,
     ConcurrencyError,
+    CreativePlanPayload,
     ImageRole,
     ModelRoutePolicy,
     ModelRoutePolicyVersion,
@@ -26,7 +29,9 @@ from commercevision_domain import (
     ProviderProtocol,
     ProviderTrainingUsePolicy,
 )
-from commercevision_persistence import SqlAlchemyModelRouterUnitOfWork
+from commercevision_persistence import (
+    SqlAlchemyModelRouterUnitOfWork,
+)
 from commercevision_persistence.creative_plan_models import (
     CreativePlanModel,
     CreativePlanVersionModel,
@@ -59,6 +64,10 @@ APPROVAL_ID = "019b0000-0000-7000-8000-000000000704"
 POLICY_VERSION_ID = "019b0000-0000-7000-8000-000000000705"
 CAPABILITY_VERSION_ID = "019b0000-0000-7000-8000-000000000706"
 OBSERVATION_ID = "019b0000-0000-7000-8000-000000000707"
+SOURCE_ASSET_ID = "019b0000-0000-7000-8000-000000000720"
+SOURCE_ASSET_VERSION_ID = "019b0000-0000-7000-8000-000000000721"
+SOURCE_RIGHTS_RECORD_ID = "019b0000-0000-7000-8000-000000000722"
+REVOKED_RIGHTS_RECORD_ID = "019b0000-0000-7000-8000-000000000723"
 
 
 def _capability(now: datetime) -> ProviderEndpointCapabilityVersion:
@@ -143,10 +152,22 @@ def _database_now(session) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _seed_route_authority(integration_database) -> datetime:
+def _seed_route_authority(
+    integration_database,
+    *,
+    plan_payload: CreativePlanPayload | None = None,
+    workflow_version: int = 1,
+    workflow_node: str = "GENERATE_CANDIDATES",
+    approval_expected_workflow_version: int = 1,
+    approval_decision: str = "APPROVED",
+    maximum_reference_images: int = 0,
+) -> datetime:
     with integration_database.session_factory() as session:
         now = _database_now(session)
-        capability = _capability(now)
+        capability = replace(
+            _capability(now),
+            maximum_reference_images=maximum_reference_images,
+        )
         capability_json = capability.to_canonical_data()
         capability_json.pop("secret_reference")
         policy_version = ModelRoutePolicyVersion.create(
@@ -174,8 +195,8 @@ def _seed_route_authority(integration_database) -> datetime:
                     workflow_type="CREATIVE_PRODUCTION",
                     status="GENERATING",
                     retention_status="ACTIVE",
-                    current_node="GENERATE_CANDIDATES",
-                    version=1,
+                    current_node=workflow_node,
+                    version=workflow_version,
                     input_json={},
                     result_json=None,
                     expires_at=now + timedelta(days=1),
@@ -222,8 +243,14 @@ def _seed_route_authority(integration_database) -> datetime:
                     version_number=1,
                     supersedes_version_id=None,
                     source="AGENT",
-                    payload_json={"schema_version": "creative-plan.v1"},
-                    payload_sha256="b" * 64,
+                    payload_json=(
+                        plan_payload.to_canonical_data()
+                        if plan_payload is not None
+                        else {"schema_version": "creative-plan.v1"}
+                    ),
+                    payload_sha256=(
+                        plan_payload.payload_sha256 if plan_payload is not None else "b" * 64
+                    ),
                     product_brief_id="019b0000-0000-7000-8000-000000000708",
                     product_brief_version=1,
                     product_brief_sha256="c" * 64,
@@ -278,11 +305,11 @@ def _seed_route_authority(integration_database) -> datetime:
                     approval_type="CREATIVE_PLAN",
                     subject_id=PLAN_ID,
                     subject_version=1,
-                    decision="APPROVED",
+                    decision=approval_decision,
                     reason_code=None,
                     comment_ref=None,
                     approved_by="reviewer",
-                    expected_workflow_version=1,
+                    expected_workflow_version=approval_expected_workflow_version,
                     created_at=now,
                 ),
                 ProviderEndpointCapabilityHeadModel(
@@ -324,7 +351,7 @@ def _seed_route_authority(integration_database) -> datetime:
             ]
         )
         session.commit()
-        return now
+    return now
 
 
 def test_model_router_persists_and_replays_one_atomic_decision(integration_database) -> None:
